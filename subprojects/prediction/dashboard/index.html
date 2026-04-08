@@ -1,0 +1,3500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PREDICTION_DASHBOARD_TITLE__</title>
+    <script>
+      (function () {
+        var theme = "system";
+        try {
+          var raw = window.localStorage.getItem("prediction-markets-dashboard:v1");
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.theme === "string" && /^(system|light|dark)$/.test(parsed.theme)) {
+              theme = parsed.theme;
+            }
+          }
+        } catch (error) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4eee4;
+        --bg-deep: #d8cdbd;
+        --bg-floor: #efe4d4;
+        --panel: rgba(254, 250, 243, 0.92);
+        --panel-strong: rgba(252, 246, 236, 0.98);
+        --ink: #1f1a17;
+        --muted: #6d6257;
+        --line: rgba(54, 43, 34, 0.14);
+        --accent: #ab4d2f;
+        --accent-soft: rgba(171, 77, 47, 0.12);
+        --signal: #0d766e;
+        --signal-soft: rgba(13, 118, 110, 0.12);
+        --warn: #9b6a12;
+        --warn-soft: rgba(155, 106, 18, 0.12);
+        --bad: #8b2e2e;
+        --bad-soft: rgba(139, 46, 46, 0.12);
+        --shadow: 0 22px 60px rgba(42, 31, 23, 0.12);
+        --glow-warm: rgba(171, 77, 47, 0.35);
+        --glow-cool: rgba(13, 118, 110, 0.32);
+        --glow-warm-faint: rgba(171, 77, 47, 0.18);
+        --glow-cool-faint: rgba(13, 118, 110, 0.18);
+        --eyebrow-border: rgba(171, 77, 47, 0.22);
+        --eyebrow-bg: rgba(255, 255, 255, 0.58);
+        --field-bg: rgba(255, 255, 255, 0.72);
+        --field-bg-strong: rgba(255, 255, 255, 0.82);
+        --field-border: rgba(54, 43, 34, 0.12);
+        --card-bg: rgba(255, 255, 255, 0.64);
+        --card-bg-soft: rgba(255, 255, 255, 0.7);
+        --card-border: rgba(54, 43, 34, 0.12);
+        --pill-neutral-bg: rgba(255, 255, 255, 0.74);
+        --pill-neutral-border: rgba(54, 43, 34, 0.12);
+        --empty-bg: rgba(255, 255, 255, 0.45);
+        --empty-border: rgba(54, 43, 34, 0.16);
+        --code-bg: rgba(31, 26, 23, 0.92);
+        --code-ink: #f7efe4;
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+        --radius-md: 14px;
+        --mono: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace;
+        --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", "Libre Baskerville", Georgia, serif;
+        --sans: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #101417;
+        --bg-deep: #070a0c;
+        --bg-floor: #0b0f12;
+        --panel: rgba(19, 25, 30, 0.9);
+        --panel-strong: rgba(14, 19, 24, 0.97);
+        --ink: #f3e8db;
+        --muted: #b9ac9d;
+        --line: rgba(243, 232, 219, 0.12);
+        --accent: #e08a5e;
+        --accent-soft: rgba(224, 138, 94, 0.16);
+        --signal: #54d0c5;
+        --signal-soft: rgba(84, 208, 197, 0.16);
+        --warn: #efbd62;
+        --warn-soft: rgba(239, 189, 98, 0.16);
+        --bad: #f09a9a;
+        --bad-soft: rgba(240, 154, 154, 0.16);
+        --shadow: 0 28px 72px rgba(0, 0, 0, 0.42);
+        --glow-warm: rgba(224, 138, 94, 0.18);
+        --glow-cool: rgba(84, 208, 197, 0.16);
+        --glow-warm-faint: rgba(224, 138, 94, 0.14);
+        --glow-cool-faint: rgba(84, 208, 197, 0.12);
+        --eyebrow-border: rgba(224, 138, 94, 0.28);
+        --eyebrow-bg: rgba(255, 255, 255, 0.04);
+        --field-bg: rgba(255, 255, 255, 0.05);
+        --field-bg-strong: rgba(255, 255, 255, 0.08);
+        --field-border: rgba(243, 232, 219, 0.12);
+        --card-bg: rgba(255, 255, 255, 0.04);
+        --card-bg-soft: rgba(255, 255, 255, 0.05);
+        --card-border: rgba(243, 232, 219, 0.12);
+        --pill-neutral-bg: rgba(255, 255, 255, 0.05);
+        --pill-neutral-border: rgba(243, 232, 219, 0.12);
+        --empty-bg: rgba(255, 255, 255, 0.03);
+        --empty-border: rgba(243, 232, 219, 0.14);
+        --code-bg: rgba(7, 10, 13, 0.96);
+        --code-ink: #f3e8db;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root[data-theme="system"] {
+          color-scheme: dark;
+          --bg: #101417;
+          --bg-deep: #070a0c;
+          --bg-floor: #0b0f12;
+          --panel: rgba(19, 25, 30, 0.9);
+          --panel-strong: rgba(14, 19, 24, 0.97);
+          --ink: #f3e8db;
+          --muted: #b9ac9d;
+          --line: rgba(243, 232, 219, 0.12);
+          --accent: #e08a5e;
+          --accent-soft: rgba(224, 138, 94, 0.16);
+          --signal: #54d0c5;
+          --signal-soft: rgba(84, 208, 197, 0.16);
+          --warn: #efbd62;
+          --warn-soft: rgba(239, 189, 98, 0.16);
+          --bad: #f09a9a;
+          --bad-soft: rgba(240, 154, 154, 0.16);
+          --shadow: 0 28px 72px rgba(0, 0, 0, 0.42);
+          --glow-warm: rgba(224, 138, 94, 0.18);
+          --glow-cool: rgba(84, 208, 197, 0.16);
+          --glow-warm-faint: rgba(224, 138, 94, 0.14);
+          --glow-cool-faint: rgba(84, 208, 197, 0.12);
+          --eyebrow-border: rgba(224, 138, 94, 0.28);
+          --eyebrow-bg: rgba(255, 255, 255, 0.04);
+          --field-bg: rgba(255, 255, 255, 0.05);
+          --field-bg-strong: rgba(255, 255, 255, 0.08);
+          --field-border: rgba(243, 232, 219, 0.12);
+          --card-bg: rgba(255, 255, 255, 0.04);
+          --card-bg-soft: rgba(255, 255, 255, 0.05);
+          --card-border: rgba(243, 232, 219, 0.12);
+          --pill-neutral-bg: rgba(255, 255, 255, 0.05);
+          --pill-neutral-border: rgba(243, 232, 219, 0.12);
+          --empty-bg: rgba(255, 255, 255, 0.03);
+          --empty-border: rgba(243, 232, 219, 0.14);
+          --code-bg: rgba(7, 10, 13, 0.96);
+          --code-ink: #f3e8db;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top left, var(--glow-warm-faint), transparent 32%),
+          radial-gradient(circle at top right, var(--glow-cool-faint), transparent 28%),
+          linear-gradient(180deg, var(--bg) 0%, var(--bg-floor) 58%, var(--bg-deep) 100%);
+        color: var(--ink);
+        font-family: var(--sans);
+        transition: background 180ms ease, color 180ms ease;
+      }
+
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        inset: auto;
+        width: 30rem;
+        height: 30rem;
+        border-radius: 999px;
+        filter: blur(90px);
+        pointer-events: none;
+        opacity: 0.22;
+        z-index: 0;
+      }
+
+      body::before {
+        top: -8rem;
+        left: -8rem;
+        background: var(--glow-warm);
+      }
+
+      body::after {
+        right: -10rem;
+        bottom: -10rem;
+        background: var(--glow-cool);
+      }
+
+      .shell {
+        position: relative;
+        z-index: 1;
+        width: min(1460px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 28px 0 40px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .panel {
+        background: linear-gradient(180deg, var(--panel) 0%, var(--panel-strong) 100%);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(16px);
+        transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+      }
+
+      .hero-main,
+      .hero-side,
+      .controls,
+      .metric,
+      .list-panel,
+      .detail-panel,
+      .surface-panel,
+      .raw-panel {
+        padding: 22px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--eyebrow-border);
+        background: var(--eyebrow-bg);
+        color: var(--accent);
+        font: 600 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        font-family: var(--serif);
+        letter-spacing: -0.03em;
+      }
+
+      h1 {
+        margin-top: 14px;
+        font-size: clamp(2.6rem, 5vw, 4.6rem);
+        line-height: 0.96;
+      }
+
+      .lede {
+        max-width: 56ch;
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.6;
+      }
+
+      .hero-side {
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      .theme-strip {
+        display: grid;
+        gap: 8px;
+      }
+
+      .theme-label {
+        color: var(--muted);
+        font: 600 12px/1 var(--mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .theme-switcher {
+        display: inline-grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .theme-option {
+        min-height: 42px;
+        border-radius: 999px;
+        border: 1px solid var(--field-border);
+        background: var(--field-bg);
+        color: var(--ink);
+        font: 600 0.88rem/1 var(--mono);
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition: background 140ms ease, border-color 140ms ease, transform 140ms ease, color 140ms ease;
+      }
+
+      .theme-option:hover {
+        transform: translateY(-1px);
+      }
+
+      .theme-option.active {
+        border-color: transparent;
+        background: linear-gradient(135deg, rgba(171, 77, 47, 0.95), rgba(118, 40, 24, 0.95));
+        color: #fff9f0;
+        box-shadow: 0 10px 24px rgba(43, 28, 17, 0.16);
+      }
+
+      .mini-note {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.55;
+      }
+
+      .hero-meta {
+        display: grid;
+        gap: 10px;
+      }
+
+      .hero-meta .row,
+      .summary-line,
+      .surface-line {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        font-size: 0.95rem;
+      }
+
+      .hero-meta .label,
+      .summary-line .label,
+      .surface-line .label {
+        color: var(--muted);
+      }
+
+      .hero-meta .value,
+      .summary-line .value,
+      .surface-line .value {
+        text-align: right;
+        font-weight: 600;
+      }
+
+      .controls {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font: 600 12px/1 var(--mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .field input,
+      .field select,
+      .field button {
+        width: 100%;
+        min-height: 46px;
+        border-radius: 14px;
+        border: 1px solid var(--field-border);
+        background: var(--field-bg);
+        color: var(--ink);
+        padding: 0 14px;
+        font: 500 0.98rem/1 var(--sans);
+        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+      }
+
+      .field button {
+        cursor: pointer;
+        background:
+          linear-gradient(135deg, rgba(171, 77, 47, 0.95), rgba(118, 40, 24, 0.95));
+        color: #fff9f0;
+        border-color: transparent;
+        font-weight: 700;
+      }
+
+      .field button.secondary {
+        background: var(--field-bg-strong);
+        color: var(--ink);
+        border-color: var(--field-border);
+      }
+
+      .status-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font: 600 12px/1 var(--mono);
+        letter-spacing: 0.04em;
+      }
+
+      .pill-neutral {
+        background: var(--pill-neutral-bg);
+        border-color: var(--pill-neutral-border);
+        color: var(--ink);
+      }
+
+      .pill-good {
+        background: var(--signal-soft);
+        border-color: rgba(13, 118, 110, 0.22);
+        color: var(--signal);
+      }
+
+      .pill-warn {
+        background: var(--warn-soft);
+        border-color: rgba(155, 106, 18, 0.2);
+        color: var(--warn);
+      }
+
+      .pill-bad {
+        background: var(--bad-soft);
+        border-color: rgba(139, 46, 46, 0.24);
+        color: var(--bad);
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .metric {
+        display: grid;
+        gap: 10px;
+      }
+
+      .metric .label {
+        color: var(--muted);
+        font: 600 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .metric .value {
+        font-family: var(--serif);
+        font-size: clamp(2rem, 3vw, 3rem);
+        line-height: 1;
+      }
+
+      .metric .caption {
+        color: var(--muted);
+        font-size: 0.94rem;
+        line-height: 1.45;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: 360px minmax(0, 1fr);
+        gap: 16px;
+      }
+
+      .list-panel,
+      .detail-panel,
+      .surface-panel,
+      .raw-panel {
+        min-height: 180px;
+      }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 14px;
+      }
+
+      .section-title p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+
+      .runs-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .run-card {
+        width: 100%;
+        text-align: left;
+        border: 1px solid var(--card-border);
+        background: var(--card-bg-soft);
+        border-radius: 18px;
+        padding: 14px;
+        cursor: pointer;
+        transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+      }
+
+      .run-card:hover,
+      .run-card.active {
+        transform: translateY(-1px);
+        border-color: rgba(171, 77, 47, 0.4);
+        box-shadow: 0 16px 30px rgba(43, 28, 17, 0.08);
+      }
+
+      .run-card .headline {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+      }
+
+      .run-card .run-id {
+        font: 700 0.95rem/1.35 var(--mono);
+        word-break: break-word;
+      }
+
+      .run-card .question {
+        margin: 8px 0 0;
+        color: var(--ink);
+        font-size: 0.97rem;
+        line-height: 1.45;
+      }
+
+      .run-card .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .detail-grid,
+      .surface-grid,
+      .side-grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .detail-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .surface-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .arbitrage-grid {
+        display: grid;
+        grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+        gap: 14px;
+      }
+
+      .candidate-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .candidate-card {
+        border-radius: 16px;
+        border: 1px solid var(--card-border);
+        background: var(--card-bg-soft);
+        padding: 14px;
+      }
+
+      .candidate-card .title {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 8px;
+        font-weight: 700;
+      }
+
+      .candidate-card .summary {
+        color: var(--muted);
+        font-size: 0.94rem;
+        line-height: 1.5;
+      }
+
+      .side-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .detail-card,
+      .surface-card {
+        border-radius: 18px;
+        border: 1px solid var(--card-border);
+        background: var(--card-bg);
+        padding: 16px;
+      }
+
+      .detail-card h3,
+      .surface-card h3 {
+        margin-bottom: 10px;
+        font-size: 1.2rem;
+      }
+
+      .surface-card .surface-status {
+        margin-bottom: 10px;
+      }
+
+      .surface-card .surface-summary {
+        color: var(--muted);
+        font-size: 0.94rem;
+        line-height: 1.5;
+      }
+
+      .surface-card ul,
+      .detail-card ul {
+        margin: 10px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+      }
+
+      .mono {
+        font-family: var(--mono);
+      }
+
+      .raw-panel pre {
+        margin: 0;
+        border-radius: 16px;
+        background: var(--code-bg);
+        color: var(--code-ink);
+        padding: 18px;
+        overflow: auto;
+        font: 0.84rem/1.65 var(--mono);
+      }
+
+      .empty-state {
+        padding: 28px;
+        border: 1px dashed var(--empty-border);
+        border-radius: 18px;
+        color: var(--muted);
+        background: var(--empty-bg);
+      }
+
+      .microcopy {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .dashboard-nav {
+        position: sticky;
+        top: 12px;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 16px;
+        padding: 14px 16px;
+        border-radius: 999px;
+      }
+
+      .nav-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid var(--field-border);
+        background: var(--field-bg);
+        color: var(--ink);
+        text-decoration: none;
+        font: 600 0.92rem/1 var(--mono);
+      }
+
+      .nav-pill.active {
+        background: linear-gradient(135deg, rgba(171, 77, 47, 0.95), rgba(118, 40, 24, 0.95));
+        color: #fff9f0;
+        border-color: transparent;
+      }
+
+      .overview-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .overview-card {
+        display: grid;
+        gap: 10px;
+        min-height: 140px;
+      }
+
+      .overview-card .value {
+        font-family: var(--serif);
+        font-size: clamp(1.8rem, 2.8vw, 2.8rem);
+        line-height: 1;
+      }
+
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.92fr) minmax(0, 1.38fr);
+        gap: 16px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .section-anchor {
+        scroll-margin-top: 104px;
+      }
+
+      .section-heading {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 14px;
+      }
+
+      .section-heading p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+
+      .alert-strip,
+      .event-feed,
+      .intent-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .alert-card,
+      .event-card,
+      .intent-card {
+        border-radius: 16px;
+        border: 1px solid var(--card-border);
+        background: var(--card-bg-soft);
+        padding: 14px;
+      }
+
+      .alert-card .title,
+      .event-card .title,
+      .intent-card .title {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 6px;
+        font-weight: 700;
+      }
+
+      .alert-card .summary,
+      .event-card .summary,
+      .intent-card .summary {
+        color: var(--muted);
+        font-size: 0.94rem;
+        line-height: 1.5;
+      }
+
+      .intent-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .candidate-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .surface-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .surface-actions button,
+      .candidate-actions button,
+      .intent-actions button,
+      .control-actions button {
+        min-height: 40px;
+        border-radius: 999px;
+        border: 1px solid var(--field-border);
+        background: var(--field-bg);
+        color: var(--ink);
+        padding: 0 14px;
+        cursor: pointer;
+        font: 600 0.88rem/1 var(--mono);
+      }
+
+      .surface-actions button.primary,
+      .candidate-actions button.primary,
+      .intent-actions button.primary,
+      .control-actions button.primary {
+        border-color: transparent;
+        background: linear-gradient(135deg, rgba(171, 77, 47, 0.95), rgba(118, 40, 24, 0.95));
+        color: #fff9f0;
+      }
+
+      .candidate-actions button.secondary {
+        background: var(--field-bg-strong);
+        color: var(--ink);
+        border-color: var(--field-border);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--pill-neutral-border);
+        background: var(--pill-neutral-bg);
+        color: var(--muted);
+        font: 600 11px/1 var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .badge.good {
+        color: var(--signal);
+        background: var(--signal-soft);
+        border-color: rgba(13, 118, 110, 0.18);
+      }
+
+      .badge.warn {
+        color: var(--warn);
+        background: var(--warn-soft);
+        border-color: rgba(155, 106, 18, 0.18);
+      }
+
+      .badge.bad {
+        color: var(--bad);
+        background: var(--bad-soft);
+        border-color: rgba(139, 46, 46, 0.18);
+      }
+
+      .badge.info {
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-color: rgba(171, 77, 47, 0.18);
+      }
+
+      .callout {
+        border-radius: 18px;
+        border: 1px solid var(--card-border);
+        background: var(--empty-bg);
+        padding: 14px;
+        color: var(--muted);
+      }
+
+      .inline-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .inline-form .row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .inline-form textarea,
+      .inline-form input {
+        width: 100%;
+        min-height: 46px;
+        border-radius: 14px;
+        border: 1px solid var(--field-border);
+        background: var(--field-bg);
+        color: var(--ink);
+        padding: 12px 14px;
+        font: 500 0.98rem/1.45 var(--sans);
+      }
+
+      .inline-form textarea {
+        min-height: 92px;
+        resize: vertical;
+      }
+
+      .alert-strip,
+      .event-feed,
+      .intent-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .alert-card,
+      .event-card,
+      .intent-card {
+        border-radius: 16px;
+        border: 1px solid var(--card-border);
+        background: var(--card-bg-soft);
+        padding: 14px;
+      }
+
+      .alert-card .title,
+      .event-card .title,
+      .intent-card .title {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 6px;
+        font-weight: 700;
+      }
+
+      .alert-card .summary,
+      .event-card .summary,
+      .intent-card .summary {
+        color: var(--muted);
+        font-size: 0.94rem;
+        line-height: 1.5;
+      }
+
+      .intent-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 6px 10px;
+        border: 1px solid var(--pill-neutral-border);
+        background: var(--pill-neutral-bg);
+        font: 600 11px/1 var(--mono);
+        letter-spacing: 0.04em;
+      }
+
+      .field.inline {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .field textarea {
+        width: 100%;
+        min-height: 92px;
+        border-radius: 14px;
+        border: 1px solid var(--field-border);
+        background: var(--field-bg);
+        color: var(--ink);
+        padding: 12px 14px;
+        font: 500 0.96rem/1.5 var(--sans);
+        resize: vertical;
+      }
+
+      @media (max-width: 1200px) {
+        .overview-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero,
+        .content {
+          grid-template-columns: 1fr;
+        }
+
+        .surface-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 860px) {
+        .shell {
+          width: min(100vw - 20px, 100%);
+          padding-top: 18px;
+        }
+
+        .overview-grid,
+        .toolbar,
+        .metrics,
+        .detail-grid,
+        .side-grid,
+        .surface-grid,
+        .inline-form .row {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-main,
+        .hero-side,
+        .controls,
+        .metric,
+        .list-panel,
+        .detail-panel,
+        .surface-panel,
+        .raw-panel {
+          padding: 18px;
+        }
+      }
+    </style>
+  </head>
+  <body
+    data-api-base="__PREDICTION_DASHBOARD_API_BASE__"
+    data-dashboard-title="__PREDICTION_DASHBOARD_TITLE__"
+    data-dashboard-mode="__PREDICTION_DASHBOARD_MODE__"
+  >
+    <main class="shell">
+      <section class="hero">
+        <article class="panel hero-main">
+          <span class="eyebrow">Prediction Markets Operator View</span>
+          <h1 id="dashboardTitle">__PREDICTION_DASHBOARD_TITLE__</h1>
+          <p class="lede">
+            Live operator cockpit for runs, benchmark gates, execution projection, and the bounded
+            dispatch/paper/shadow/live surfaces already wired in the module.
+          </p>
+        </article>
+        <aside class="panel hero-side">
+          <div class="hero-meta">
+            <div class="row"><span class="label">Mode</span><span class="value mono" id="dashboardMode"></span></div>
+            <div class="row"><span class="label">API base</span><span class="value mono" id="dashboardApiBase"></span></div>
+            <div class="row"><span class="label">Selected venue</span><span class="value" id="heroVenue">polymarket</span></div>
+            <div class="row"><span class="label">Theme</span><span class="value mono" id="heroTheme">system</span></div>
+            <div class="row"><span class="label">Last refresh</span><span class="value mono" id="heroRefresh">never</span></div>
+          </div>
+          <div class="theme-strip">
+            <span class="theme-label">Theme mode</span>
+            <div class="theme-switcher" id="themeSwitcher" role="group" aria-label="Theme mode">
+              <button type="button" class="theme-option" data-theme-option="system" aria-pressed="false">System</button>
+              <button type="button" class="theme-option" data-theme-option="light" aria-pressed="false">Light</button>
+              <button type="button" class="theme-option" data-theme-option="dark" aria-pressed="false">Dark</button>
+            </div>
+          </div>
+          <p class="mini-note">
+            The dashboard stays aligned with the current architecture: `paper`, `shadow`, and `live`
+            are surfaced as operator-facing preflight layers around the canonical `execution_projection`.
+          </p>
+        </aside>
+      </section>
+
+      <section class="panel controls">
+        <div class="toolbar">
+          <div class="field">
+            <label for="venueSelect">Venue</label>
+            <select id="venueSelect">
+              <option value="polymarket">polymarket</option>
+              <option value="kalshi">kalshi</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="limitInput">Run limit</label>
+            <input id="limitInput" type="number" min="1" max="50" value="12" />
+          </div>
+          <div class="field">
+            <label for="runIdInput">Jump to run</label>
+            <input id="runIdInput" type="text" placeholder="run-..." />
+          </div>
+          <div class="field">
+            <label for="autoRefreshSelect">Auto refresh</label>
+            <select id="autoRefreshSelect">
+              <option value="0">off</option>
+              <option value="15000">15s</option>
+              <option value="30000" selected>30s</option>
+              <option value="60000">60s</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button id="refreshButton" type="button">Refresh dashboard</button>
+          </div>
+        </div>
+
+        <div class="toolbar" style="margin-top: 4px; grid-template-columns: repeat(4, minmax(0, 1fr));">
+          <div class="field">
+            <label for="actorAliasInput">Creator alias</label>
+            <input id="actorAliasInput" type="text" placeholder="operator-a" />
+          </div>
+          <div class="field">
+            <label for="approverAliasInput">Approver alias</label>
+            <input id="approverAliasInput" type="text" placeholder="operator-b" />
+          </div>
+          <div class="field">
+            <label for="liveNoteInput">Live intent note</label>
+            <input id="liveNoteInput" type="text" placeholder="double approval required" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <div class="control-actions">
+              <button id="resetFiltersButton" type="button">Reset filters</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="status-strip">
+          <span class="pill pill-neutral" id="statusLine">Idle.</span>
+          <span class="pill pill-neutral" id="selectionLine">No run selected.</span>
+          <span class="pill pill-neutral" id="sseLine">SSE off.</span>
+        </div>
+      </section>
+
+      <section class="dashboard-nav panel" aria-label="Dashboard sections">
+        <a class="nav-pill" href="#overview">Overview</a>
+        <a class="nav-pill" href="#runs">Runs Explorer</a>
+        <a class="nav-pill" href="#research">Run Detail</a>
+        <a class="nav-pill" href="#research" title="Research & Benchmark">Research &amp; Benchmark</a>
+        <a class="nav-pill" href="#strategy" title="Strategy Engine">Strategy Engine</a>
+        <a class="nav-pill" href="#execution">Execution Desk</a>
+        <a class="nav-pill" href="#arbitrage" title="Cross-Venue / Arbitrage">Cross-Venue &amp; Arbitrage</a>
+        <a class="nav-pill" href="#venues" title="Venue & Ops">Venue &amp; Ops</a>
+        <a class="nav-pill" href="#audit">Audit</a>
+      </section>
+
+      <section class="metrics">
+        <article class="panel metric">
+          <span class="label">Loaded Runs</span>
+          <div class="value" id="metricRuns">0</div>
+          <div class="caption" id="metricRunsCaption">No runs loaded yet.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Benchmark Gate</span>
+          <div class="value" id="metricBenchmark">-</div>
+          <div class="caption" id="metricBenchmarkCaption">Waiting for a selected run.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Selected Path</span>
+          <div class="value" id="metricPath">-</div>
+          <div class="caption" id="metricPathCaption">Execution projection not loaded.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Primary Strategy</span>
+          <div class="value" id="metricStrategy">-</div>
+          <div class="caption" id="metricStrategyCaption">Waiting for strategy engine data.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Market Regime</span>
+          <div class="value" id="metricRegime">-</div>
+          <div class="caption" id="metricRegimeCaption">Waiting for regime data.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Surface Readiness</span>
+          <div class="value" id="metricSurfaces">0/4</div>
+          <div class="caption" id="metricSurfacesCaption">Dispatch, paper, shadow, live.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Live Promotable</span>
+          <div class="value" id="metricLivePromotable">0</div>
+          <div class="caption" id="metricLivePromotableCaption">Waiting for a selected run.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Events</span>
+          <div class="value" id="metricEvents">0</div>
+          <div class="caption" id="metricEventsCaption">Recent dashboard event stream.</div>
+        </article>
+        <article class="panel metric">
+          <span class="label">Arbitrage</span>
+          <div class="value" id="metricArbitrage">0</div>
+          <div class="caption" id="metricArbitrageCaption">Shadow-only Polymarket / Kalshi scan.</div>
+        </article>
+      </section>
+
+      <section class="panel controls" style="margin-bottom: 18px;">
+        <div class="toolbar" style="grid-template-columns: repeat(8, minmax(0, 1fr));">
+          <div class="field">
+            <label for="recommendationFilter">Recommendation</label>
+            <select id="recommendationFilter">
+              <option value="">all</option>
+              <option value="bet">bet</option>
+              <option value="wait">wait</option>
+              <option value="no_trade">no_trade</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="benchmarkFilter">Benchmark</label>
+            <select id="benchmarkFilter">
+              <option value="">all</option>
+              <option value="ready">ready</option>
+              <option value="preview">preview</option>
+              <option value="blocked">blocked</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="pathFilter">Selected path</label>
+            <select id="pathFilter">
+              <option value="">all</option>
+              <option value="dispatch">dispatch</option>
+              <option value="paper">paper</option>
+              <option value="shadow">shadow</option>
+              <option value="live">live</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="surfaceFilter">Surface status</label>
+            <select id="surfaceFilter">
+              <option value="">all</option>
+              <option value="ready">ready</option>
+              <option value="degraded">degraded</option>
+              <option value="blocked">blocked</option>
+              <option value="unknown">unknown</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="strategyFilter">Primary strategy</label>
+            <input id="strategyFilter" type="text" placeholder="intramarket_parity, maker_spread_capture…" />
+          </div>
+          <div class="field">
+            <label for="regimeFilter">Market regime</label>
+            <select id="regimeFilter">
+              <option value="">all</option>
+              <option value="slow">slow</option>
+              <option value="fast">fast</option>
+              <option value="sports">sports</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="dateWindowInput">Date window</label>
+            <input id="dateWindowInput" type="text" placeholder="last_24h, last_7d, 2026-04-01..2026-04-08" />
+          </div>
+          <div class="field">
+            <label for="autoRefreshSelect">Auto refresh</label>
+            <select id="autoRefreshSelect">
+              <option value="0">off</option>
+              <option value="15000">15s</option>
+              <option value="30000" selected>30s</option>
+              <option value="60000">60s</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section id="overview" class="panel detail-panel section-anchor" style="margin-bottom: 18px;">
+        <div class="section-title">
+          <div>
+            <h2>Overview</h2>
+            <p>Global health, benchmark gate, and live intent readiness at a glance.</p>
+          </div>
+        </div>
+        <div id="overviewAlerts" class="callout" style="margin-bottom: 14px;">
+          <div class="status-strip">
+            <span class="pill pill-neutral" id="overviewConnection">Loading connection…</span>
+            <span class="pill pill-neutral" id="overviewSelectedRun">Selected run: n/a</span>
+            <span class="pill pill-neutral" id="overviewSelectedVenue">Venue: n/a</span>
+            <span class="pill pill-neutral" id="overviewLiveIntentCount">Live intents: 0</span>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <section class="detail-card">
+            <h3>Overview Summary</h3>
+            <div id="overviewSummary" class="microcopy">Load dashboard overview to inspect system status.</div>
+          </section>
+          <section class="detail-card">
+            <h3>Alerts</h3>
+            <div id="alertStrip" class="alert-strip">
+              <div class="empty-state">No alerts yet.</div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="content">
+        <aside id="runs" class="panel list-panel section-anchor">
+          <div class="section-title">
+            <div>
+              <h2>Runs Explorer</h2>
+              <p>Recent runs for the selected venue, with filters and promotion context.</p>
+              <p id="runListSummary">Load the overview to filter the runs list.</p>
+            </div>
+          </div>
+          <div class="runs-list" id="runsList">
+            <div class="empty-state">No run list yet. Refresh to load the first batch.</div>
+          </div>
+        </aside>
+
+        <section style="display:grid; gap:16px;">
+          <article id="research" class="panel detail-panel section-anchor">
+            <div class="section-title">
+              <div>
+                <h2>Run Detail</h2>
+                <p>Canonical runtime hints, research and benchmark state, packet bundle, artifacts, and recommendation details.</p>
+              </div>
+            </div>
+            <div class="detail-grid">
+              <section class="detail-card">
+                <h3>Run</h3>
+                <div id="runSummary" class="microcopy">Pick a run to inspect details.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Benchmark</h3>
+                <div id="benchmarkSummary" class="microcopy">Benchmark gate summary will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Research</h3>
+                <div id="researchSummary" class="microcopy">Research pipeline and recommendation origin will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Execution</h3>
+                <div id="executionSummary" class="microcopy">Execution projection, preview, and sizing hints will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Packet bundle</h3>
+                <div id="packetBundleSummary" class="microcopy">Packet bundle readback will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Artifact audit</h3>
+                <div id="artifactAuditSummary" class="microcopy">Artifact audit and readback will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Market graph</h3>
+                <div id="marketGraphSummary" class="microcopy">Market graph details will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Microstructure</h3>
+                <div id="microstructureSummary" class="microcopy">Microstructure lab details will appear here.</div>
+              </section>
+            </div>
+          </article>
+
+          <article id="strategy" class="panel detail-panel section-anchor">
+            <div class="section-title">
+              <div>
+                <h2>Strategy Engine</h2>
+                <p>Primary strategy, regime, execution intent preview, shadow strategy summary, and resolution/watch anomalies.</p>
+              </div>
+            </div>
+            <div class="detail-grid">
+              <section class="detail-card">
+                <h3>Primary Strategy</h3>
+                <div id="strategyPrimarySummary" class="microcopy">Primary strategy selection will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Strategy Counts</h3>
+                <div id="strategyCountsSummary" class="microcopy">Strategy candidate counts will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Market Regime</h3>
+                <div id="strategyRegimeSummary" class="microcopy">Regime budgets and defensive posture will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Execution Intent Preview</h3>
+                <div id="strategyIntentPreviewSummary" class="microcopy">Strategy decision preview kind will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Shadow Strategy</h3>
+                <div id="strategyShadowSummary" class="microcopy">Generalized shadow strategy simulation summary will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Resolution Watch</h3>
+                <div id="strategyResolutionSummary" class="microcopy">Resolution and manipulation anomalies will appear here.</div>
+              </section>
+            </div>
+          </article>
+
+          <article id="execution" class="panel surface-panel section-anchor">
+            <div class="section-title">
+              <div>
+                <h2>Execution Desk</h2>
+                <p>Dispatch, paper, shadow, and live all read from the same execution projection.</p>
+              </div>
+            </div>
+            <div class="surface-grid" id="surfaceGrid">
+              <div class="empty-state">Surface cards load once a run is selected.</div>
+            </div>
+          </article>
+
+          <article id="arbitrage" class="panel detail-panel section-anchor">
+            <div class="section-title">
+              <div>
+                <h2>Cross-Venue / Arbitrage</h2>
+                <p>Shadow-only Polymarket/Kalshi candidate scan, shadow edge, freshness, and manual review state.</p>
+              </div>
+            </div>
+            <div id="arbitrageStrip" class="callout" style="margin-bottom: 14px;">
+              <div class="status-strip">
+                <span class="pill pill-neutral" id="arbitrageConnection">Loading arbitrage scan…</span>
+                <span class="pill pill-neutral" id="arbitragePairs">Pairs: n/a</span>
+                <span class="pill pill-neutral" id="arbitrageCandidatesCount">Candidates: n/a</span>
+                <span class="pill pill-neutral" id="arbitrageBestEdge">Best shadow edge: n/a</span>
+              </div>
+            </div>
+            <div class="toolbar" style="margin-bottom: 14px; grid-template-columns: repeat(5, minmax(0, 1fr));">
+              <div class="field">
+                <label for="arbitrageStatusFilter">Desk state</label>
+                <select id="arbitrageStatusFilter">
+                  <option value="">all</option>
+                  <option value="shadow_ready">shadow_ready</option>
+                  <option value="manual_review">manual_review</option>
+                  <option value="blocked">blocked</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="arbitrageOpportunityFilter">Opportunity</label>
+                <select id="arbitrageOpportunityFilter">
+                  <option value="">all</option>
+                  <option value="true_arbitrage">true_arbitrage</option>
+                  <option value="relative_value">relative_value</option>
+                  <option value="cross_venue_signal">cross_venue_signal</option>
+                  <option value="comparison_only">comparison_only</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="arbitrageSortSelect">Sort</label>
+                <select id="arbitrageSortSelect">
+                  <option value="shadow_edge_desc">shadow_edge_desc</option>
+                  <option value="net_spread_desc">net_spread_desc</option>
+                  <option value="confidence_desc">confidence_desc</option>
+                  <option value="freshness_asc">freshness_asc</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="arbitrageDisplayLimitInput">Desk limit</label>
+                <input id="arbitrageDisplayLimitInput" type="number" min="1" max="20" value="8" />
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <div class="control-actions">
+                  <button id="resetArbitrageFiltersButton" type="button" class="secondary">Reset arbitrage</button>
+                </div>
+              </div>
+            </div>
+            <div class="detail-grid">
+              <section class="detail-card">
+                <h3>Overview</h3>
+                <div id="arbitrageOverview" class="microcopy">Arbitrage snapshot will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Trader desk alert</h3>
+                <div id="arbitrageDeskAlert" class="microcopy">Top shadow-ready candidate and direct actions will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Top candidates</h3>
+                <div id="arbitrageCandidates" class="candidate-list">
+                  <div class="empty-state">No cross-venue arbitrage snapshot yet.</div>
+                </div>
+              </section>
+            </div>
+          </article>
+
+          <article class="panel detail-panel">
+            <div class="section-title">
+              <div>
+                <h2>Live Intents</h2>
+                <p>Create, approve, reject, and audit live execution requests with two distinct actors.</p>
+              </div>
+            </div>
+            <div class="side-grid">
+              <section class="detail-card">
+                <h3>Create intent</h3>
+                <div class="field inline">
+                  <label for="liveIntentActorInput">Creator</label>
+                  <input id="liveIntentActorInput" type="text" placeholder="creator-operator" />
+                </div>
+                <div class="field inline" style="margin-top:10px;">
+                  <label for="liveIntentApproverInput">Approver</label>
+                  <input id="liveIntentApproverInput" type="text" placeholder="second-approver" />
+                </div>
+                <div class="field inline" style="margin-top:10px;">
+                  <label for="liveIntentNoteInput">Note</label>
+                  <textarea id="liveIntentNoteInput" placeholder="Optional operator note"></textarea>
+                </div>
+                <div class="intent-actions" style="margin-top: 12px;">
+                  <button id="createLiveIntentButton" type="button" class="primary">Create live intent</button>
+                  <button id="refreshLiveIntentButton" type="button" class="secondary">Refresh intents</button>
+                </div>
+                <div class="microcopy" id="liveIntentHelp" style="margin-top:10px;">
+                  Live intents require a creator and a distinct approver. The live route remains gated until an intent is approved.
+                </div>
+              </section>
+              <section class="detail-card">
+                <h3>Recent intents</h3>
+                <div id="liveIntentsList" class="intent-list">
+                  <div class="empty-state">No live intents loaded yet.</div>
+                </div>
+              </section>
+            </div>
+          </article>
+
+          <article id="venues" class="panel detail-panel section-anchor">
+            <div class="section-title">
+              <div>
+                <h2>Venue &amp; Ops</h2>
+                <p>Capabilities, health, feed, budgets, and strategy contracts for the active venue.</p>
+              </div>
+            </div>
+            <div class="side-grid">
+              <section class="detail-card">
+                <h3>Capabilities</h3>
+                <div id="capabilitiesSummary" class="microcopy">Capabilities will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Health</h3>
+                <div id="healthSummary" class="microcopy">Health will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Feed</h3>
+                <div id="feedSummary" class="microcopy">Feed surface will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Budgets</h3>
+                <div id="budgetsSummary" class="microcopy">Budgets contract will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Strategy</h3>
+                <div id="strategySummary" class="microcopy">Strategy contract will appear here.</div>
+              </section>
+            </div>
+          </article>
+
+          <article id="audit" class="panel raw-panel section-anchor">
+            <div class="section-title">
+              <div>
+                <h2>Dashboard Events</h2>
+                <p>SSE-replayed operator events, benchmark changes, and live-intent transitions.</p>
+              </div>
+            </div>
+            <div id="auditTimeline" class="event-feed">
+              <div class="empty-state">Audit events will appear here.</div>
+            </div>
+            <div id="eventFeed" class="event-feed">
+              <div class="empty-state">No dashboard events yet.</div>
+            </div>
+            <pre id="rawPayload" style="display:none">{}</pre>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        var apiBase = document.body.dataset.apiBase || "/api/v1/prediction-markets";
+        var dashboardMode = document.body.dataset.dashboardMode || "embedded";
+        var storageKey = "prediction-markets-dashboard:v1";
+        var refreshTimer = null;
+        var eventStream = null;
+        var eventRefreshTimer = null;
+        var state = {
+          venue: "polymarket",
+          limit: 12,
+          selectedRunId: "",
+          autoRefreshMs: 30000,
+          theme: "system",
+          creatorActor: "dashboard-creator",
+          approverActor: "dashboard-approver",
+          liveIntentNote: "",
+          recommendation: "",
+          benchmarkState: "",
+          selectedPath: "",
+          surfaceStatus: "",
+          strategyFilter: "",
+          regimeFilter: "",
+          dateWindow: "",
+          arbitrageStatus: "",
+          arbitrageOpportunity: "",
+          arbitrageSort: "shadow_edge_desc",
+          arbitrageDisplayLimit: 8,
+          sseEnabled: true,
+          selectedIntentId: ""
+        };
+
+        var cache = {
+          overview: null,
+          detail: null,
+          benchmark: null,
+          venueSnapshot: null,
+          arbitrage: null
+        };
+
+        var elements = {
+          dashboardMode: document.getElementById("dashboardMode"),
+          dashboardApiBase: document.getElementById("dashboardApiBase"),
+          heroVenue: document.getElementById("heroVenue"),
+          heroTheme: document.getElementById("heroTheme"),
+          heroRefresh: document.getElementById("heroRefresh"),
+          overviewConnection: document.getElementById("overviewConnection"),
+          overviewSelectedRun: document.getElementById("overviewSelectedRun"),
+          overviewSelectedVenue: document.getElementById("overviewSelectedVenue"),
+          overviewLiveIntentCount: document.getElementById("overviewLiveIntentCount"),
+          venueSelect: document.getElementById("venueSelect"),
+          limitInput: document.getElementById("limitInput"),
+          runIdInput: document.getElementById("runIdInput"),
+          autoRefreshSelect: document.getElementById("autoRefreshSelect"),
+          refreshButton: document.getElementById("refreshButton"),
+          recommendationFilter: document.getElementById("recommendationFilter"),
+          benchmarkFilter: document.getElementById("benchmarkFilter"),
+          pathFilter: document.getElementById("pathFilter"),
+          surfaceFilter: document.getElementById("surfaceFilter"),
+          strategyFilter: document.getElementById("strategyFilter"),
+          regimeFilter: document.getElementById("regimeFilter"),
+          dateWindowInput: document.getElementById("dateWindowInput"),
+          resetFiltersButton: document.getElementById("resetFiltersButton"),
+          arbitrageStatusFilter: document.getElementById("arbitrageStatusFilter"),
+          arbitrageOpportunityFilter: document.getElementById("arbitrageOpportunityFilter"),
+          arbitrageSortSelect: document.getElementById("arbitrageSortSelect"),
+          arbitrageDisplayLimitInput: document.getElementById("arbitrageDisplayLimitInput"),
+          resetArbitrageFiltersButton: document.getElementById("resetArbitrageFiltersButton"),
+          statusLine: document.getElementById("statusLine"),
+          selectionLine: document.getElementById("selectionLine"),
+          sseLine: document.getElementById("sseLine"),
+          runsList: document.getElementById("runsList"),
+          runListSummary: document.getElementById("runListSummary"),
+          metricRuns: document.getElementById("metricRuns"),
+          metricRunsCaption: document.getElementById("metricRunsCaption"),
+          metricBenchmark: document.getElementById("metricBenchmark"),
+          metricBenchmarkCaption: document.getElementById("metricBenchmarkCaption"),
+          metricPath: document.getElementById("metricPath"),
+          metricPathCaption: document.getElementById("metricPathCaption"),
+          metricStrategy: document.getElementById("metricStrategy"),
+          metricStrategyCaption: document.getElementById("metricStrategyCaption"),
+          metricRegime: document.getElementById("metricRegime"),
+          metricRegimeCaption: document.getElementById("metricRegimeCaption"),
+          metricSurfaces: document.getElementById("metricSurfaces"),
+          metricSurfacesCaption: document.getElementById("metricSurfacesCaption"),
+          metricEvents: document.getElementById("metricEvents"),
+          metricEventsCaption: document.getElementById("metricEventsCaption"),
+          metricArbitrage: document.getElementById("metricArbitrage"),
+          metricArbitrageCaption: document.getElementById("metricArbitrageCaption"),
+          metricLivePromotable: document.getElementById("metricLivePromotable"),
+          metricLivePromotableCaption: document.getElementById("metricLivePromotableCaption"),
+          overviewSummary: document.getElementById("overviewSummary"),
+          alertStrip: document.getElementById("alertStrip"),
+          overviewAlerts: document.getElementById("overviewAlerts"),
+          arbitrageStrip: document.getElementById("arbitrageStrip"),
+          arbitrageConnection: document.getElementById("arbitrageConnection"),
+          arbitragePairs: document.getElementById("arbitragePairs"),
+          arbitrageCandidatesCount: document.getElementById("arbitrageCandidatesCount"),
+          arbitrageBestEdge: document.getElementById("arbitrageBestEdge"),
+          arbitrageSummary: document.getElementById("arbitrageSummary"),
+          arbitrageCandidates: document.getElementById("arbitrageCandidates"),
+          arbitrageDeskAlert: document.getElementById("arbitrageDeskAlert"),
+          runSummary: document.getElementById("runSummary"),
+          benchmarkSummary: document.getElementById("benchmarkSummary"),
+          researchSummary: document.getElementById("researchSummary"),
+          executionSummary: document.getElementById("executionSummary"),
+          strategyPrimarySummary: document.getElementById("strategyPrimarySummary"),
+          strategyCountsSummary: document.getElementById("strategyCountsSummary"),
+          strategyRegimeSummary: document.getElementById("strategyRegimeSummary"),
+          strategyIntentPreviewSummary: document.getElementById("strategyIntentPreviewSummary"),
+          strategyShadowSummary: document.getElementById("strategyShadowSummary"),
+          strategyResolutionSummary: document.getElementById("strategyResolutionSummary"),
+          packetBundleSummary: document.getElementById("packetBundleSummary"),
+          artifactAuditSummary: document.getElementById("artifactAuditSummary"),
+          marketGraphSummary: document.getElementById("marketGraphSummary"),
+          microstructureSummary: document.getElementById("microstructureSummary"),
+          surfaceGrid: document.getElementById("surfaceGrid"),
+          capabilitiesSummary: document.getElementById("capabilitiesSummary"),
+          healthSummary: document.getElementById("healthSummary"),
+          feedSummary: document.getElementById("feedSummary"),
+          budgetsSummary: document.getElementById("budgetsSummary"),
+          strategySummary: document.getElementById("strategySummary"),
+          liveIntentsList: document.getElementById("liveIntentsList"),
+          liveIntentActorInput: document.getElementById("liveIntentActorInput"),
+          liveIntentApproverInput: document.getElementById("liveIntentApproverInput"),
+          liveIntentNoteInput: document.getElementById("liveIntentNoteInput"),
+          createLiveIntentButton: document.getElementById("createLiveIntentButton"),
+          refreshLiveIntentButton: document.getElementById("refreshLiveIntentButton"),
+          liveIntentHelp: document.getElementById("liveIntentHelp"),
+          arbitrageOverview: document.getElementById("arbitrageOverview"),
+          arbitrageCandidates: document.getElementById("arbitrageCandidates"),
+          eventFeed: document.getElementById("eventFeed"),
+          themeOptions: document.querySelectorAll("[data-theme-option]")
+        };
+
+        var systemThemeMedia = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
+        function loadState() {
+          try {
+            var raw = window.localStorage.getItem(storageKey);
+            if (!raw) return;
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              if (typeof parsed.venue === "string") state.venue = parsed.venue;
+              if (typeof parsed.limit === "number") state.limit = parsed.limit;
+              if (typeof parsed.selectedRunId === "string") state.selectedRunId = parsed.selectedRunId;
+              if (typeof parsed.autoRefreshMs === "number") state.autoRefreshMs = parsed.autoRefreshMs;
+              if (typeof parsed.theme === "string" && /^(system|light|dark)$/.test(parsed.theme)) state.theme = parsed.theme;
+              if (typeof parsed.creatorActor === "string" && parsed.creatorActor.trim()) state.creatorActor = parsed.creatorActor.trim();
+              if (typeof parsed.approverActor === "string" && parsed.approverActor.trim()) state.approverActor = parsed.approverActor.trim();
+              if (typeof parsed.liveIntentNote === "string") state.liveIntentNote = parsed.liveIntentNote;
+              if (typeof parsed.recommendation === "string") state.recommendation = parsed.recommendation;
+              if (typeof parsed.benchmarkState === "string") state.benchmarkState = parsed.benchmarkState;
+              if (typeof parsed.selectedPath === "string") state.selectedPath = parsed.selectedPath;
+              if (typeof parsed.surfaceStatus === "string") state.surfaceStatus = parsed.surfaceStatus;
+              if (typeof parsed.strategyFilter === "string") state.strategyFilter = parsed.strategyFilter;
+              if (typeof parsed.regimeFilter === "string") state.regimeFilter = parsed.regimeFilter;
+              if (typeof parsed.dateWindow === "string") state.dateWindow = parsed.dateWindow;
+              if (typeof parsed.arbitrageStatus === "string") state.arbitrageStatus = parsed.arbitrageStatus;
+              if (typeof parsed.arbitrageOpportunity === "string") state.arbitrageOpportunity = parsed.arbitrageOpportunity;
+              if (typeof parsed.arbitrageSort === "string") state.arbitrageSort = parsed.arbitrageSort;
+              if (typeof parsed.arbitrageDisplayLimit === "number") state.arbitrageDisplayLimit = parsed.arbitrageDisplayLimit;
+              if (typeof parsed.sseEnabled === "boolean") state.sseEnabled = parsed.sseEnabled;
+              if (typeof parsed.selectedIntentId === "string") state.selectedIntentId = parsed.selectedIntentId;
+            }
+          } catch (error) {
+            console.warn("dashboard state load failed", error);
+          }
+        }
+
+        function saveState() {
+          try {
+            window.localStorage.setItem(storageKey, JSON.stringify(state));
+            persistQueryState();
+          } catch (error) {
+            console.warn("dashboard state save failed", error);
+          }
+        }
+
+        function applyQueryState() {
+          try {
+            var params = new URLSearchParams(window.location.search);
+            if (params.has("venue")) state.venue = params.get("venue") || state.venue;
+            if (params.has("run")) state.selectedRunId = params.get("run") || state.selectedRunId;
+            if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+            if (params.has("theme")) state.theme = params.get("theme") || state.theme;
+            if (params.has("actor")) state.creatorActor = params.get("actor") || state.creatorActor;
+            if (params.has("approver")) state.approverActor = params.get("approver") || state.approverActor;
+            if (params.has("note")) state.liveIntentNote = params.get("note") || state.liveIntentNote;
+            if (params.has("recommendation")) state.recommendation = params.get("recommendation") || "";
+            if (params.has("benchmark")) state.benchmarkState = params.get("benchmark") || "";
+            if (params.has("path")) state.selectedPath = params.get("path") || "";
+            if (params.has("surface")) state.surfaceStatus = params.get("surface") || "";
+            if (params.has("strategy")) state.strategyFilter = params.get("strategy") || "";
+            if (params.has("regime")) state.regimeFilter = params.get("regime") || "";
+            if (params.has("date")) state.dateWindow = params.get("date") || "";
+            if (params.has("arb_status")) state.arbitrageStatus = params.get("arb_status") || "";
+            if (params.has("arb_opportunity")) state.arbitrageOpportunity = params.get("arb_opportunity") || "";
+            if (params.has("arb_sort")) state.arbitrageSort = params.get("arb_sort") || state.arbitrageSort;
+            if (params.has("arb_limit")) state.arbitrageDisplayLimit = Number(params.get("arb_limit")) || state.arbitrageDisplayLimit;
+            if (params.has("refresh")) state.autoRefreshMs = Number(params.get("refresh")) || state.autoRefreshMs;
+            if (params.has("sse")) state.sseEnabled = params.get("sse") !== "0";
+          } catch (error) {
+            console.warn("dashboard query state apply failed", error);
+          }
+        }
+
+        function persistQueryState() {
+          try {
+            var url = new URL(window.location.href);
+            url.searchParams.set("venue", state.venue);
+            url.searchParams.set("run", state.selectedRunId || "");
+            url.searchParams.set("limit", String(state.limit));
+            url.searchParams.set("theme", state.theme);
+            url.searchParams.set("actor", state.creatorActor || "");
+            url.searchParams.set("approver", state.approverActor || "");
+            url.searchParams.set("note", state.liveIntentNote || "");
+            if (state.recommendation) url.searchParams.set("recommendation", state.recommendation); else url.searchParams.delete("recommendation");
+            if (state.benchmarkState) url.searchParams.set("benchmark", state.benchmarkState); else url.searchParams.delete("benchmark");
+            if (state.selectedPath) url.searchParams.set("path", state.selectedPath); else url.searchParams.delete("path");
+            if (state.surfaceStatus) url.searchParams.set("surface", state.surfaceStatus); else url.searchParams.delete("surface");
+            if (state.strategyFilter) url.searchParams.set("strategy", state.strategyFilter); else url.searchParams.delete("strategy");
+            if (state.regimeFilter) url.searchParams.set("regime", state.regimeFilter); else url.searchParams.delete("regime");
+            if (state.dateWindow) url.searchParams.set("date", state.dateWindow); else url.searchParams.delete("date");
+            if (state.arbitrageStatus) url.searchParams.set("arb_status", state.arbitrageStatus); else url.searchParams.delete("arb_status");
+            if (state.arbitrageOpportunity) url.searchParams.set("arb_opportunity", state.arbitrageOpportunity); else url.searchParams.delete("arb_opportunity");
+            if (state.arbitrageSort) url.searchParams.set("arb_sort", state.arbitrageSort); else url.searchParams.delete("arb_sort");
+            if (state.arbitrageDisplayLimit > 0) url.searchParams.set("arb_limit", String(state.arbitrageDisplayLimit)); else url.searchParams.delete("arb_limit");
+            if (state.autoRefreshMs > 0) url.searchParams.set("refresh", String(state.autoRefreshMs)); else url.searchParams.delete("refresh");
+            url.searchParams.set("sse", state.sseEnabled ? "1" : "0");
+            window.history.replaceState({}, "", url);
+          } catch (error) {
+            console.warn("dashboard query state persist failed", error);
+          }
+        }
+
+        function resolveAppliedTheme() {
+          if (state.theme === "light" || state.theme === "dark") return state.theme;
+          return systemThemeMedia && systemThemeMedia.matches ? "dark" : "light";
+        }
+
+        function applyTheme() {
+          var appliedTheme = resolveAppliedTheme();
+          document.documentElement.setAttribute("data-theme", state.theme);
+          elements.heroTheme.textContent = state.theme === "system"
+            ? appliedTheme + " (system)"
+            : appliedTheme;
+
+          Array.prototype.forEach.call(elements.themeOptions, function (button) {
+            var isActive = button.getAttribute("data-theme-option") === state.theme;
+            button.classList.toggle("active", isActive);
+            button.setAttribute("aria-pressed", isActive ? "true" : "false");
+          });
+        }
+
+        function escapeHtml(value) {
+          return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        }
+
+        function shortRunId(value) {
+          if (!value) return "n/a";
+          if (value.length <= 18) return value;
+          return value.slice(0, 9) + "…" + value.slice(-7);
+        }
+
+        function formatMaybeNumber(value, digits) {
+          if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+          return value.toFixed(digits);
+        }
+
+        function formatPercent(value) {
+          if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+          return (value * 100).toFixed(1) + "%";
+        }
+
+        function formatTimestamp(value) {
+          if (!value) return "never";
+          var date = new Date(value);
+          return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+        }
+
+        function toneForStatus(value) {
+          var normalized = String(value || "").toLowerCase();
+          if (normalized === "ready" || normalized === "healthy" || normalized === "eligible" || normalized === "completed") return "good";
+          if (normalized === "blocked" || normalized === "error" || normalized === "degraded") return "bad";
+          if (normalized === "downgraded" || normalized === "preview_only" || normalized === "unproven") return "warn";
+          return "neutral";
+        }
+
+        function pill(label, value, tone) {
+          return '<span class="pill pill-' + tone + '">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</span>';
+        }
+
+        function summaryLine(label, value) {
+          return '<div class="summary-line"><span class="label">' + escapeHtml(label) + '</span><span class="value">' + escapeHtml(value) + "</span></div>";
+        }
+
+        function listBlock(items) {
+          if (!items || !items.length) return "";
+          return "<ul>" + items.slice(0, 6).map(function (item) {
+            return "<li>" + escapeHtml(item) + "</li>";
+          }).join("") + "</ul>";
+        }
+
+        function cardBlock(label, value) {
+          return '<div class="summary-line"><span class="label">' + escapeHtml(label) + '</span><span class="value">' + escapeHtml(value) + '</span></div>';
+        }
+
+        function joinList(items, limit) {
+          if (!Array.isArray(items) || items.length === 0) return "n/a";
+          return items.slice(0, limit || 4).map(function (item) {
+            if (item == null) return "n/a";
+            if (typeof item === "string") return item;
+            if (typeof item === "number" || typeof item === "boolean") return String(item);
+            try {
+              return JSON.stringify(item);
+            } catch (error) {
+              return String(item);
+            }
+          }).join(", ");
+        }
+
+        function dateToMs(value) {
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return value > 1e12 ? value : value * 1000;
+          }
+          if (typeof value === "string" && value.trim()) {
+            var parsed = Date.parse(value);
+            return Number.isNaN(parsed) ? null : parsed;
+          }
+          return null;
+        }
+
+        function parseDateWindow(value) {
+          var raw = String(value || "").trim();
+          if (!raw) return null;
+
+          var now = Date.now();
+          if (raw === "last_24h") {
+            return { start: now - 24 * 60 * 60 * 1000, end: now };
+          }
+          if (raw === "last_7d") {
+            return { start: now - 7 * 24 * 60 * 60 * 1000, end: now };
+          }
+
+          var range = raw.split("..");
+          if (range.length === 2) {
+            return {
+              start: dateToMs(range[0].trim()),
+              end: dateToMs(range[1].trim()),
+            };
+          }
+
+          var single = dateToMs(raw);
+          return single == null ? null : { start: single, end: single + 24 * 60 * 60 * 1000 };
+        }
+
+        function runStatusLabel(run) {
+          var benchmark = String(run && (run.benchmark_state || run.benchmark_promotion_status || "")).toLowerCase();
+          if (benchmark.indexOf("ready") !== -1 || run.benchmark_ready === true) return "ready";
+          if (benchmark.indexOf("blocked") !== -1) return "blocked";
+          if (benchmark.indexOf("preview") !== -1) return "preview";
+          return benchmark || "unknown";
+        }
+
+        function runSurfaceStatus(run) {
+          var status = run && (run.selected_path_status || run.execution_projection_selected_path_status || run.execution_projection_verdict || "");
+          return String(status || "unknown").toLowerCase();
+        }
+
+        function matchesRunFilters(run) {
+          if (!run) return false;
+          var strategy = strategySummaryFrom(run);
+          if (state.recommendation && String(run.recommendation || "") !== state.recommendation) return false;
+          if (state.benchmarkState && runStatusLabel(run) !== state.benchmarkState) return false;
+          if (state.selectedPath) {
+            var selectedPath = String(run.selected_path || run.execution_projection_selected_path || "");
+            if (selectedPath !== state.selectedPath) return false;
+          }
+          if (state.surfaceStatus) {
+            var surfaceStatus = runSurfaceStatus(run);
+            if (surfaceStatus !== state.surfaceStatus) return false;
+          }
+          if (state.strategyFilter) {
+            var primaryStrategy = String(strategy && strategy.primary_strategy || "").toLowerCase();
+            if (primaryStrategy.indexOf(String(state.strategyFilter).toLowerCase()) === -1) return false;
+          }
+          if (state.regimeFilter) {
+            var regime = String(strategy && strategy.market_regime || "").toLowerCase();
+            if (regime !== String(state.regimeFilter).toLowerCase()) return false;
+          }
+          if (state.dateWindow) {
+            var windowRange = parseDateWindow(state.dateWindow);
+            if (windowRange) {
+              var runUpdatedAt = dateToMs(run.updated_at) || dateToMs(run.created_at);
+              if (runUpdatedAt == null) return false;
+              if (windowRange.start != null && runUpdatedAt < windowRange.start) return false;
+              if (windowRange.end != null && runUpdatedAt > windowRange.end) return false;
+            }
+          }
+          return true;
+        }
+
+        function filterRuns(runs) {
+          if (!Array.isArray(runs)) return [];
+          return runs.filter(matchesRunFilters);
+        }
+
+        function normalizeStrategyCounts(value) {
+          var counts = value && typeof value === "object" ? value : {};
+          return {
+            total: typeof counts.total === "number" ? counts.total : 0,
+            actionable: typeof counts.actionable === "number" ? counts.actionable : 0,
+            ready: typeof counts.ready === "number" ? counts.ready : 0,
+            degraded: typeof counts.degraded === "number" ? counts.degraded : 0,
+            blocked: typeof counts.blocked === "number" ? counts.blocked : 0,
+            inactive: typeof counts.inactive === "number" ? counts.inactive : 0
+          };
+        }
+
+        function strategySummaryFrom(source) {
+          if (!source || typeof source !== "object") return null;
+          var strategy = source.strategy && typeof source.strategy === "object" ? source.strategy : source;
+          var resolutionAnomalies = Array.isArray(strategy.resolution_anomalies)
+            ? strategy.resolution_anomalies
+            : Array.isArray(source.resolution_anomalies)
+              ? source.resolution_anomalies
+              : [];
+          var previewKind = strategy.execution_intent_preview_kind
+            || source.execution_intent_preview_kind
+            || source.execution_intent_preview && source.execution_intent_preview.kind
+            || source.execution_projection_selected_preview_source
+            || null;
+          var strategyShadowSummary = strategy.strategy_shadow_summary
+            || source.strategy_shadow_summary
+            || source.shadow_strategy_summary
+            || source.shadow_arbitrage && source.shadow_arbitrage.summary && source.shadow_arbitrage.summary.notes && source.shadow_arbitrage.summary.notes.join("; ")
+            || null;
+
+          var counts = normalizeStrategyCounts(strategy.strategy_counts || source.strategy_counts || source.counts);
+          var primaryStrategy = strategy.primary_strategy
+            || source.primary_strategy
+            || source.strategy_primary
+            || null;
+          var marketRegime = strategy.market_regime
+            || source.market_regime
+            || source.strategy_market_regime
+            || null;
+          var operatorSummary = strategy.operator_summary || source.strategy_operator_summary || null;
+
+          if (!primaryStrategy && !marketRegime && !previewKind && !strategyShadowSummary && !resolutionAnomalies.length && counts.total === 0 && !operatorSummary) {
+            return null;
+          }
+
+          return {
+            primary_strategy: primaryStrategy,
+            strategy_counts: counts,
+            market_regime: marketRegime,
+            strategy_shadow_summary: strategyShadowSummary,
+            resolution_anomalies: resolutionAnomalies,
+            execution_intent_preview_kind: previewKind,
+            operator_summary: operatorSummary
+          };
+        }
+
+        function renderSummaryPanels(detail) {
+          var run = detail && (detail.run || detail);
+          var packetBundle = run && run.packet_bundle ? run.packet_bundle : null;
+          var artifactAudit = run && run.artifact_audit ? run.artifact_audit : null;
+          var marketGraph = run && run.market_graph ? run.market_graph : null;
+          var microstructure = run && run.microstructure_lab ? run.microstructure_lab : null;
+
+          elements.packetBundleSummary.innerHTML = packetBundle
+            ? [
+                summaryLine("Bundle", packetBundle.bundle_id || packetBundle.bundleId || "n/a"),
+                summaryLine("Advisor", packetBundle.advisor_architecture && packetBundle.advisor_architecture.architecture_id ? packetBundle.advisor_architecture.architecture_id : "n/a"),
+                summaryLine("Stages", joinList(packetBundle.advisor_architecture && packetBundle.advisor_architecture.stages, 6)),
+                summaryLine("Evidence packets", joinList((packetBundle.evidence_packets || []).map(function (packet) { return packet.type || packet.artifact_type || packet.id; }), 5)),
+                summaryLine("Microstructure", packetBundle.microstructure_summary ? JSON.stringify(packetBundle.microstructure_summary) : "n/a")
+              ].join("")
+            : '<div class="empty-state">Packet bundle readback will appear here.</div>';
+
+          elements.artifactAuditSummary.innerHTML = artifactAudit
+            ? [
+                summaryLine("Bundle", artifactAudit.bundle_id || artifactAudit.bundleId || "n/a"),
+                summaryLine("Artifacts", Array.isArray(artifactAudit.artifacts) ? String(artifactAudit.artifacts.length) : "n/a"),
+                summaryLine("Readback", artifactAudit.summary || artifactAudit.status || "n/a"),
+                summaryLine("Canonical refs", joinList(artifactAudit.canonical_refs || artifactAudit.references || [], 5))
+              ].join("")
+            : '<div class="empty-state">Artifact audit and readback will appear here.</div>';
+
+          elements.marketGraphSummary.innerHTML = marketGraph
+            ? [
+                summaryLine("Market", marketGraph.market_id || marketGraph.marketSlug || "n/a"),
+                summaryLine("Venue", marketGraph.venue || "n/a"),
+                summaryLine("Selected path", marketGraph.selected_path || marketGraph.path || "n/a"),
+                summaryLine("Signal", marketGraph.summary || marketGraph.status || "n/a"),
+                summaryLine("Signals", joinList(marketGraph.signals || marketGraph.signal_types || [], 5))
+              ].join("")
+            : '<div class="empty-state">Market graph details will appear here.</div>';
+
+          elements.microstructureSummary.innerHTML = microstructure
+            ? [
+                summaryLine("Recommended mode", microstructure.summary && microstructure.summary.recommended_mode ? microstructure.summary.recommended_mode : microstructure.recommended_mode || "n/a"),
+                summaryLine("Worst severity", microstructure.summary && microstructure.summary.worst_case_severity ? microstructure.summary.worst_case_severity : microstructure.worst_case_severity || "n/a"),
+                summaryLine("Deterioration bps", microstructure.summary && typeof microstructure.summary.executable_deterioration_bps === "number" ? formatMaybeNumber(microstructure.summary.executable_deterioration_bps, 0) : formatMaybeNumber(microstructure.executable_deterioration_bps, 0)),
+                summaryLine("Quality score", microstructure.summary && typeof microstructure.summary.execution_quality_score === "number" ? formatMaybeNumber(microstructure.summary.execution_quality_score, 2) : formatMaybeNumber(microstructure.execution_quality_score, 2)),
+                summaryLine("Warnings", joinList(microstructure.warnings || microstructure.summary?.warnings || [], 5))
+              ].join("")
+            : '<div class="empty-state">Microstructure lab details will appear here.</div>';
+        }
+
+        function normalizeArbitrageCandidate(candidate) {
+          if (!candidate) return null;
+          var source = candidate.executable_edge || candidate;
+          return {
+            candidate_id: candidate.candidate_id || candidate.arbitrage_candidate_id || candidate.canonical_event_key || candidate.canonical_event_id || null,
+            canonical_event_key: candidate.canonical_event_key || candidate.event_key || candidate.market_equivalence_proof?.canonical_event_key || null,
+            canonical_event_id: candidate.canonical_event_id || candidate.event_id || candidate.market_equivalence_proof?.canonical_event_id || null,
+            buy_venue: candidate.buy_venue || candidate.buy_ref?.venue || source.buy_ref?.venue || null,
+            sell_venue: candidate.sell_venue || candidate.sell_ref?.venue || source.sell_ref?.venue || null,
+            buy_market_id: candidate.buy_market_id || candidate.buy_ref?.market_id || source.buy_ref?.market_id || null,
+            sell_market_id: candidate.sell_market_id || candidate.sell_ref?.market_id || source.sell_ref?.market_id || null,
+            buy_question: candidate.buy_question || candidate.left_question || null,
+            sell_question: candidate.sell_question || candidate.right_question || null,
+            gross_spread_bps: typeof candidate.gross_spread_bps === "number" ? candidate.gross_spread_bps : source.gross_spread_bps ?? null,
+            net_spread_bps: typeof candidate.net_spread_bps === "number" ? candidate.net_spread_bps : source.executable_edge_bps ?? null,
+            shadow_edge_bps: typeof candidate.shadow_edge_bps === "number" ? candidate.shadow_edge_bps : candidate.shadow_arbitrage?.summary?.shadow_edge_bps ?? candidate.shadow_arbitrage_shadow_edge_bps ?? null,
+            recommended_size_usd: typeof candidate.recommended_size_usd === "number" ? candidate.recommended_size_usd : candidate.shadow_arbitrage?.summary?.recommended_size_usd ?? candidate.shadow_arbitrage_recommended_size_usd ?? null,
+            hedge_success_probability: typeof candidate.hedge_success_probability === "number" ? candidate.hedge_success_probability : candidate.shadow_arbitrage?.summary?.hedge_success_probability ?? null,
+            confidence_score: typeof candidate.confidence_score === "number" ? candidate.confidence_score : candidate.evaluation?.confidence_score ?? null,
+            freshness_ms: typeof candidate.freshness_ms === "number" ? candidate.freshness_ms : source.freshness_ms ?? null,
+            shadow_ready: candidate.shadow_ready === true,
+            manual_review_required: candidate.manual_review_required === true
+              || candidate.market_equivalence_proof?.proof_status === "manual_review"
+              || source.manual_review_required === true,
+            blocking_reasons: Array.isArray(candidate.blocking_reasons)
+              ? candidate.blocking_reasons
+              : Array.isArray(candidate.reasons)
+                ? candidate.reasons
+                : Array.isArray(source.blocking_reasons)
+                  ? source.blocking_reasons
+                  : [],
+            proof_status: candidate.market_equivalence_proof?.proof_status || candidate.proof_status || null,
+            opportunity_type: candidate.opportunity_type || source.opportunity_type || null,
+            notes: Array.isArray(candidate.notes) ? candidate.notes : [],
+          };
+        }
+
+        function arbitrageDeskStatus(candidate) {
+          if (!candidate) return "unknown";
+          if (candidate.shadow_ready) return "shadow_ready";
+          if (candidate.manual_review_required) return "manual_review";
+          if (Array.isArray(candidate.blocking_reasons) && candidate.blocking_reasons.length > 0) return "blocked";
+          return "candidate";
+        }
+
+        function matchesArbitrageFilters(candidate) {
+          if (!candidate) return false;
+          if (state.arbitrageStatus && arbitrageDeskStatus(candidate) !== state.arbitrageStatus) return false;
+          if (state.arbitrageOpportunity && String(candidate.opportunity_type || "") !== state.arbitrageOpportunity) return false;
+          return true;
+        }
+
+        function sortArbitrageCandidates(candidates) {
+          var sorted = candidates.slice();
+          sorted.sort(function (left, right) {
+            if (state.arbitrageSort === "net_spread_desc") {
+              return (right.net_spread_bps || -Infinity) - (left.net_spread_bps || -Infinity);
+            }
+            if (state.arbitrageSort === "confidence_desc") {
+              return (right.confidence_score || -Infinity) - (left.confidence_score || -Infinity);
+            }
+            if (state.arbitrageSort === "freshness_asc") {
+              return (left.freshness_ms == null ? Number.POSITIVE_INFINITY : left.freshness_ms)
+                - (right.freshness_ms == null ? Number.POSITIVE_INFINITY : right.freshness_ms);
+            }
+            return (right.shadow_edge_bps || -Infinity) - (left.shadow_edge_bps || -Infinity);
+          });
+          return sorted;
+        }
+
+        function getFilteredArbitrageCandidates(snapshot) {
+          var raw = Array.isArray(snapshot && snapshot.candidates) ? snapshot.candidates : [];
+          var normalized = raw.map(normalizeArbitrageCandidate).filter(Boolean);
+          var filtered = normalized.filter(matchesArbitrageFilters);
+          var sorted = sortArbitrageCandidates(filtered);
+          return sorted.slice(0, Math.max(1, state.arbitrageDisplayLimit || 8));
+        }
+
+        function findArbitrageCandidateById(candidateId) {
+          var raw = cache.arbitrage && Array.isArray(cache.arbitrage.candidates) ? cache.arbitrage.candidates : [];
+          var normalized = raw.map(normalizeArbitrageCandidate).filter(Boolean);
+          for (var index = 0; index < normalized.length; index += 1) {
+            if (normalized[index].candidate_id === candidateId) return normalized[index];
+          }
+          return null;
+        }
+
+        async function createRunFromArbitrageCandidate(candidate) {
+          if (!candidate || !candidate.buy_market_id || !candidate.buy_venue) {
+            throw new Error("Arbitrage candidate is missing a canonical buy leg.");
+          }
+
+          var advisePayload = await apiPost("/advise", {
+            venue: candidate.buy_venue,
+            market_id: candidate.buy_market_id,
+            history_limit: 80,
+            research_signals: [{
+              source: "dashboard_arbitrage",
+              type: "system_note",
+              canonical_event_key: candidate.canonical_event_key,
+              canonical_event_id: candidate.canonical_event_id,
+              buy_venue: candidate.buy_venue,
+              sell_venue: candidate.sell_venue,
+              gross_spread_bps: candidate.gross_spread_bps,
+              net_spread_bps: candidate.net_spread_bps,
+              shadow_edge_bps: candidate.shadow_edge_bps,
+              hedge_success_probability: candidate.hedge_success_probability,
+              manual_review_required: candidate.manual_review_required,
+              blocking_reasons: candidate.blocking_reasons,
+            }],
+          }, {
+            "x-prediction-dashboard-actor": state.creatorActor
+          });
+
+          var runId = advisePayload && advisePayload.prediction_run && advisePayload.prediction_run.run_id
+            ? advisePayload.prediction_run.run_id
+            : advisePayload && advisePayload.run && (advisePayload.run.run_id || advisePayload.run.id)
+              ? (advisePayload.run.run_id || advisePayload.run.id)
+              : null;
+
+          if (!runId) {
+            throw new Error("Advice response did not include a run_id.");
+          }
+
+          state.venue = candidate.buy_venue;
+          state.recommendation = "";
+          state.benchmarkState = "";
+          state.selectedPath = "";
+          state.surfaceStatus = "";
+          state.dateWindow = "";
+          state.selectedRunId = runId;
+          syncControls();
+          saveState();
+
+          return {
+            runId: runId,
+            payload: advisePayload,
+          };
+        }
+
+        async function openArbitrageCandidateAction(candidateId, action) {
+          var candidate = findArbitrageCandidateById(candidateId);
+          if (!candidate) {
+            setStatus("Arbitrage candidate introuvable.", "bad");
+            return;
+          }
+
+          var actionLabel = action === "live_intent" ? "live intent" : action;
+          setStatus("Preparing " + actionLabel + " from the arbitrage buy leg…", "warn");
+
+          try {
+            var prepared = await createRunFromArbitrageCandidate(candidate);
+            var runId = prepared.runId;
+            var surfaceResult = null;
+
+            if (action === "dispatch" || action === "paper" || action === "shadow") {
+              surfaceResult = await apiPost("/runs/" + encodeURIComponent(runId) + "/" + action);
+              setStatus(action + " ready for " + shortRunId(runId) + ".", surfaceResult && surfaceResult.summary ? "good" : "neutral");
+              window.location.hash = "#execution";
+            } else if (action === "live_intent") {
+              state.liveIntentNote = candidate.canonical_event_key
+                ? "Cross-venue candidate " + candidate.canonical_event_key + " from dashboard arbitrage desk."
+                : state.liveIntentNote;
+              saveState();
+              surfaceResult = await apiPost("/dashboard/live-intents", {
+                run_id: runId,
+                note: state.liveIntentNote
+              }, {
+                "x-prediction-dashboard-actor": state.creatorActor
+              });
+              state.selectedIntentId = surfaceResult && surfaceResult.live_intent ? surfaceResult.live_intent.intent_id || "" : "";
+              setStatus("Live intent created for " + shortRunId(runId) + ".", "good");
+              window.location.hash = "#execution";
+            } else {
+              setStatus("Opened buy leg run " + shortRunId(runId) + ".", "good");
+              window.location.hash = "#runs";
+            }
+
+            await refreshDashboard();
+          } catch (error) {
+            setStatus("Arbitrage action failed: " + (error.message || String(error)), "bad");
+          }
+        }
+
+        function renderAuditTimeline(overview, detail) {
+          var events = [];
+          if (overview && Array.isArray(overview.recent_events)) {
+            events = overview.recent_events.slice();
+          }
+          if (detail && Array.isArray(detail.live_intents)) {
+            events = events.concat(detail.live_intents.slice(0, 6).map(function (intent) {
+              return {
+                event_type: intent.status || 'live_intent',
+                severity: intent.status === 'approved' ? 'info' : intent.status === 'rejected' ? 'error' : 'warn',
+                created_at: intent.updated_at || intent.created_at || intent.requested_at,
+                summary: (intent.summary || 'Live intent') + ' • ' + (intent.intent_id || ''),
+              };
+            }));
+          }
+
+          if (!events.length) {
+            elements.auditTimeline.innerHTML = '<div class="empty-state">Audit events will appear here.</div>';
+            return;
+          }
+
+          elements.auditTimeline.innerHTML = events.slice().reverse().map(function (event) {
+            return '' +
+              '<article class="event-card">' +
+                '<div class="title">' +
+                  '<span>' + escapeHtml(event.event_type || event.type || "event") + '</span>' +
+                  pill(event.severity || "info", event.severity || "info", toneForStatus(event.severity || "info")) +
+                '</div>' +
+                '<div class="summary">' + escapeHtml(event.summary || "No summary.") + '</div>' +
+                '<div class="summary" style="margin-top:6px;">' + escapeHtml(formatTimestamp(event.created_at || event.emitted_at)) + '</div>' +
+              '</article>';
+          }).join("");
+        }
+
+        function updateLiveIntentControls(detail) {
+          if (!elements.createLiveIntentButton || !elements.liveIntentHelp) return;
+
+          var run = detail && (detail.run || detail);
+          var execution = detail && detail.execution ? detail.execution : null;
+          var ready = Boolean(execution && execution.live_promotable === true);
+          var selectedPath = execution && execution.selected_path ? execution.selected_path : (run && run.execution_projection_selected_path ? run.execution_projection_selected_path : null);
+          var blockerSummary = execution && execution.blockers && execution.blockers.length
+            ? execution.blockers.slice(0, 4).join('; ')
+            : (detail && detail.benchmark && detail.benchmark.summary) || 'Select a promotable run to enable live intent creation.';
+
+          elements.createLiveIntentButton.disabled = !ready;
+          elements.liveIntentHelp.innerHTML = ready
+            ? 'Live intent ready for <span class="mono">' + escapeHtml(selectedPath || 'live') + '</span>. Two distinct actors are still required for approval.'
+            : 'Live intent creation is disabled: ' + escapeHtml(blockerSummary);
+        }
+
+        function setStatus(message, tone) {
+          elements.statusLine.className = "pill pill-" + (tone || "neutral");
+          elements.statusLine.textContent = message;
+        }
+
+        function setSelection(message, tone) {
+          elements.selectionLine.className = "pill pill-" + (tone || "neutral");
+          elements.selectionLine.textContent = message;
+        }
+
+        function buildApiUrl(path, searchParams) {
+          var query = searchParams ? "?" + new URLSearchParams(searchParams).toString() : "";
+          return apiBase + path + query;
+        }
+
+        async function apiGet(path, searchParams) {
+          var response = await fetch(buildApiUrl(path, searchParams), {
+            headers: { "accept": "application/json" }
+          });
+          var text = await response.text();
+          var body = null;
+          try {
+            body = text ? JSON.parse(text) : null;
+          } catch (error) {
+            body = text;
+          }
+          if (!response.ok) {
+            throw new Error((body && body.error) || ("HTTP " + response.status));
+          }
+          return body;
+        }
+
+        async function apiPost(path, body, headers) {
+          var response = await fetch(buildApiUrl(path), {
+            method: "POST",
+            headers: Object.assign({
+              "accept": "application/json",
+              "content-type": "application/json"
+            }, headers || {}),
+            body: body == null ? null : JSON.stringify(body)
+          });
+          var text = await response.text();
+          var parsed = null;
+          try {
+            parsed = text ? JSON.parse(text) : null;
+          } catch (error) {
+            parsed = text;
+          }
+          if (!response.ok) {
+            throw new Error((parsed && parsed.error) || ("HTTP " + response.status));
+          }
+          return parsed;
+        }
+
+        function syncControls() {
+          elements.dashboardMode.textContent = dashboardMode;
+          elements.dashboardApiBase.textContent = apiBase;
+          elements.heroVenue.textContent = state.venue;
+          if (elements.overviewSelectedVenue) elements.overviewSelectedVenue.textContent = state.venue;
+          elements.venueSelect.value = state.venue;
+          elements.limitInput.value = String(state.limit);
+          elements.runIdInput.value = state.selectedRunId;
+          elements.autoRefreshSelect.value = String(state.autoRefreshMs);
+          if (elements.liveIntentActorInput) elements.liveIntentActorInput.value = state.creatorActor;
+          if (elements.liveIntentApproverInput) elements.liveIntentApproverInput.value = state.approverActor;
+          if (elements.liveIntentNoteInput) elements.liveIntentNoteInput.value = state.liveIntentNote;
+          if (elements.recommendationFilter) elements.recommendationFilter.value = state.recommendation;
+          if (elements.benchmarkFilter) elements.benchmarkFilter.value = state.benchmarkState;
+          if (elements.pathFilter) elements.pathFilter.value = state.selectedPath;
+          if (elements.surfaceFilter) elements.surfaceFilter.value = state.surfaceStatus;
+          if (elements.strategyFilter) elements.strategyFilter.value = state.strategyFilter;
+          if (elements.regimeFilter) elements.regimeFilter.value = state.regimeFilter;
+          if (elements.dateWindowInput) elements.dateWindowInput.value = state.dateWindow;
+          if (elements.arbitrageStatusFilter) elements.arbitrageStatusFilter.value = state.arbitrageStatus;
+          if (elements.arbitrageOpportunityFilter) elements.arbitrageOpportunityFilter.value = state.arbitrageOpportunity;
+          if (elements.arbitrageSortSelect) elements.arbitrageSortSelect.value = state.arbitrageSort;
+          if (elements.arbitrageDisplayLimitInput) elements.arbitrageDisplayLimitInput.value = String(state.arbitrageDisplayLimit);
+          if (elements.resetFiltersButton) {
+            elements.resetFiltersButton.disabled = !(
+              state.recommendation || state.benchmarkState || state.selectedPath || state.surfaceStatus || state.strategyFilter || state.regimeFilter || state.dateWindow
+            );
+          }
+          if (elements.resetArbitrageFiltersButton) {
+            elements.resetArbitrageFiltersButton.disabled = !(
+              state.arbitrageStatus || state.arbitrageOpportunity || state.arbitrageSort !== "shadow_edge_desc" || state.arbitrageDisplayLimit !== 8
+            );
+          }
+          applyTheme();
+        }
+
+        function renderRuns(runs) {
+          var filteredRuns = filterRuns(runs);
+          if (elements.runListSummary) {
+            elements.runListSummary.textContent = filteredRuns.length + " of " + (Array.isArray(runs) ? runs.length : 0) + " runs match the current filters.";
+          }
+
+          if (!Array.isArray(runs) || runs.length === 0) {
+            elements.runsList.innerHTML = '<div class="empty-state">No runs returned for this venue yet.</div>';
+            return;
+          }
+
+          if (filteredRuns.length === 0) {
+            elements.runsList.innerHTML = '<div class="empty-state">No runs match the current filters.</div>';
+            return;
+          }
+
+          elements.runsList.innerHTML = filteredRuns.map(function (run) {
+            var active = run.run_id === state.selectedRunId ? " active" : "";
+            var recommendation = run.recommendation || "n/a";
+            var confidence = formatPercent(run.confidence);
+            var benchmarkReady = run.benchmark_promotion_ready === true || run.benchmark_ready === true ? "ready" : "not ready";
+            var selectedPath = run.execution_projection_selected_path || run.selected_path || run.execution_projection_requested_path || "n/a";
+            var selectedPathStatus = run.execution_projection_selected_path_status || run.selected_path_status || run.execution_projection_verdict || "n/a";
+            var strategy = strategySummaryFrom(run);
+            return '' +
+              '<button type="button" class="run-card' + active + '" data-run-id="' + escapeHtml(run.run_id) + '">' +
+                '<div class="headline">' +
+                  '<div class="run-id">' + escapeHtml(shortRunId(run.run_id)) + '</div>' +
+                  pill("path", selectedPath, toneForStatus(selectedPathStatus)) +
+                '</div>' +
+                '<p class="question">' + escapeHtml(run.market_slug || run.market_id || "Unnamed market") + '</p>' +
+                '<div class="meta">' +
+                  pill("rec", recommendation, toneForStatus(recommendation === "bet" ? "ready" : recommendation)) +
+                  pill("conf", confidence, "neutral") +
+                  pill("benchmark", benchmarkReady, run.benchmark_promotion_ready === true ? "good" : "warn") +
+                  (strategy && strategy.primary_strategy ? pill("strategy", strategy.primary_strategy, "neutral") : "") +
+                  (strategy && strategy.market_regime ? pill("regime", strategy.market_regime, "neutral") : "") +
+                '</div>' +
+              '</button>';
+          }).join("");
+
+          Array.prototype.forEach.call(elements.runsList.querySelectorAll("[data-run-id]"), function (button) {
+            button.addEventListener("click", function () {
+              state.selectedRunId = button.getAttribute("data-run-id") || "";
+              syncControls();
+              saveState();
+              refreshDashboard();
+            });
+          });
+        }
+
+        function renderOverview(overview) {
+          if (!overview) {
+            elements.overviewSummary.innerHTML = '<div class="empty-state">Overview data unavailable.</div>';
+            elements.alertStrip.innerHTML = '<div class="empty-state">No alerts yet.</div>';
+            if (elements.overviewConnection) elements.overviewConnection.textContent = 'Connection: unavailable';
+            return;
+          }
+
+          var runs = Array.isArray(overview.runs) ? overview.runs : [];
+          var filteredRuns = filterRuns(runs);
+          var alertCount = Array.isArray(overview.alerts) ? overview.alerts.length : 0;
+          var strategy = strategySummaryFrom(overview.strategy || overview);
+
+          elements.overviewSummary.innerHTML = [
+            cardBlock("Runs", String(overview.metrics && overview.metrics.runs != null ? overview.metrics.runs : 0)),
+            cardBlock("Filtered runs", String(filteredRuns.length)),
+            cardBlock("Benchmark ready", String(overview.metrics && overview.metrics.benchmark_ready != null ? overview.metrics.benchmark_ready : 0)),
+            cardBlock("Live promotable", String(overview.metrics && overview.metrics.live_promotable != null ? overview.metrics.live_promotable : 0)),
+            cardBlock("Live blocked", String(overview.metrics && overview.metrics.live_blocked != null ? overview.metrics.live_blocked : 0)),
+            cardBlock("Primary strategy", strategy && strategy.primary_strategy ? strategy.primary_strategy : "n/a"),
+            cardBlock("Market regime", strategy && strategy.market_regime ? strategy.market_regime : "n/a"),
+            cardBlock("Venue", overview.venue || state.venue),
+            cardBlock("Freshness", overview.freshness || "n/a"),
+            cardBlock("Alerts", String(alertCount))
+          ].join("");
+
+          if (elements.overviewConnection) {
+            elements.overviewConnection.textContent = [
+              'Connection',
+              overview.transport || 'polling',
+              overview.freshness || 'n/a'
+            ].join(': ');
+          }
+          if (elements.overviewSelectedRun) {
+            elements.overviewSelectedRun.textContent = 'Selected run: ' + (state.selectedRunId ? shortRunId(state.selectedRunId) : (runs[0] ? shortRunId(runs[0].run_id) : 'n/a'));
+          }
+          if (elements.overviewSelectedVenue) {
+            elements.overviewSelectedVenue.textContent = 'Venue: ' + (overview.venue || state.venue);
+          }
+          if (elements.overviewLiveIntentCount) {
+            elements.overviewLiveIntentCount.textContent = 'Live intents: ' + String(Array.isArray(overview.live_intents) ? overview.live_intents.length : 0);
+          }
+
+          var alerts = Array.isArray(overview.alerts) ? overview.alerts : [];
+          if (!alerts.length) {
+            elements.alertStrip.innerHTML = '<div class="empty-state">No alerts yet.</div>';
+          } else {
+            elements.alertStrip.innerHTML = alerts.slice(0, 8).map(function (alert) {
+              return '' +
+                '<article class="alert-card">' +
+                  '<div class="title">' +
+                    '<span>' + escapeHtml(alert.title || alert.kind || "Alert") + '</span>' +
+                    pill(alert.severity || "info", alert.severity || "info", toneForStatus(alert.severity || "info")) +
+                  '</div>' +
+                  '<div class="summary">' + escapeHtml(alert.summary || "No summary.") + '</div>' +
+                '</article>';
+            }).join("");
+          }
+
+          if (elements.overviewAlerts) {
+            var chips = [
+              pill("transport", overview.transport || "polling", toneForStatus(overview.transport || "polling")),
+              pill("freshness", overview.freshness || "n/a", toneForStatus(overview.freshness || "n/a")),
+              pill("venue", overview.venue || state.venue, "neutral"),
+              pill("selected", state.selectedRunId ? shortRunId(state.selectedRunId) : (runs[0] ? shortRunId(runs[0].run_id) : "n/a"), "neutral")
+            ];
+            elements.overviewAlerts.innerHTML = '<div class="status-strip">' + chips.join("") + '</div>';
+          }
+        }
+
+        function renderRunSummary(detail) {
+          if (!detail) {
+            elements.runSummary.innerHTML = '<div class="empty-state">No run selected.</div>';
+            return;
+          }
+          var strategy = strategySummaryFrom(detail);
+          elements.runSummary.innerHTML = [
+            summaryLine("Run id", detail.run_id || "n/a"),
+            summaryLine("Venue", detail.venue || "n/a"),
+            summaryLine("Mode", detail.mode || "n/a"),
+            summaryLine("Recommendation", (detail.recommendation || "n/a") + (detail.side ? " / " + detail.side : "")),
+            summaryLine("Primary strategy", strategy && strategy.primary_strategy ? strategy.primary_strategy : "n/a"),
+            summaryLine("Market regime", strategy && strategy.market_regime ? strategy.market_regime : "n/a"),
+            summaryLine("Confidence", formatPercent(detail.confidence)),
+            summaryLine("Probability yes", formatPercent(detail.probability_yes)),
+            summaryLine("Edge (bps)", formatMaybeNumber(detail.edge_bps, 0)),
+            summaryLine("Status", detail.status || "n/a")
+          ].join("");
+        }
+
+        function renderBenchmarkSummary(detail) {
+          if (!detail) {
+            elements.benchmarkSummary.innerHTML = '<div class="empty-state">Benchmark data unavailable.</div>';
+            return;
+          }
+          elements.benchmarkSummary.innerHTML = [
+            summaryLine("Verdict", detail.benchmark_verdict || detail.research_benchmark_verdict || "n/a"),
+            summaryLine("Gate status", detail.benchmark_gate_status || detail.research_benchmark_gate_status || "n/a"),
+            summaryLine("Promotion ready", detail.benchmark_promotion_ready === true ? "yes" : "no"),
+            summaryLine("Evidence", detail.benchmark_promotion_evidence || detail.research_benchmark_promotion_evidence || "n/a"),
+            summaryLine("Evidence level", detail.benchmark_evidence_level || detail.research_benchmark_evidence_level || "n/a"),
+            summaryLine("Gate kind", detail.benchmark_promotion_gate_kind || detail.research_promotion_gate_kind || "n/a"),
+            summaryLine("Summary", detail.benchmark_promotion_blocker_summary || detail.benchmark_promotion_summary || detail.research_benchmark_promotion_blocker_summary || detail.research_benchmark_promotion_summary || "n/a")
+          ].join("") + listBlock(detail.benchmark_gate_blockers || detail.research_benchmark_gate_blockers || []);
+        }
+
+        function renderResearchSummary(detail) {
+          if (!detail) {
+            elements.researchSummary.innerHTML = '<div class="empty-state">Research data unavailable.</div>';
+            return;
+          }
+          var strategy = strategySummaryFrom(detail);
+          elements.researchSummary.innerHTML = [
+            summaryLine("Origin", detail.research_recommendation_origin || detail.research_runtime_mode || "n/a"),
+            summaryLine("Pipeline", detail.research_pipeline_id || "n/a"),
+            summaryLine("Version", detail.research_pipeline_version || "n/a"),
+            summaryLine("Preferred mode", detail.research_compare_preferred_mode || "n/a"),
+            summaryLine("Forecasters", detail.research_forecaster_count != null ? String(detail.research_forecaster_count) : "n/a"),
+            summaryLine("Weighted yes", formatPercent(detail.research_weighted_probability_yes)),
+            summaryLine("Coverage", formatPercent(detail.research_weighted_coverage)),
+            summaryLine("Abstention blocks", detail.research_abstention_policy_blocks_forecast === true ? "yes" : "no"),
+            summaryLine("Strategy operator note", strategy && strategy.operator_summary ? strategy.operator_summary : "n/a")
+          ].join("");
+        }
+
+        function renderExecutionSummary(detail) {
+          if (!detail) {
+            elements.executionSummary.innerHTML = '<div class="empty-state">Execution data unavailable.</div>';
+            return;
+          }
+          var strategy = strategySummaryFrom(detail);
+          elements.executionSummary.innerHTML = [
+            summaryLine("Requested path", detail.execution_projection_requested_path || "n/a"),
+            summaryLine("Selected path", detail.execution_projection_selected_path || "n/a"),
+            summaryLine("Path status", detail.execution_projection_selected_path_status || detail.execution_projection_verdict || "n/a"),
+            summaryLine("Effective mode", detail.execution_projection_selected_path_effective_mode || detail.execution_projection_recommended_effective_mode || "n/a"),
+            summaryLine("Preview size USD", detail.execution_projection_selected_preview && typeof detail.execution_projection_selected_preview.size_usd === "number" ? formatMaybeNumber(detail.execution_projection_selected_preview.size_usd, 2) : "n/a"),
+            summaryLine("Preview source", detail.execution_projection_selected_preview_source || "n/a"),
+            summaryLine("Intent preview kind", strategy && strategy.execution_intent_preview_kind ? strategy.execution_intent_preview_kind : "n/a"),
+            summaryLine("Capital status", detail.execution_projection_capital_status || "n/a"),
+            summaryLine("Reconciliation", detail.execution_projection_reconciliation_status || "n/a")
+          ].join("") + listBlock(detail.execution_projection_downgrade_reasons || detail.execution_projection_blocking_reasons || []);
+        }
+
+        function renderStrategySection(detail, overview) {
+          var source = detail && (detail.strategy || detail.run || detail) ? (detail.strategy ? detail : (detail.run || detail)) : (overview && (overview.strategy || overview)) || null;
+          var strategy = strategySummaryFrom(source);
+
+          if (!strategy) {
+            if (elements.strategyPrimarySummary) elements.strategyPrimarySummary.innerHTML = '<div class="empty-state">No strategy engine payload visible yet.</div>';
+            if (elements.strategyCountsSummary) elements.strategyCountsSummary.innerHTML = '<div class="empty-state">Strategy counts will appear here.</div>';
+            if (elements.strategyRegimeSummary) elements.strategyRegimeSummary.innerHTML = '<div class="empty-state">Market regime will appear here.</div>';
+            if (elements.strategyIntentPreviewSummary) elements.strategyIntentPreviewSummary.innerHTML = '<div class="empty-state">Execution intent preview kind will appear here.</div>';
+            if (elements.strategyShadowSummary) elements.strategyShadowSummary.innerHTML = '<div class="empty-state">Shadow strategy summary will appear here.</div>';
+            if (elements.strategyResolutionSummary) elements.strategyResolutionSummary.innerHTML = '<div class="empty-state">Resolution anomalies will appear here.</div>';
+            return;
+          }
+
+          var counts = strategy.strategy_counts || normalizeStrategyCounts({});
+
+          if (elements.strategyPrimarySummary) {
+            elements.strategyPrimarySummary.innerHTML = [
+              summaryLine("Primary strategy", strategy.primary_strategy || "n/a"),
+              summaryLine("Operator summary", strategy.operator_summary || "n/a"),
+            ].join("");
+          }
+
+          if (elements.strategyCountsSummary) {
+            elements.strategyCountsSummary.innerHTML = [
+              summaryLine("Total", String(counts.total)),
+              summaryLine("Actionable", String(counts.actionable)),
+              summaryLine("Ready", String(counts.ready)),
+              summaryLine("Degraded", String(counts.degraded)),
+              summaryLine("Blocked", String(counts.blocked)),
+              summaryLine("Inactive", String(counts.inactive)),
+            ].join("");
+          }
+
+          if (elements.strategyRegimeSummary) {
+            elements.strategyRegimeSummary.innerHTML = [
+              summaryLine("Market regime", strategy.market_regime || "n/a"),
+              summaryLine("Execution posture", strategy.market_regime === "fast" || strategy.market_regime === "sports" ? "defensive / freshness-bound" : strategy.market_regime === "slow" ? "forecast-friendly / research-heavy" : "n/a"),
+            ].join("");
+          }
+
+          if (elements.strategyIntentPreviewSummary) {
+            elements.strategyIntentPreviewSummary.innerHTML = [
+              summaryLine("Preview kind", strategy.execution_intent_preview_kind || "n/a"),
+              summaryLine("Intent family", strategy.execution_intent_preview_kind === "quote_pair" ? "maker quoting" : strategy.execution_intent_preview_kind === "basket" ? "multi-leg basket" : strategy.execution_intent_preview_kind === "shadow_watch" ? "watch-only" : strategy.execution_intent_preview_kind === "trade" ? "trade intent" : "n/a"),
+            ].join("");
+          }
+
+          if (elements.strategyShadowSummary) {
+            elements.strategyShadowSummary.innerHTML = strategy.strategy_shadow_summary
+              ? [
+                  summaryLine("Shadow summary", strategy.strategy_shadow_summary),
+                ].join("")
+              : '<div class="empty-state">No generalized shadow strategy summary yet.</div>';
+          }
+
+          if (elements.strategyResolutionSummary) {
+            elements.strategyResolutionSummary.innerHTML = strategy.resolution_anomalies && strategy.resolution_anomalies.length > 0
+              ? [
+                  summaryLine("Anomaly count", String(strategy.resolution_anomalies.length)),
+                ].join("") + listBlock(strategy.resolution_anomalies)
+              : '<div class="empty-state">No resolution anomaly reported.</div>';
+          }
+        }
+
+        function renderLiveIntents(overview, detail) {
+          var intents = [];
+          if (overview && Array.isArray(overview.live_intents)) {
+            intents = overview.live_intents;
+          } else if (detail && Array.isArray(detail.live_intents)) {
+            intents = detail.live_intents;
+          }
+
+          if (elements.overviewLiveIntentCount) {
+            elements.overviewLiveIntentCount.textContent = 'Live intents: ' + String(intents.length);
+          }
+
+          if (!intents.length) {
+            elements.liveIntentsList.innerHTML = '<div class="empty-state">No live intents yet.</div>';
+            return;
+          }
+
+          elements.liveIntentsList.innerHTML = intents.map(function (intent) {
+            var status = intent.approval_state && intent.approval_state.status ? intent.approval_state.status : intent.status || "pending";
+            var approvers = intent.approval_state && Array.isArray(intent.approval_state.approvers)
+              ? intent.approval_state.approvers
+              : [];
+            var canAct = status === "pending" || status === "partial";
+            var intentId = intent.intent_id || "";
+            var isSelected = state.selectedIntentId && state.selectedIntentId === intentId;
+            return '' +
+              '<article class="intent-card' + (isSelected ? ' active' : '') + '" data-live-intent-id="' + escapeHtml(intentId) + '">' +
+                '<div class="title">' +
+                  '<span>' + escapeHtml(shortRunId(intent.run_id || intentId)) + '</span>' +
+                  pill(status, status, toneForStatus(status)) +
+                '</div>' +
+                '<div class="summary">' +
+                  'creator: ' + escapeHtml(intent.requested_by || intent.created_by || "n/a") +
+                  ' • approvers: ' + escapeHtml(approvers.length ? approvers.join(", ") : "none") +
+                '</div>' +
+                '<div class="summary" style="margin-top:6px;">' +
+                  'selected path: ' + escapeHtml(intent.selected_path || intent.requested_path || "n/a") +
+                  ' • live status: ' + escapeHtml(intent.live_status || "n/a") +
+                '</div>' +
+                '<div class="summary" style="margin-top:6px;">' + escapeHtml(intent.summary || (intent.benchmark_state && intent.benchmark_state.summary) || "No summary.") + '</div>' +
+                '<div class="intent-actions">' +
+                  (canAct ? '<button type="button" data-live-approve="' + escapeHtml(intentId) + '">Approve</button>' : '') +
+                  (canAct ? '<button type="button" class="secondary" data-live-reject="' + escapeHtml(intentId) + '">Reject</button>' : '') +
+                '</div>' +
+              '</article>';
+          }).join("");
+
+          Array.prototype.forEach.call(elements.liveIntentsList.querySelectorAll("[data-live-approve]"), function (button) {
+            button.addEventListener("click", function () {
+              state.selectedIntentId = button.getAttribute("data-live-approve") || "";
+              saveState();
+              approveLiveIntent(button.getAttribute("data-live-approve") || "");
+            });
+          });
+          Array.prototype.forEach.call(elements.liveIntentsList.querySelectorAll("[data-live-reject]"), function (button) {
+            button.addEventListener("click", function () {
+              state.selectedIntentId = button.getAttribute("data-live-reject") || "";
+              saveState();
+              rejectLiveIntent(button.getAttribute("data-live-reject") || "");
+            });
+          });
+          Array.prototype.forEach.call(elements.liveIntentsList.querySelectorAll("[data-live-intent-id]"), function (card) {
+            card.addEventListener("click", function (event) {
+              if (event.target && event.target.closest && event.target.closest("button")) return;
+              state.selectedIntentId = card.getAttribute("data-live-intent-id") || "";
+              saveState();
+              renderLiveIntents(overview, detail);
+            });
+          });
+        }
+
+        function renderEventFeed(overview) {
+          var events = overview && Array.isArray(overview.recent_events) ? overview.recent_events : [];
+          if (!events.length) {
+            elements.eventFeed.innerHTML = '<div class="empty-state">No dashboard events yet.</div>';
+            return;
+          }
+
+          elements.eventFeed.innerHTML = events.slice().reverse().map(function (event) {
+            return '' +
+              '<article class="event-card">' +
+                '<div class="title">' +
+                  '<span>' + escapeHtml(event.event_type || "event") + '</span>' +
+                  pill(event.severity || "info", event.severity || "info", toneForStatus(event.severity || "info")) +
+                '</div>' +
+                '<div class="summary">' + escapeHtml(event.summary || "No summary.") + '</div>' +
+                '<div class="summary" style="margin-top:6px;">' + escapeHtml(formatTimestamp(event.created_at)) + '</div>' +
+              '</article>';
+          }).join("");
+        }
+
+        function surfaceStatusFrom(surface, name) {
+          return surface[name + "_status"] || surface.dispatch_status || surface.live_status || surface.paper_status || surface.shadow_status || "n/a";
+        }
+
+        function surfaceBlockersFrom(surface, name) {
+          return surface[name + "_blocking_reasons"] || surface.dispatch_blocking_reasons || surface.live_blocking_reasons || surface.paper_blocking_reasons || surface.shadow_blocking_reasons || [];
+        }
+
+        function renderSurfaces(payload) {
+          if (!payload || !payload.surfaces) {
+            elements.surfaceGrid.innerHTML = '<div class="empty-state">Surface data unavailable.</div>';
+            return;
+          }
+
+          var surfaceNames = ["dispatch", "paper", "shadow", "live"];
+          elements.surfaceGrid.innerHTML = surfaceNames.map(function (name) {
+            var entry = payload.surfaces[name];
+            if (!entry || entry.error) {
+              var errorMessage = entry && entry.error ? entry.error : "Surface unavailable";
+              return '' +
+                '<article class="surface-card">' +
+                  '<h3>' + escapeHtml(name) + '</h3>' +
+                  pill("status", "error", "bad") +
+                  '<p class="surface-summary">' + escapeHtml(errorMessage) + '</p>' +
+                '</article>';
+            }
+            var status = surfaceStatusFrom(entry, name);
+            var blockers = surfaceBlockersFrom(entry, name);
+            var projectedPath = entry.execution_projection_selected_path || entry.execution_projection && entry.execution_projection.selected_path || entry.live_path && entry.live_path.path || entry.paper_path && entry.paper_path.path || entry.shadow_path && entry.shadow_path.path || "n/a";
+            var strategy = strategySummaryFrom(entry);
+            return '' +
+              '<article class="surface-card">' +
+                '<h3>' + escapeHtml(name) + '</h3>' +
+                '<div class="surface-status">' + pill("status", status, toneForStatus(status)) + '</div>' +
+                '<div class="surface-line"><span class="label">Projected path</span><span class="value">' + escapeHtml(projectedPath) + '</span></div>' +
+                '<div class="surface-line"><span class="label">Benchmark ready</span><span class="value">' + escapeHtml(entry.benchmark_promotion_ready === true ? "yes" : "no") + '</span></div>' +
+                '<div class="surface-line"><span class="label">Preview source</span><span class="value">' + escapeHtml(entry.execution_projection_selected_preview_source || entry.live_trade_intent_preview_source || entry.paper_trade_intent_preview_source || entry.shadow_trade_intent_preview_source || "n/a") + '</span></div>' +
+                '<div class="surface-line"><span class="label">Strategy</span><span class="value">' + escapeHtml(strategy && strategy.primary_strategy ? strategy.primary_strategy : "n/a") + '</span></div>' +
+                '<div class="surface-line"><span class="label">Regime</span><span class="value">' + escapeHtml(strategy && strategy.market_regime ? strategy.market_regime : "n/a") + '</span></div>' +
+                '<div class="surface-line"><span class="label">Intent kind</span><span class="value">' + escapeHtml(strategy && strategy.execution_intent_preview_kind ? strategy.execution_intent_preview_kind : "n/a") + '</span></div>' +
+                '<p class="surface-summary">' + escapeHtml(entry.summary || "No summary.") + '</p>' +
+                listBlock(blockers) +
+              '</article>';
+          }).join("");
+
+          var readyCount = surfaceNames.filter(function (name) {
+            var entry = payload.surfaces[name];
+            if (!entry || entry.error) return false;
+            return surfaceStatusFrom(entry, name) === "ready";
+          }).length;
+          elements.metricSurfaces.textContent = readyCount + "/4";
+          elements.metricSurfacesCaption.textContent = "Dispatch, paper, shadow, live operator surfaces.";
+        }
+
+        function renderVenueContext(payload) {
+          var capabilities = payload && payload.capabilities ? payload.capabilities : null;
+          var health = payload && payload.health ? payload.health : null;
+          var feed = payload && payload.feed ? payload.feed : null;
+          var budgets = payload && payload.budgets ? payload.budgets : null;
+          var strategy = payload && payload.strategy ? payload.strategy : null;
+
+          elements.capabilitiesSummary.innerHTML = capabilities
+            ? [
+                summaryLine("Venue", capabilities.venue || state.venue),
+                summaryLine("Execution", capabilities.capabilities && capabilities.capabilities.supports_execution === true ? "supported" : "not supported"),
+                summaryLine("Paper mode", capabilities.capabilities && capabilities.capabilities.supports_paper_mode === true ? "supported" : "n/a"),
+                summaryLine("Order types", capabilities.capabilities_contract && capabilities.capabilities_contract.supported_order_types ? capabilities.capabilities_contract.supported_order_types.join(", ") : "n/a"),
+                summaryLine("Constraints", capabilities.capabilities_contract && capabilities.capabilities_contract.automation_constraints ? capabilities.capabilities_contract.automation_constraints.join(", ") : "none"),
+                summaryLine("Daily loss limit", capabilities.budgets_contract && capabilities.budgets_contract.daily_loss_limit_usd != null ? "$" + capabilities.budgets_contract.daily_loss_limit_usd : "n/a")
+              ].join("")
+            : '<div class="empty-state">Capabilities unavailable.</div>';
+
+          elements.healthSummary.innerHTML = health
+            ? [
+                summaryLine("Venue", health.venue || state.venue),
+                summaryLine("Status", health.health && health.health.status ? health.health.status : "n/a"),
+                summaryLine("Market feed", health.health_contract && health.health_contract.market_feed_status ? health.health_contract.market_feed_status : "n/a"),
+                summaryLine("User feed", health.health_contract && health.health_contract.user_feed_status ? health.health_contract.user_feed_status : "n/a"),
+                summaryLine("RTDS", health.health_contract && health.health_contract.rtds_status ? health.health_contract.rtds_status : "n/a"),
+                summaryLine("Max open positions", health.budgets_contract && health.budgets_contract.max_open_positions != null ? String(health.budgets_contract.max_open_positions) : "n/a")
+              ].join("")
+            : '<div class="empty-state">Health unavailable.</div>';
+
+          elements.feedSummary.innerHTML = feed
+            ? [
+                summaryLine("Backend mode", feed.backend_mode || feed.mode || "n/a"),
+                summaryLine("Market feed", feed.market_feed_status || feed.summary || "n/a"),
+                summaryLine("User feed", feed.user_feed_status || "n/a"),
+                summaryLine("RTDS", feed.rtds_status || "n/a"),
+                summaryLine("Venue", feed.venue || state.venue)
+              ].join("")
+            : '<div class="empty-state">Feed surface will appear here.</div>';
+
+          elements.budgetsSummary.innerHTML = budgets
+            ? [
+                summaryLine("Daily loss limit", budgets.daily_loss_limit_usd != null ? '$' + budgets.daily_loss_limit_usd : "n/a"),
+                summaryLine("Max open positions", budgets.max_open_positions != null ? String(budgets.max_open_positions) : "n/a"),
+                summaryLine("Max order size", budgets.max_order_size_usd != null ? '$' + budgets.max_order_size_usd : "n/a"),
+                summaryLine("Capital currency", budgets.capital_currency || "n/a")
+              ].join("")
+            : '<div class="empty-state">Budgets contract will appear here.</div>';
+
+          elements.strategySummary.innerHTML = strategy
+            ? [
+                summaryLine("Source of truth", strategy.source_of_truth || strategy.source || "n/a"),
+                summaryLine("Execution mode", strategy.execution_mode || strategy.selected_mode || "n/a"),
+                summaryLine("Selected venue", strategy.selected_venue || strategy.venue || state.venue),
+                summaryLine("Notes", joinList(strategy.notes || strategy.recommendations || [], 5))
+              ].join("")
+            : '<div class="empty-state">Strategy contract will appear here.</div>';
+        }
+
+        function renderMetrics(payload) {
+          var overview = payload && payload.overview ? payload.overview : null;
+          var runs = overview && Array.isArray(overview.runs) ? overview.runs : (payload && Array.isArray(payload.runs) ? payload.runs : []);
+          var filteredRuns = filterRuns(runs);
+          var detail = payload && payload.detail ? payload.detail : null;
+          var runDetail = detail && detail.run ? detail.run : detail;
+          var strategy = strategySummaryFrom(runDetail || (overview && (overview.strategy || overview)));
+          var arbitrage = payload && payload.arbitrage ? payload.arbitrage : cache.arbitrage;
+          elements.metricRuns.textContent = String(filteredRuns.length);
+          elements.metricRunsCaption.textContent = filteredRuns.length > 0
+            ? "Filtered latest run: " + shortRunId(filteredRuns[0].run_id)
+            : "No runs returned for this venue.";
+
+          var benchmark = overview && overview.benchmark ? overview.benchmark : null;
+          elements.metricBenchmark.textContent = runDetail
+            ? (runDetail.benchmark_promotion_ready === true ? "Ready" : "Preview")
+            : benchmark && benchmark.benchmark && benchmark.benchmark.ready === true
+              ? "Ready"
+              : "Preview";
+          elements.metricBenchmarkCaption.textContent = runDetail
+            ? (
+                runDetail.benchmark_promotion_blocker_summary ||
+                runDetail.benchmark_promotion_summary ||
+                runDetail.research_benchmark_promotion_summary ||
+                    "Benchmark state loaded."
+              )
+            : benchmark && benchmark.benchmark && benchmark.benchmark.summary
+              ? benchmark.benchmark.summary || "Benchmark state loaded."
+              : "Select a run to inspect benchmark state.";
+          elements.metricPath.textContent = runDetail
+            ? runDetail.execution_projection_selected_path || "n/a"
+            : benchmark && benchmark.comparison && benchmark.comparison.selected_path
+              ? benchmark.comparison.selected_path
+              : "-";
+          elements.metricPathCaption.textContent = runDetail
+            ? (
+                runDetail.execution_projection_summary ||
+                runDetail.execution_projection_preflight_summary && runDetail.execution_projection_preflight_summary.summary ||
+                "Execution projection loaded."
+              )
+              : benchmark && benchmark.comparison && benchmark.comparison.benchmark_gate_summary
+              ? benchmark.comparison.benchmark_gate_summary
+              : "Execution projection not loaded.";
+          elements.metricStrategy.textContent = strategy && strategy.primary_strategy
+            ? strategy.primary_strategy
+            : "-";
+          elements.metricStrategyCaption.textContent = strategy
+            ? (strategy.operator_summary || "Strategy engine data loaded.")
+            : "Waiting for strategy engine data.";
+          elements.metricRegime.textContent = strategy && strategy.market_regime
+            ? strategy.market_regime
+            : "-";
+          elements.metricRegimeCaption.textContent = strategy
+            ? (
+                strategy.execution_intent_preview_kind
+                  ? "Intent preview: " + strategy.execution_intent_preview_kind
+                  : "Strategy regime loaded."
+              )
+            : "Waiting for regime data.";
+          elements.metricSurfaces.textContent = runDetail && detail && detail.surfaces ? "4/4" : (overview && overview.metrics ? String(overview.metrics.live_promotable || 0) + "/" + String(overview.metrics.runs || 0) : "0/4");
+          elements.metricSurfacesCaption.textContent = "Dispatch, paper, shadow, live operator surfaces.";
+          elements.metricLivePromotable.textContent = String(overview && overview.metrics ? overview.metrics.live_promotable || 0 : 0);
+          elements.metricLivePromotableCaption.textContent = runDetail
+            ? (runDetail.benchmark_promotion_ready === true && runDetail.benchmark_gate_blocks_live !== true
+                ? "Selected run can be promoted live."
+                : "Selected run still blocked from live.")
+            : "Inspect a run to see live promotability.";
+          elements.metricEvents.textContent = String(overview && Array.isArray(overview.recent_events) ? overview.recent_events.length : 0);
+          elements.metricEventsCaption.textContent = overview && overview.recent_events && overview.recent_events[0]
+            ? "Latest: " + (overview.recent_events[0].summary || overview.recent_events[0].type || "event")
+            : "Recent dashboard event stream.";
+          elements.metricArbitrage.textContent = String(arbitrage && arbitrage.overview ? arbitrage.overview.candidate_count || 0 : 0);
+          elements.metricArbitrageCaption.textContent = arbitrage && arbitrage.error
+            ? "Arbitrage unavailable."
+            : arbitrage && arbitrage.overview
+              ? (arbitrage.overview.summary || "Arbitrage scan loaded.")
+              : "Shadow-only Polymarket / Kalshi scan.";
+        }
+
+        function renderArbitrage(snapshot, errorMessage) {
+          var error = errorMessage || (snapshot && snapshot.error ? snapshot.error : null);
+          if (!snapshot || error) {
+            if (elements.arbitrageConnection) {
+              elements.arbitrageConnection.textContent = error ? "Arbitrage unavailable." : "Arbitrage loading.";
+              elements.arbitrageConnection.className = "pill " + (error ? "pill-bad" : "pill-neutral");
+            }
+            if (elements.arbitragePairs) elements.arbitragePairs.textContent = "Pairs: n/a";
+            if (elements.arbitrageCandidatesCount) elements.arbitrageCandidatesCount.textContent = "Candidates: n/a";
+            if (elements.arbitrageBestEdge) elements.arbitrageBestEdge.textContent = "Best shadow edge: n/a";
+            if (elements.arbitrageOverview) {
+              elements.arbitrageOverview.innerHTML = '<div class="empty-state">' + escapeHtml(error || "Arbitrage snapshot will appear here.") + '</div>';
+            }
+            if (elements.arbitrageDeskAlert) {
+              elements.arbitrageDeskAlert.innerHTML = '<div class="empty-state">' + escapeHtml(error || "Top shadow-ready candidate will appear here.") + '</div>';
+            }
+            if (elements.arbitrageCandidates) {
+              elements.arbitrageCandidates.innerHTML = '<div class="empty-state">' + escapeHtml(error || "No cross-venue arbitrage snapshot yet.") + '</div>';
+            }
+            return;
+          }
+
+          var overview = snapshot.overview || {};
+          var allCandidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : [];
+          var candidates = getFilteredArbitrageCandidates(snapshot);
+          var bestShadowReady = candidates.find(function (candidate) {
+            return candidate.shadow_ready;
+          }) || null;
+          var comparedPairs = overview.compared_pairs != null ? overview.compared_pairs : overview.pairs_compared;
+          if (elements.arbitrageConnection) {
+            elements.arbitrageConnection.textContent = "Arbitrage " + (snapshot.freshness || "fresh");
+            elements.arbitrageConnection.className = "pill pill-" + toneForStatus(snapshot.freshness || "fresh");
+          }
+          if (elements.arbitragePairs) {
+            elements.arbitragePairs.textContent = "Pairs: " + String(comparedPairs != null ? comparedPairs : snapshot.compared_pairs || 0);
+          }
+          if (elements.arbitrageCandidatesCount) {
+            elements.arbitrageCandidatesCount.textContent = "Candidates: " + String(candidates.length) + "/" + String(overview.candidate_count != null ? overview.candidate_count : allCandidates.length);
+          }
+          if (elements.arbitrageBestEdge) {
+            elements.arbitrageBestEdge.textContent = "Best shadow edge: " + (overview.best_shadow_edge_bps != null ? formatMaybeNumber(overview.best_shadow_edge_bps, 0) + " bps" : "n/a");
+          }
+          if (elements.arbitrageOverview) {
+            elements.arbitrageOverview.innerHTML = [
+              summaryLine("Venue pair", Array.isArray(snapshot.venue_pair) ? snapshot.venue_pair.join(" / ") : "n/a"),
+              summaryLine("Pairs compared", String(comparedPairs != null ? comparedPairs : snapshot.compared_pairs || 0)),
+              summaryLine("Compatible pairs", String(overview.compatible_pairs != null ? overview.compatible_pairs : 0)),
+              summaryLine("Candidates", String(candidates.length) + " shown / " + String(overview.candidate_count != null ? overview.candidate_count : allCandidates.length)),
+              summaryLine("Manual review", String(overview.manual_review_count != null ? overview.manual_review_count : 0)),
+              summaryLine("Shadow-ready", String(overview.shadow_ready_count != null ? overview.shadow_ready_count : candidates.filter(function (item) { return item.shadow_ready; }).length)),
+              summaryLine("Best net spread", overview.best_net_spread_bps != null ? formatMaybeNumber(overview.best_net_spread_bps, 0) + " bps" : "n/a"),
+              summaryLine("Best executable edge", overview.best_executable_edge_bps != null ? formatMaybeNumber(overview.best_executable_edge_bps, 0) + " bps" : "n/a"),
+              summaryLine("Best candidate", overview.best_candidate_id || "n/a"),
+              summaryLine("Freshness", snapshot.freshness || "n/a"),
+              summaryLine("Errors", String(Array.isArray(overview.errors) ? overview.errors.length : 0))
+            ].join("") + listBlock(overview.errors || []);
+          }
+          if (elements.arbitrageDeskAlert) {
+            elements.arbitrageDeskAlert.innerHTML = bestShadowReady
+              ? [
+                  summaryLine("Top shadow-ready", bestShadowReady.canonical_event_key || bestShadowReady.candidate_id || "candidate"),
+                  summaryLine("Buy leg", [bestShadowReady.buy_venue, bestShadowReady.buy_market_id].filter(Boolean).join(" / ") || "n/a"),
+                  summaryLine("Shadow edge", bestShadowReady.shadow_edge_bps != null ? formatMaybeNumber(bestShadowReady.shadow_edge_bps, 0) + " bps" : "n/a"),
+                  summaryLine("Recommended size", bestShadowReady.recommended_size_usd != null ? "$" + formatMaybeNumber(bestShadowReady.recommended_size_usd, 0) : "n/a"),
+                  summaryLine("Hedge success", bestShadowReady.hedge_success_probability != null ? formatPercent(bestShadowReady.hedge_success_probability) : "n/a"),
+                  summaryLine("Desk note", "Buttons below open an advise run on the buy leg, then jump into dispatch, paper, shadow, or live intent."),
+                ].join("")
+              : '<div class="empty-state">No shadow-ready candidate yet. Manual-review or blocked candidates still appear below for triage.</div>';
+          }
+          if (!candidates.length) {
+            elements.arbitrageCandidates.innerHTML = '<div class="empty-state">No cross-venue arbitrage candidates loaded yet.</div>';
+            return;
+          }
+
+          elements.arbitrageCandidates.innerHTML = candidates.map(function (candidate) {
+            var readyTone = candidate.shadow_ready ? "good" : candidate.manual_review_required ? "warn" : "neutral";
+            var pathLabel = candidate.buy_venue + " -> " + candidate.sell_venue;
+            return '' +
+              '<article class="event-card">' +
+                '<div class="title">' +
+                  '<span>' + escapeHtml(candidate.candidate_id || candidate.canonical_event_key || "candidate") + '</span>' +
+                  pill(candidate.shadow_ready ? "shadow-ready" : candidate.manual_review_required ? "manual review" : "shadow-only", candidate.shadow_ready ? "shadow-ready" : candidate.manual_review_required ? "manual review" : "shadow-only", readyTone) +
+                '</div>' +
+                '<div class="summary">' + escapeHtml(candidate.buy_question || candidate.buy_market_id || "n/a") + '</div>' +
+                '<div class="summary">' + escapeHtml(candidate.sell_question || candidate.sell_market_id || "n/a") + '</div>' +
+                '<div class="summary" style="margin-top:6px;">' +
+                  'route: ' + escapeHtml(pathLabel) +
+                  ' • gross: ' + escapeHtml(formatMaybeNumber(candidate.gross_spread_bps, 0)) + ' bps' +
+                  ' • net: ' + escapeHtml(formatMaybeNumber(candidate.net_spread_bps, 0)) + ' bps' +
+                '</div>' +
+                '<div class="summary" style="margin-top:6px;">' +
+                  'shadow edge: ' + escapeHtml(candidate.shadow_edge_bps != null ? formatMaybeNumber(candidate.shadow_edge_bps, 0) + ' bps' : 'n/a') +
+                  ' • size: ' + escapeHtml(candidate.recommended_size_usd != null ? '$' + formatMaybeNumber(candidate.recommended_size_usd, 0) : 'n/a') +
+                  ' • success: ' + escapeHtml(candidate.hedge_success_probability != null ? formatPercent(candidate.hedge_success_probability) : 'n/a') +
+                '</div>' +
+                '<div class="summary" style="margin-top:6px;">' +
+                  'freshness: ' + escapeHtml(candidate.freshness_ms != null ? formatMaybeNumber(candidate.freshness_ms, 0) + 'ms' : 'n/a') +
+                  ' • blockers: ' + escapeHtml(joinList(candidate.blocking_reasons, 4)) +
+                '</div>' +
+                '<div class="candidate-actions">' +
+                  '<button type="button" class="secondary" data-arbitrage-action="open" data-arbitrage-candidate="' + escapeHtml(candidate.candidate_id || '') + '">Open buy leg</button>' +
+                  '<button type="button" class="secondary" data-arbitrage-action="dispatch" data-arbitrage-candidate="' + escapeHtml(candidate.candidate_id || '') + '">Dispatch</button>' +
+                  '<button type="button" class="secondary" data-arbitrage-action="paper" data-arbitrage-candidate="' + escapeHtml(candidate.candidate_id || '') + '">Paper</button>' +
+                  '<button type="button" class="secondary" data-arbitrage-action="shadow" data-arbitrage-candidate="' + escapeHtml(candidate.candidate_id || '') + '">Shadow</button>' +
+                  '<button type="button" class="primary" data-arbitrage-action="live_intent" data-arbitrage-candidate="' + escapeHtml(candidate.candidate_id || '') + '">Live intent</button>' +
+                '</div>' +
+              '</article>';
+          }).join("");
+
+          Array.prototype.forEach.call(elements.arbitrageCandidates.querySelectorAll("[data-arbitrage-action]"), function (button) {
+            button.addEventListener("click", function () {
+              var action = button.getAttribute("data-arbitrage-action") || "open";
+              var candidateId = button.getAttribute("data-arbitrage-candidate") || "";
+              openArbitrageCandidateAction(candidateId, action);
+            });
+          });
+        }
+
+        async function loadSurface(name, runId) {
+          try {
+            return await apiGet("/runs/" + encodeURIComponent(runId) + "/" + name);
+          } catch (error) {
+            return { error: error.message || String(error) };
+          }
+        }
+
+        async function loadArbitrageSnapshot() {
+          try {
+            return await apiGet("/dashboard/arbitrage", {
+              limit: String(Math.max(4, state.limit || 12)),
+              shadow_candidates: String(Math.max(state.arbitrageDisplayLimit || 8, 8)),
+            });
+          } catch (error) {
+            return { error: error.message || String(error) };
+          }
+        }
+
+        async function createLiveIntent() {
+          if (!state.selectedRunId) {
+            setStatus("Select a run before creating a live intent.", "warn");
+            return;
+          }
+
+          setStatus("Creating live intent…", "warn");
+          try {
+            var result = await apiPost("/dashboard/live-intents", {
+              run_id: state.selectedRunId,
+              note: state.liveIntentNote
+            }, {
+              "x-prediction-dashboard-actor": state.creatorActor
+            });
+            if (result && result.live_intent && result.live_intent.run_id) {
+              state.selectedRunId = result.live_intent.run_id;
+            }
+            setStatus("Live intent created.", "good");
+            await refreshDashboard();
+          } catch (error) {
+            setStatus("Live intent create failed: " + (error.message || String(error)), "bad");
+          }
+        }
+
+        async function approveLiveIntent(intentId) {
+          if (!intentId) return;
+          setStatus("Approving live intent…", "warn");
+          try {
+            await apiPost("/dashboard/live-intents/" + encodeURIComponent(intentId) + "/approve", {
+              note: "Approved from dashboard"
+            }, {
+              "x-prediction-dashboard-actor": state.approverActor
+            });
+            setStatus("Live intent approved.", "good");
+            await refreshDashboard();
+          } catch (error) {
+            setStatus("Approval failed: " + (error.message || String(error)), "bad");
+          }
+        }
+
+        async function rejectLiveIntent(intentId) {
+          if (!intentId) return;
+          setStatus("Rejecting live intent…", "warn");
+          try {
+            await apiPost("/dashboard/live-intents/" + encodeURIComponent(intentId) + "/reject", {
+              note: "Rejected from dashboard"
+            }, {
+              "x-prediction-dashboard-actor": state.approverActor
+            });
+            setStatus("Live intent rejected.", "warn");
+            await refreshDashboard();
+          } catch (error) {
+            setStatus("Rejection failed: " + (error.message || String(error)), "bad");
+          }
+        }
+
+        function scheduleEventRefresh() {
+          if (eventRefreshTimer) {
+            window.clearTimeout(eventRefreshTimer);
+          }
+          eventRefreshTimer = window.setTimeout(function () {
+            refreshDashboard();
+          }, 300);
+        }
+
+        function connectEventStream(runId) {
+          if (eventStream) {
+            eventStream.close();
+            eventStream = null;
+          }
+          if (elements.sseLine) {
+            elements.sseLine.textContent = state.sseEnabled ? "SSE connecting…" : "SSE disabled.";
+            elements.sseLine.className = "pill pill-" + (state.sseEnabled ? "warn" : "neutral");
+          }
+          if (!state.sseEnabled || typeof window.EventSource !== "function") return;
+
+          try {
+            eventStream = new EventSource(buildApiUrl("/dashboard/events", runId ? { run_id: runId } : undefined));
+            var eventNames = [
+              "live_intent_created",
+              "live_intent_approved",
+              "live_intent_rejected",
+              "live_intent_prepared",
+              "live_intent_failed",
+              "benchmark_changed",
+              "arbitrage_candidate_opened",
+              "arbitrage_candidate_updated",
+              "arbitrage_candidate_closed",
+              "run_created",
+              "run_updated",
+              "health_changed",
+            ];
+            eventNames.forEach(function (name) {
+              eventStream.addEventListener(name, scheduleEventRefresh);
+            });
+            eventStream.addEventListener("message", scheduleEventRefresh);
+            eventStream.addEventListener("open", function () {
+              if (elements.sseLine) {
+                elements.sseLine.textContent = "SSE live.";
+                elements.sseLine.className = "pill pill-good";
+              }
+            });
+            eventStream.addEventListener("error", function () {
+              if (elements.sseLine) {
+                elements.sseLine.textContent = "SSE reconnecting…";
+                elements.sseLine.className = "pill pill-warn";
+              }
+            });
+            if (elements.sseLine) {
+              elements.sseLine.textContent = "SSE live.";
+              elements.sseLine.className = "pill pill-good";
+            }
+          } catch (error) {
+            console.warn("event stream unavailable", error);
+            if (elements.sseLine) {
+              elements.sseLine.textContent = "SSE unavailable.";
+              elements.sseLine.className = "pill pill-bad";
+            }
+          }
+        }
+
+        async function refreshDashboard() {
+          syncControls();
+          saveState();
+          setStatus("Loading dashboard overview and run detail…", "warn");
+          setSelection(state.selectedRunId ? ("Loading " + shortRunId(state.selectedRunId)) : "Choosing the latest run…", "neutral");
+
+          try {
+            var overview = await apiGet("/dashboard/overview", {
+              venue: state.venue,
+              limit: String(state.limit)
+            });
+            cache.overview = overview;
+            var runs = Array.isArray(overview.runs) ? overview.runs : [];
+            if (!state.selectedRunId && runs.length > 0) {
+              state.selectedRunId = runs[0].run_id;
+            }
+            if (state.selectedRunId && !runs.some(function (run) { return run.run_id === state.selectedRunId; })) {
+              state.selectedRunId = runs.length > 0 ? runs[0].run_id : "";
+            }
+
+            renderRuns(runs);
+            renderOverview(overview);
+            renderEventFeed(overview);
+            renderLiveIntents(overview, null);
+            var arbitrage = await loadArbitrageSnapshot();
+            cache.arbitrage = arbitrage;
+
+            var detail = null;
+            var venueSnapshot = overview.venue_snapshot || null;
+            if (state.selectedRunId) {
+              detail = await apiGet("/dashboard/runs/" + encodeURIComponent(state.selectedRunId));
+              venueSnapshot = detail.venue_snapshot || venueSnapshot;
+              cache.detail = detail;
+              cache.benchmark = overview.benchmark || null;
+              cache.venueSnapshot = venueSnapshot;
+
+              renderRunSummary(detail.run || detail);
+              renderBenchmarkSummary(detail.run || detail);
+              renderResearchSummary(detail.run || detail);
+              renderExecutionSummary(detail.run || detail);
+              renderStrategySection(detail.run || detail, overview);
+              renderSummaryPanels(detail);
+              renderSurfaces({ surfaces: detail.surfaces || {} });
+              renderVenueContext({
+                capabilities: venueSnapshot ? venueSnapshot.capabilities : null,
+                health: venueSnapshot ? venueSnapshot.health : null,
+                feed: venueSnapshot ? venueSnapshot.feed : null,
+                budgets: venueSnapshot ? venueSnapshot.budgets : null,
+                strategy: venueSnapshot ? venueSnapshot.strategy : null
+              });
+              renderArbitrage(arbitrage, null);
+              renderLiveIntents(overview, detail);
+              renderAuditTimeline(overview, detail);
+              updateLiveIntentControls(detail);
+              elements.rawPayload.textContent = JSON.stringify({
+                overview: overview,
+                detail: detail,
+                arbitrage: arbitrage
+              }, null, 2);
+              renderMetrics({ overview: overview, detail: detail, arbitrage: arbitrage });
+            } else {
+              cache.detail = null;
+              renderRunSummary(null);
+              renderBenchmarkSummary(null);
+              renderResearchSummary(null);
+              renderExecutionSummary(null);
+              renderStrategySection(null, overview);
+              renderSummaryPanels(null);
+              renderSurfaces(null);
+              renderVenueContext(venueSnapshot);
+              renderArbitrage(arbitrage, null);
+              renderAuditTimeline(overview, null);
+              updateLiveIntentControls(null);
+              elements.rawPayload.textContent = JSON.stringify({ overview: overview, arbitrage: arbitrage }, null, 2);
+              renderMetrics({ overview: overview, arbitrage: arbitrage });
+            }
+
+            elements.heroVenue.textContent = state.venue;
+            elements.heroRefresh.textContent = new Date().toLocaleString();
+            setStatus("Dashboard refreshed.", "good");
+            setSelection(
+              state.selectedRunId ? ("Selected " + shortRunId(state.selectedRunId)) : "No run selected.",
+              state.selectedRunId ? "good" : "neutral"
+            );
+          } catch (error) {
+            console.error(error);
+            setStatus("Refresh failed: " + (error.message || String(error)), "bad");
+            setSelection("Operator data unavailable.", "bad");
+            elements.rawPayload.textContent = JSON.stringify({
+              error: error.message || String(error)
+            }, null, 2);
+          }
+
+          connectEventStream(state.selectedRunId);
+        }
+
+        function restartAutoRefresh() {
+          if (refreshTimer) {
+            window.clearInterval(refreshTimer);
+            refreshTimer = null;
+          }
+          if (state.autoRefreshMs > 0) {
+            refreshTimer = window.setInterval(refreshDashboard, state.autoRefreshMs);
+          }
+        }
+
+        elements.venueSelect.addEventListener("change", function () {
+          state.venue = elements.venueSelect.value;
+          state.selectedRunId = "";
+          syncControls();
+          restartAutoRefresh();
+          refreshDashboard();
+        });
+
+        elements.limitInput.addEventListener("change", function () {
+          var next = Number(elements.limitInput.value);
+          state.limit = Number.isFinite(next) && next > 0 ? Math.min(next, 50) : 12;
+          syncControls();
+          refreshDashboard();
+        });
+
+        elements.runIdInput.addEventListener("change", function () {
+          state.selectedRunId = elements.runIdInput.value.trim();
+          syncControls();
+          refreshDashboard();
+        });
+
+        elements.autoRefreshSelect.addEventListener("change", function () {
+          var next = Number(elements.autoRefreshSelect.value);
+          state.autoRefreshMs = Number.isFinite(next) ? next : 0;
+          restartAutoRefresh();
+          saveState();
+        });
+
+        elements.refreshButton.addEventListener("click", function () {
+          refreshDashboard();
+        });
+
+        if (elements.createLiveIntentButton) {
+          elements.createLiveIntentButton.addEventListener("click", function () {
+            state.creatorActor = elements.liveIntentActorInput.value.trim() || state.creatorActor;
+            state.approverActor = elements.liveIntentApproverInput.value.trim() || state.approverActor;
+            state.liveIntentNote = elements.liveIntentNoteInput.value.trim();
+            saveState();
+            createLiveIntent();
+          });
+        }
+
+        if (elements.refreshLiveIntentButton) {
+          elements.refreshLiveIntentButton.addEventListener("click", function () {
+            refreshDashboard();
+          });
+        }
+
+        if (elements.liveIntentActorInput) {
+          elements.liveIntentActorInput.addEventListener("change", function () {
+            state.creatorActor = elements.liveIntentActorInput.value.trim() || state.creatorActor;
+            saveState();
+          });
+        }
+
+        if (elements.liveIntentApproverInput) {
+          elements.liveIntentApproverInput.addEventListener("change", function () {
+            state.approverActor = elements.liveIntentApproverInput.value.trim() || state.approverActor;
+            saveState();
+          });
+        }
+
+        if (elements.liveIntentNoteInput) {
+          elements.liveIntentNoteInput.addEventListener("change", function () {
+            state.liveIntentNote = elements.liveIntentNoteInput.value;
+            saveState();
+          });
+        }
+
+        if (elements.recommendationFilter) {
+          elements.recommendationFilter.addEventListener("change", function () {
+            state.recommendation = elements.recommendationFilter.value;
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.benchmarkFilter) {
+          elements.benchmarkFilter.addEventListener("change", function () {
+            state.benchmarkState = elements.benchmarkFilter.value;
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.pathFilter) {
+          elements.pathFilter.addEventListener("change", function () {
+            state.selectedPath = elements.pathFilter.value;
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.surfaceFilter) {
+          elements.surfaceFilter.addEventListener("change", function () {
+            state.surfaceStatus = elements.surfaceFilter.value;
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.strategyFilter) {
+          elements.strategyFilter.addEventListener("change", function () {
+            state.strategyFilter = elements.strategyFilter.value.trim();
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.regimeFilter) {
+          elements.regimeFilter.addEventListener("change", function () {
+            state.regimeFilter = elements.regimeFilter.value;
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.dateWindowInput) {
+          elements.dateWindowInput.addEventListener("change", function () {
+            state.dateWindow = elements.dateWindowInput.value.trim();
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.resetFiltersButton) {
+          elements.resetFiltersButton.addEventListener("click", function () {
+            state.recommendation = "";
+            state.benchmarkState = "";
+            state.selectedPath = "";
+            state.surfaceStatus = "";
+            state.strategyFilter = "";
+            state.regimeFilter = "";
+            state.dateWindow = "";
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.arbitrageStatusFilter) {
+          elements.arbitrageStatusFilter.addEventListener("change", function () {
+            state.arbitrageStatus = elements.arbitrageStatusFilter.value;
+            syncControls();
+            renderArbitrage(cache.arbitrage, null);
+            saveState();
+          });
+        }
+
+        if (elements.arbitrageOpportunityFilter) {
+          elements.arbitrageOpportunityFilter.addEventListener("change", function () {
+            state.arbitrageOpportunity = elements.arbitrageOpportunityFilter.value;
+            syncControls();
+            renderArbitrage(cache.arbitrage, null);
+            saveState();
+          });
+        }
+
+        if (elements.arbitrageSortSelect) {
+          elements.arbitrageSortSelect.addEventListener("change", function () {
+            state.arbitrageSort = elements.arbitrageSortSelect.value || "shadow_edge_desc";
+            syncControls();
+            renderArbitrage(cache.arbitrage, null);
+            saveState();
+          });
+        }
+
+        if (elements.arbitrageDisplayLimitInput) {
+          elements.arbitrageDisplayLimitInput.addEventListener("change", function () {
+            var next = Number(elements.arbitrageDisplayLimitInput.value);
+            state.arbitrageDisplayLimit = Number.isFinite(next) && next > 0 ? Math.min(next, 20) : 8;
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
+        if (elements.resetArbitrageFiltersButton) {
+          elements.resetArbitrageFiltersButton.addEventListener("click", function () {
+            state.arbitrageStatus = "";
+            state.arbitrageOpportunity = "";
+            state.arbitrageSort = "shadow_edge_desc";
+            state.arbitrageDisplayLimit = 8;
+            syncControls();
+            renderArbitrage(cache.arbitrage, null);
+            saveState();
+          });
+        }
+
+        Array.prototype.forEach.call(elements.themeOptions, function (button) {
+          button.addEventListener("click", function () {
+            var nextTheme = button.getAttribute("data-theme-option") || "system";
+            state.theme = /^(system|light|dark)$/.test(nextTheme) ? nextTheme : "system";
+            applyTheme();
+            saveState();
+          });
+        });
+
+        if (systemThemeMedia && typeof systemThemeMedia.addEventListener === "function") {
+          systemThemeMedia.addEventListener("change", function () {
+            if (state.theme === "system") {
+              applyTheme();
+            }
+          });
+        } else if (systemThemeMedia && typeof systemThemeMedia.addListener === "function") {
+          systemThemeMedia.addListener(function () {
+            if (state.theme === "system") {
+              applyTheme();
+            }
+          });
+        }
+
+        loadState();
+        applyQueryState();
+        syncControls();
+        restartAutoRefresh();
+        refreshDashboard();
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,57 @@
+{
+  "suite_version": "v1",
+  "name": "harness-self-improvement-v1",
+  "metadata": {
+    "purpose": "fixture"
+  },
+  "cases": [
+    {
+      "case_id": "fixture_case_1",
+      "description": "Fixture case for benchmark loading tests.",
+      "weight": 1.0,
+      "intent": {
+        "intent_version": "v1",
+        "swarm_version": "v1",
+        "intent_id": "intent_fixture_1",
+        "task_type": "scenario_simulation",
+        "goal": "Estimate social and market reaction to a sudden shock.",
+        "inputs": {
+          "documents": ["brief_a"],
+          "entities": ["city", "retail", "media"],
+          "variables": {
+            "shock_size": 0.2
+          },
+          "environment_seed": {
+            "population": 2500
+          }
+        },
+        "constraints": {
+          "max_agents": 2500,
+          "time_horizon": "7d",
+          "additional": {}
+        },
+        "policy": {
+          "budget_max": 10,
+          "timeout_seconds": 1800,
+          "engine_preference": "agentsociety",
+          "priority": 5
+        },
+        "requested_outputs": ["summary", "metrics", "artifacts"],
+        "context": {
+          "user_id": null,
+          "tenant_id": null,
+          "source": "benchmark",
+          "metadata": {}
+        },
+        "correlation_id": "corr_fixture_1"
+      },
+      "expectation": {
+        "min_score": 0.6,
+        "metric_thresholds": {
+          "engagement_index": 0.6
+        },
+        "accepted_statuses": ["completed"]
+      }
+    }
+  ]
+}

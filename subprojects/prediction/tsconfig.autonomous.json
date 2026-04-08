@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.d.ts",
+    "src/lib/auth.ts",
+    "src/lib/rate-limit.ts",
+    "src/lib/validation.ts",
+    "src/lib/prediction-markets/**/*.ts",
+    "src/lib/logger.ts",
+    "src/lib/db.ts",
+    "src/lib/runs.ts",
+    "src/test-support/**/*.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.mts"
+  ],
+  "exclude": [
+    "src/lib/__tests__/**/*",
+    "src/app/**/*"
+  ]
+}

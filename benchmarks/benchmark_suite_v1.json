@@ -1,0 +1,122 @@
+{
+  "suite_version": "v1",
+  "name": "default_harness_benchmark_suite",
+  "metadata": {
+    "purpose": "Reference benchmark suite for harness self-improvement rounds",
+    "owner": "swarm_core"
+  },
+  "cases": [
+    {
+      "case_id": "market_shock_social_response",
+      "description": "Baseline social simulation benchmark for reaction to a market-moving event.",
+      "weight": 1.0,
+      "intent": {
+        "intent_version": "v1",
+        "swarm_version": "v1",
+        "intent_id": "intent_bench_market_001",
+        "task_type": "scenario_simulation",
+        "goal": "Simulate how a city-scale population reacts to a sudden market shock.",
+        "inputs": {
+          "documents": [],
+          "entities": [],
+          "variables": {
+            "shock_intensity": "medium"
+          },
+          "environment_seed": {
+            "districts": 4
+          }
+        },
+        "constraints": {
+          "max_agents": 1,
+          "time_horizon": "0.01d",
+          "additional": {}
+        },
+        "policy": {
+          "budget_max": 10,
+          "timeout_seconds": 300,
+          "engine_preference": "agentsociety",
+          "priority": 5
+        },
+        "requested_outputs": [
+          "summary",
+          "metrics",
+          "artifacts"
+        ],
+        "context": {
+          "user_id": null,
+          "tenant_id": null,
+          "source": "benchmark",
+          "metadata": {
+            "suite": "v1"
+          }
+        },
+        "correlation_id": "corr_bench_market_001"
+      },
+      "expectation": {
+        "min_score": 0.6,
+        "metric_thresholds": {
+          "engagement_index": 0.6
+        },
+        "accepted_statuses": [
+          "completed"
+        ]
+      }
+    },
+    {
+      "case_id": "policy_intervention_response",
+      "description": "Benchmark the harness on a policy intervention scenario with moderate complexity.",
+      "weight": 1.0,
+      "intent": {
+        "intent_version": "v1",
+        "swarm_version": "v1",
+        "intent_id": "intent_bench_policy_001",
+        "task_type": "scenario_simulation",
+        "goal": "Estimate how the simulated population adapts to a transport policy intervention.",
+        "inputs": {
+          "documents": [],
+          "entities": [],
+          "variables": {
+            "policy_type": "transport_restriction"
+          },
+          "environment_seed": {
+            "districts": 3
+          }
+        },
+        "constraints": {
+          "max_agents": 2,
+          "time_horizon": "0.02d",
+          "additional": {}
+        },
+        "policy": {
+          "budget_max": 10,
+          "timeout_seconds": 300,
+          "engine_preference": "agentsociety",
+          "priority": 5
+        },
+        "requested_outputs": [
+          "summary",
+          "metrics",
+          "artifacts"
+        ],
+        "context": {
+          "user_id": null,
+          "tenant_id": null,
+          "source": "benchmark",
+          "metadata": {
+            "suite": "v1"
+          }
+        },
+        "correlation_id": "corr_bench_policy_001"
+      },
+      "expectation": {
+        "min_score": 0.6,
+        "metric_thresholds": {
+          "engagement_index": 0.5
+        },
+        "accepted_statuses": [
+          "completed"
+        ]
+      }
+    }
+  ]
+}

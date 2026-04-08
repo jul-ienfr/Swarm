@@ -1,0 +1,10 @@
+# Minimal root runtime dependencies for Swarm.
+# Install with: python -m pip install -r requirements.txt
+
+httpx
+openai
+pydantic
+pydantic-ai
+PyYAML
+rich
+typer

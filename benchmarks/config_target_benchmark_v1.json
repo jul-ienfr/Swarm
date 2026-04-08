@@ -1,0 +1,45 @@
+{
+  "suite_version": "v1",
+  "name": "config_target_benchmark_v1",
+  "metadata": {
+    "purpose": "Benchmark safe config knobs for orchestrator tolerance, retry budget, and search depth."
+  },
+  "cases": [
+    {
+      "case_id": "orchestrator_long_horizon",
+      "description": "Multi-step orchestration should have enough stall, replan, and total-step headroom.",
+      "weight": 1.5,
+      "signals": {
+        "orchestrator_error_rate": 0.35,
+        "long_horizon_complexity": 0.8
+      },
+      "expectation": {
+        "min_score": 0.9
+      }
+    },
+    {
+      "case_id": "coding_retry_pressure",
+      "description": "Coding-heavy tasks should keep retries and lint guardrails in a safe range.",
+      "weight": 1.0,
+      "signals": {
+        "retryable_failure_rate": 0.4,
+        "syntax_failure_rate": 0.5
+      },
+      "expectation": {
+        "min_score": 0.95
+      }
+    },
+    {
+      "case_id": "search_cost_pressure",
+      "description": "Research-heavy flows should keep search depth near the efficient midpoint.",
+      "weight": 1.0,
+      "signals": {
+        "search_token_pressure": 0.7,
+        "search_miss_rate": 0.1
+      },
+      "expectation": {
+        "min_score": 0.95
+      }
+    }
+  ]
+}

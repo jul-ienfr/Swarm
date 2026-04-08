@@ -1,0 +1,82 @@
+{
+  "suite_id": "deliberation_suite",
+  "suite_version": "v1",
+  "name": "Massive Deliberation Baseline Suite",
+  "cases": [
+    {
+      "case_id": "committee_baseline",
+      "topic": "Committee baseline",
+      "description": "Committee runs should complete with an actionable strategy and usable confidence.",
+      "mode": "committee",
+      "expectations": [
+        {
+          "metric": "status_completed",
+          "operator": "eq",
+          "target": 1.0,
+          "description": "The committee run should complete."
+        },
+        {
+          "metric": "has_final_strategy",
+          "operator": "eq",
+          "target": 1.0,
+          "description": "The committee run should produce a final strategy."
+        },
+        {
+          "metric": "confidence_level",
+          "operator": "gte",
+          "target": 0.45,
+          "description": "The committee confidence should stay above the minimum acceptable floor."
+        }
+      ]
+    },
+    {
+      "case_id": "simulation_baseline",
+      "topic": "Simulation baseline",
+      "description": "Simulation runs should complete with scenarios, recommendations, and acceptable quality.",
+      "mode": "simulation",
+      "expectations": [
+        {
+          "metric": "status_completed",
+          "operator": "eq",
+          "target": 1.0
+        },
+        {
+          "metric": "scenarios_count",
+          "operator": "gte",
+          "target": 1
+        },
+        {
+          "metric": "quality_score",
+          "operator": "gte",
+          "target": 0.35
+        }
+      ]
+    },
+    {
+      "case_id": "hybrid_baseline",
+      "topic": "Hybrid baseline",
+      "description": "Hybrid runs should complete and keep a final strategy grounded in simulation output.",
+      "mode": "hybrid",
+      "expectations": [
+        {
+          "metric": "status_completed",
+          "operator": "eq",
+          "target": 1.0
+        },
+        {
+          "metric": "has_final_strategy",
+          "operator": "eq",
+          "target": 1.0
+        },
+        {
+          "metric": "quality_score",
+          "operator": "gte",
+          "target": 0.4
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "purpose": "Default benchmark suite for massive deliberation modes."
+  }
+}

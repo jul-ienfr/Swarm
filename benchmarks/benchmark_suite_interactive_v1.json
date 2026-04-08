@@ -1,0 +1,66 @@
+{
+  "suite_version": "v1-interactive",
+  "name": "interactive_harness_benchmark_suite",
+  "metadata": {
+    "purpose": "Fast local harness benchmark profile for interactive runs",
+    "owner": "swarm_core",
+    "backend_mode": "surrogate"
+  },
+  "cases": [
+    {
+      "case_id": "interactive_market_smoke",
+      "description": "Fast smoke benchmark for interactive harness iterations.",
+      "weight": 1.0,
+      "intent": {
+        "intent_version": "v1",
+        "swarm_version": "v1",
+        "intent_id": "intent_bench_interactive_001",
+        "task_type": "scenario_simulation",
+        "goal": "Run a quick interactive simulation smoke test for a local market shock scenario.",
+        "inputs": {
+          "documents": [],
+          "entities": [],
+          "variables": {
+            "shock_intensity": "low"
+          },
+          "environment_seed": {
+            "districts": 1
+          }
+        },
+        "constraints": {
+          "max_agents": 1,
+          "time_horizon": "0.005d",
+          "additional": {}
+        },
+        "policy": {
+          "budget_max": 2,
+          "timeout_seconds": 20,
+          "engine_preference": "agentsociety",
+          "priority": 5
+        },
+        "requested_outputs": [
+          "summary",
+          "metrics"
+        ],
+        "context": {
+          "user_id": null,
+          "tenant_id": null,
+          "source": "benchmark_interactive",
+          "metadata": {
+            "suite": "v1-interactive"
+          }
+        },
+        "correlation_id": "corr_bench_interactive_001"
+      },
+      "expectation": {
+        "min_score": 0.6,
+        "metric_thresholds": {
+          "engagement_index": 0.5
+        },
+        "accepted_statuses": [
+          "completed"
+        ]
+      }
+    }
+  ]
+}
