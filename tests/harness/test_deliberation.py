@@ -6,6 +6,8 @@ from pathlib import Path
 
 from runtime_contracts.adapter_command import AdapterCommand
 from runtime_contracts.adapter_result import AdapterResultV1, EngineMeta, NormalizedArtifact, NormalizedMetric, RunStatus
+from swarm_core.adaptive_fidelity import FidelityMode, FidelityPlan
+from swarm_core.cost_latency_control import BudgetDecision, BudgetDecisionReport
 from swarm_core.deliberation import (
     DEFAULT_DELIBERATION_BENCHMARK_SUITE_PATH,
     DeliberationCoordinator,
@@ -434,6 +436,81 @@ def test_hybrid_deliberation_combines_simulation_and_committee(monkeypatch, tmp_
     assert result.decision_packet.confidence_score == 0.77
     assert result.decision_packet.dissent_turn_count == 2
     assert result.decision_packet.runtime_resilience == FAKE_RUNTIME_RESILIENCE
+
+
+def test_hybrid_deliberation_strict_analysis_preserves_requested_rounds_and_disables_fallback(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured_meeting = {}
+
+    def fake_meeting(**kwargs):
+        captured_meeting.update(kwargs)
+        return _fake_meeting_result(**kwargs)
+
+    monkeypatch.setattr("swarm_core.deliberation.run_strategy_meeting_sync", fake_meeting)
+    monkeypatch.setattr(
+        "swarm_core.deliberation.AdaptiveFidelityPlanner.plan",
+        lambda self, request: FidelityPlan(
+            mode=FidelityMode.low,
+            population_size=8,
+            rounds=1,
+            parallelism=2,
+            estimated_cost_units=1.0,
+            estimated_latency_seconds=1.0,
+            engine_preference="committee",
+            rationale="trimmed by planner",
+        ),
+    )
+    monkeypatch.setattr(
+        "swarm_core.deliberation.CostLatencyController.evaluate",
+        lambda self, request, limits: BudgetDecisionReport(
+            decision=BudgetDecision.trim,
+            allowed=True,
+            adjusted_agents=request.requested_agents,
+            adjusted_rounds=1,
+            adjusted_parallelism=request.requested_parallelism,
+            adjusted_cost_units=request.estimated_cost_units,
+            adjusted_latency_seconds=request.estimated_latency_seconds,
+            reasons=["rounds trimmed to 1"],
+        ),
+    )
+    coordinator = DeliberationCoordinator(output_dir=tmp_path, adapter_service=FakeAdapterService())
+
+    result = coordinator.run(
+        topic="Stress test strict analysis",
+        objective="Preserve requested rounds for analytical review.",
+        mode=DeliberationMode.hybrid,
+        participants=["architect", "research", "safety"],
+        documents=["Doc A"],
+        max_agents=3,
+        population_size=64,
+        rounds=3,
+        persist=False,
+        strict_analysis=True,
+        allow_fallback=True,
+    )
+
+    assert captured_meeting["rounds"] == 3
+    assert captured_meeting["allow_fallback"] is False
+    assert result.rounds_requested == 3
+    assert result.rounds_completed == 3
+    assert result.request.metadata["strict_analysis"] is True
+    assert result.request.metadata["allow_fallback"] is False
+    assert result.request.metadata["requested_allow_fallback"] is True
+    assert result.metadata["strict_analysis"]["enabled"] is True
+    assert result.metadata["strict_analysis"]["rounds_guard_applied"] is True
+    assert result.metadata["strict_analysis"]["fallback_guard_applied"] is True
+    assert result.metadata["comparability"]["strict_analysis"] is True
+    assert result.metadata["comparability"]["strict_rounds_guard_applied"] is True
+    assert result.metadata["comparability"]["strict_fallback_guard_applied"] is True
+    assert any(
+        w.startswith("strict_analysis_rounds_locked: requested=3 effective=3")
+        for w in result.metadata["quality_warnings"]
+    )
+    assert any(
+        w.startswith("strict_analysis_fallback_disabled: requested=True effective=False")
+        for w in result.metadata["quality_warnings"]
+    )
 
 
 def test_replay_deliberation_reuses_manifest(monkeypatch, tmp_path: Path) -> None:

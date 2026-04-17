@@ -4,6 +4,7 @@ import {
   buildResearchPipelineVersionMetadata,
   buildMarketResearchSidecar,
   buildResearchEvidencePacket,
+  annotateMarketResearchSidecarComparisons,
   normalizeResearchSignal,
 } from '@/lib/prediction-markets/research'
 
@@ -47,6 +48,7 @@ describe('prediction markets research bridge', () => {
       severity: 'high',
     })
     expect(signal.signal_id.startsWith('worldmonitor:')).toBe(true)
+    expect(signal.external_profiles.map((profile) => profile.profile_id)).toContain('worldmonitor-app')
     expect(signal.payload).toEqual({
       region: 'us',
       country: 'usa',
@@ -80,6 +82,7 @@ describe('prediction markets research bridge', () => {
       tags: ['desk', 'overnight'],
       thesis_probability: 0.67,
       thesis_rationale: 'Field reports and official statements improve the Yes case.',
+      external_profile_ids: [],
     })
   })
 
@@ -116,6 +119,14 @@ describe('prediction markets research bridge', () => {
       missing_signal_kinds: ['worldmonitor', 'news', 'alert', 'manual_note'],
       health_status: 'blocked',
       health_issues: ['no_signals'],
+      external_integration: {
+        total_profiles: 0,
+      },
+      external_runtime: {
+        p1_a: expect.stringContaining('P1-A runtime summary'),
+        p2_b: expect.stringContaining('P2-B runtime summary'),
+        p2_c: expect.stringContaining('P2-C runtime summary'),
+      },
     })
     expect(baseRate.abstention_summary).toMatchObject({
       recommended: true,
@@ -221,6 +232,14 @@ describe('prediction markets research bridge', () => {
         },
         health_status: 'healthy',
         health_issues: [],
+        external_integration: {
+          total_profiles: 1,
+          profile_ids: ['worldmonitor-app'],
+        },
+      },
+      external_integration: {
+        total_profiles: 1,
+        profile_ids: ['worldmonitor-app'],
       },
       manual_thesis_probability_hint: 0.64,
       manual_thesis_rationale_hint: 'Observer reports add modest support to the delay thesis.',
@@ -238,8 +257,12 @@ describe('prediction markets research bridge', () => {
 
     expect(sidecar.synthesis.key_factors).toContain('Base rate anchor at 50% from fallback_50.')
     expect(sidecar.synthesis.key_factors).toContain('3 evidence packet(s) bridged into the research sidecar.')
+    expect(sidecar.synthesis.key_factors).toContain('P1-A active discovery profiles: worldmonitor-app.')
     expect(sidecar.synthesis.counterarguments).toContain('The latest briefing suggests the schedule remains on track.')
-    expect(sidecar.synthesis.no_trade_hints).toEqual([])
+    expect(sidecar.synthesis.no_trade_hints).toEqual(expect.arrayContaining([
+      expect.stringContaining('Watchlist diff-only remains non-canonical'),
+      expect.stringContaining('Source discovery backlog stays read-only and non-runtime-critical'),
+    ]))
     expect(sidecar.synthesis.signal_kinds).toEqual(['worldmonitor', 'manual_note', 'news'])
     expect(sidecar.synthesis.top_tags).toEqual(['delay', 'desk', 'districts', 'official', 'timeline'])
     expect(sidecar.synthesis.summary).toContain('Research sidecar for "Will the sample event resolve Yes?"')
@@ -249,6 +272,10 @@ describe('prediction markets research bridge', () => {
     )
     expect(sidecar.synthesis.retrieval_summary.supportive_signal_ids).toHaveLength(2)
     expect(sidecar.synthesis.retrieval_summary.contradictory_signal_ids).toHaveLength(1)
+    expect(sidecar.synthesis.external_profiles.map((profile) => profile.profile_id)).toEqual(['worldmonitor-app'])
+    expect(sidecar.evidence_packets[1]?.metadata).toMatchObject({
+      external_profile_ids: ['worldmonitor-app'],
+    })
     expect(sidecar.synthesis.forecaster_candidates).toEqual([
       expect.objectContaining({
         forecaster_id: 'market_base_rate',
@@ -266,6 +293,42 @@ describe('prediction markets research bridge', () => {
     ])
     expect(sidecar.pipeline_version_metadata).toEqual(buildResearchPipelineVersionMetadata())
     expect(sidecar.synthesis.pipeline_version_metadata).toEqual(sidecar.pipeline_version_metadata)
+    expect(sidecar.synthesis.pipeline_trace).toMatchObject({
+      pipeline_version_metadata: sidecar.pipeline_version_metadata,
+      stages: {
+        query: {
+          market_id: 'market-123',
+          venue: 'polymarket',
+          signal_count: 3,
+          evidence_count: 3,
+        },
+        retrieval: {
+          signal_count: 3,
+          evidence_count: 3,
+          health_status: 'healthy',
+          missing_signal_kinds: ['alert'],
+        },
+        rank: {
+          balance: {
+            supportive_count: 2,
+            contradictory_count: 1,
+            neutral_count: 0,
+            unknown_count: 0,
+            direction: 'supportive',
+          },
+        },
+        summarize: {
+          supporting_summary: expect.stringContaining('Regional observers flag delayed tabulation'),
+          counter_summary: expect.stringContaining('Officials reiterate timeline'),
+          source_family_summary: expect.stringContaining('worldmonitor.app'),
+        },
+        aggregate: {
+          baseline_probability_yes: 0.5,
+          preferred_mode: 'aggregate',
+          comparative_summary: expect.stringContaining('Preferred mode: aggregate.'),
+        },
+      },
+    })
     expect(sidecar.synthesis.independent_forecaster_outputs).toEqual([
       expect.objectContaining({
         forecaster_id: 'market_base_rate',
@@ -321,7 +384,29 @@ describe('prediction markets research bridge', () => {
         reason_codes: [],
       },
     })
+    expect(sidecar.synthesis.comparative_report.preferred_mode).toBe('aggregate')
     expect(sidecar.synthesis.comparative_report.summary).toContain('Preferred mode: aggregate.')
+    expect(sidecar.synthesis.supercompact_context).toMatchObject({
+      schema_version: 'supercompact_research_context.v1',
+      format: 'supercompact',
+      stats: {
+        signal_count: 3,
+        evidence_count: 3,
+        health_status: 'healthy',
+      },
+      stance_mix: {
+        supportive: 2,
+        contradictory: 1,
+        neutral: 0,
+        unknown: 0,
+      },
+    })
+    expect(sidecar.synthesis.supercompact_context.compact_summary).toContain('signals=3')
+    expect(sidecar.synthesis.supercompact_context.compact_prompt_block).toContain('Aggregate 56.5%')
+    expect(sidecar.synthesis.supercompact_context.compact_prompt_block).toContain('Abstention policy structured-abstention-v1')
+    expect(sidecar.synthesis.supercompact_context.source_refs).toEqual(
+      expect.arrayContaining(sidecar.evidence_packets.map((packet) => packet.evidence_id)),
+    )
     expect(sidecar.synthesis.calibration_snapshot).toMatchObject({
       pipeline_version: 'poly-025-research-v1',
       calibration_version: 'calibration-shrinkage-v1',
@@ -334,7 +419,17 @@ describe('prediction markets research bridge', () => {
       calibration_gap_bps: 653,
       mean_abs_shift_bps: 0,
       coverage: 1,
+      benchmark_preferred_mode: 'aggregate',
+      benchmark_summary: expect.stringContaining('Preferred mode: aggregate.'),
+      benchmark_blockers: [],
+      benchmark_out_of_sample_ready: true,
+      validation_state: 'ready',
+      validation_blockers: [],
+      calibration_quality: 'tight',
+      calibration_bias: 'yes_upward',
     })
+    expect(sidecar.synthesis.calibration_snapshot.validation_summary).toContain('Validation state: ready')
+    expect(sidecar.synthesis.calibration_snapshot.calibration_summary).toContain('Calibration tight')
     expect(sidecar.synthesis.abstention_policy).toMatchObject({
       policy_id: 'structured-abstention',
       policy_version: 'structured-abstention-v1',
@@ -407,6 +502,7 @@ describe('prediction markets research bridge', () => {
         recommended: false,
       },
     })
+    expect(sidecar.synthesis.comparative_report.preferred_mode).toBe('aggregate')
     expect(sidecar.synthesis.comparative_report.summary).toContain('forecast 61%')
     expect(sidecar.synthesis.forecaster_candidates).toEqual(
       expect.arrayContaining([
@@ -445,6 +541,34 @@ describe('prediction markets research bridge', () => {
       market_delta_bps: 1100,
       forecast_delta_bps: 200,
     })
+  })
+
+  it('recomputes the supercompact context after comparative annotation updates', () => {
+    const sidecar = buildMarketResearchSidecar({
+      market,
+      snapshot: { midpoint_yes: 0.52, yes_price: 0.52 },
+      signals: [
+        {
+          kind: 'manual_note',
+          title: 'Desk update',
+          note: 'Desk leans yes.',
+          captured_at: '2026-04-08T09:00:00.000Z',
+          thesis_probability: 0.61,
+          thesis_rationale: 'Desk thesis stays mildly constructive.',
+          tags: ['desk'],
+          stance: 'supportive',
+        },
+      ],
+    })
+
+    const annotated = annotateMarketResearchSidecarComparisons(sidecar, 0.64)
+
+    expect(annotated.synthesis.forecast_probability_yes_hint).toBe(0.64)
+    expect(annotated.synthesis.supercompact_context.compact_prompt_block).toContain('forecast 64.0%')
+    expect(annotated.synthesis.supercompact_context.compact_prompt_block).toContain('Comparative summary:')
+    expect(annotated.synthesis.supercompact_context.stats.reference_count).toBe(
+      annotated.synthesis.external_reference_count,
+    )
   })
 
   it('deduplicates repeated narrative signals and classifies social feeds as alerts', () => {
@@ -491,5 +615,107 @@ describe('prediction markets research bridge', () => {
       issues: ['duplicate_signals_dropped'],
     })
     expect(sidecar.health.source_kinds).toEqual(expect.arrayContaining(['news', 'alert']))
+  })
+
+  it('integrates TimesFM lanes while keeping event probability bench-only', () => {
+    const sidecar = buildMarketResearchSidecar({
+      market,
+      snapshot: { midpoint_yes: 0.52, yes_price: 0.52 },
+      signals: [],
+      timesfmSidecar: {
+        schema_version: 'v1',
+        sidecar_name: 'timesfm_sidecar',
+        run_id: 'run-timesfm',
+        market_id: market.market_id,
+        venue: market.venue,
+        question: market.question,
+        requested_mode: 'auto',
+        effective_mode: 'auto',
+        requested_lanes: ['microstructure', 'event_probability'],
+        selected_lane: 'microstructure',
+        generated_at: '2026-04-08T12:00:00.000Z',
+        health: {
+          healthy: true,
+          status: 'healthy',
+          backend: 'fixture',
+          dependency_status: 'fixture_backend',
+          issues: [],
+          summary: 'fixture backend ready',
+        },
+        vendor: {
+          source: 'master_snapshot',
+        },
+        lanes: {
+          microstructure: {
+            lane: 'microstructure',
+            status: 'ready',
+            eligible: true,
+            influences_research_aggregate: true,
+            comparator_id: 'candidate_timesfm_microstructure',
+            comparator_kind: 'candidate_model',
+            basis: 'timesfm_microstructure',
+            model_family: 'timesfm-2.5',
+            pipeline_id: 'timesfm-master-snapshot',
+            pipeline_version: 'd720daa67865',
+            probability_yes: 0.58,
+            confidence: 0.63,
+            probability_band: { low: 0.52, center: 0.58, high: 0.64 },
+            quantiles: { p10: 0.52, p50: 0.58, p90: 0.64 },
+            horizon: 24,
+            summary: 'microstructure lane ready',
+            rationale: 'Fixture backend forecast',
+            reasons: [],
+            source_refs: ['commit:d720daa6786539c2566a44464fbda1019c0a82c0'],
+            metadata: {},
+          },
+          event_probability: {
+            lane: 'event_probability',
+            status: 'ready',
+            eligible: true,
+            influences_research_aggregate: false,
+            comparator_id: 'candidate_timesfm_event_probability',
+            comparator_kind: 'candidate_model',
+            basis: 'timesfm_event_probability',
+            model_family: 'timesfm-2.5',
+            pipeline_id: 'timesfm-master-snapshot',
+            pipeline_version: 'd720daa67865',
+            probability_yes: 0.55,
+            confidence: 0.57,
+            probability_band: { low: 0.49, center: 0.55, high: 0.61 },
+            quantiles: { p10: 0.49, p50: 0.55, p90: 0.61 },
+            horizon: 48,
+            summary: 'event lane ready',
+            rationale: 'Bench-only fixture forecast',
+            reasons: [],
+            source_refs: ['commit:d720daa6786539c2566a44464fbda1019c0a82c0'],
+            metadata: {},
+          },
+        },
+        summary: 'TimesFM ready',
+        metadata: {},
+      },
+    })
+
+    expect(sidecar.health.status).toBe('degraded')
+    expect(sidecar.health.issues).toContain('timesfm_sidecar_only')
+    expect(sidecar.synthesis.forecaster_candidates.map((candidate) => candidate.forecaster_kind)).toEqual(
+      expect.arrayContaining(['timesfm_microstructure', 'timesfm_event_probability']),
+    )
+
+    const microstructureOutput = sidecar.synthesis.independent_forecaster_outputs.find(
+      (candidate) => candidate.forecaster_kind === 'timesfm_microstructure',
+    )
+    const eventOutput = sidecar.synthesis.independent_forecaster_outputs.find(
+      (candidate) => candidate.forecaster_kind === 'timesfm_event_probability',
+    )
+
+    expect(microstructureOutput?.raw_weight).toBeGreaterThan(0)
+    expect(eventOutput?.raw_weight).toBe(0)
+    expect(sidecar.synthesis.weighted_aggregate_preview?.contributors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ forecaster_kind: 'timesfm_microstructure' }),
+        expect.objectContaining({ forecaster_kind: 'timesfm_event_probability' }),
+      ]),
+    )
   })
 })

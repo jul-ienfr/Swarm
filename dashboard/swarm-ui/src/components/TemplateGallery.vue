@@ -1,0 +1,295 @@
+<template>
+  <div class="template-gallery">
+    <div class="gallery-header">
+      <div class="header-left">
+        <span class="header-icon">◈</span>
+        <span class="header-label">Quick Start Templates</span>
+      </div>
+      <span class="header-meta">{{ templates.length }} scenarios ready to launch</span>
+    </div>
+
+    <div v-if="loading" class="gallery-loading">
+      Loading templates...
+    </div>
+
+    <div v-else-if="templates.length === 0" class="gallery-empty">
+      No templates available.
+    </div>
+
+    <div v-else class="template-grid">
+      <div
+        v-for="template in templates"
+        :key="template.id"
+        class="template-card"
+        :class="{ selected: selectedId === template.id, loading: launchingId === template.id }"
+        @click="selectTemplate(template)"
+      >
+        <div class="card-top">
+          <span class="card-icon">{{ iconMap[template.icon] || '◆' }}</span>
+          <span class="card-category">{{ template.category }}</span>
+        </div>
+
+        <h3 class="card-title">{{ template.name }}</h3>
+        <p class="card-desc">{{ template.description }}</p>
+
+        <div class="card-meta">
+          <span class="meta-item" :title="`~${template.estimated_agents} agents`">
+            {{ template.estimated_agents }} agents
+          </span>
+          <span class="meta-dot">·</span>
+          <span class="meta-item" :title="`~${template.estimated_rounds} rounds`">
+            {{ template.estimated_rounds }} rounds
+          </span>
+          <span class="meta-dot">·</span>
+          <span class="meta-item difficulty" :class="template.difficulty">
+            {{ template.difficulty }}
+          </span>
+        </div>
+
+        <div class="card-platforms">
+          <span v-for="p in template.platforms" :key="p" class="platform-badge">{{ p }}</span>
+        </div>
+
+        <button
+          class="launch-btn"
+          :disabled="launchingId === template.id"
+          @click.stop="launchTemplate(template)"
+        >
+          <span v-if="launchingId === template.id">Loading...</span>
+          <span v-else>Launch →</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { listTemplates, getTemplate } from '../api/templates'
+import { setPendingTemplate } from '../store/pendingUpload'
+
+const router = useRouter()
+
+const templates = ref([])
+const loading = ref(true)
+const selectedId = ref(null)
+const launchingId = ref(null)
+
+const iconMap = {
+  vote: '🗳',
+  chart: '📈',
+  alert: '⚠',
+  rocket: '🚀',
+  clock: '⏳',
+  school: '🎓'
+}
+
+onMounted(async () => {
+  try {
+    const res = await listTemplates()
+    if (res?.success) {
+      templates.value = res.data
+    }
+  } catch (e) {
+    console.error('Failed to load templates:', e)
+  } finally {
+    loading.value = false
+  }
+})
+
+const selectTemplate = (template) => {
+  selectedId.value = selectedId.value === template.id ? null : template.id
+}
+
+const launchTemplate = async (template) => {
+  launchingId.value = template.id
+  try {
+    const res = await getTemplate(template.id)
+    if (res?.success) {
+      const full = res.data
+      setPendingTemplate(
+        full.simulation_requirement,
+        full.seed_document,
+        full.name
+      )
+      router.push({ name: 'Process', params: { projectId: 'new' } })
+    }
+  } catch (e) {
+    console.error('Failed to load template:', e)
+  } finally {
+    launchingId.value = null
+  }
+}
+</script>
+
+<style scoped>
+.template-gallery {
+  border: 1px solid #E5E5E5;
+  padding: 30px;
+  margin-top: 60px;
+}
+
+.gallery-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: #999;
+}
+
+.header-icon {
+  font-size: 1.2rem;
+  color: #FF4500;
+}
+
+.header-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: #BBB;
+}
+
+.gallery-loading,
+.gallery-empty {
+  text-align: center;
+  padding: 40px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: #999;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.template-card {
+  border: 1px solid #E5E5E5;
+  padding: 24px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.template-card:hover {
+  border-color: #999;
+}
+
+.template-card.selected {
+  border-color: #FF4500;
+  box-shadow: 0 0 0 1px #FF4500;
+}
+
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.card-icon {
+  font-size: 1.4rem;
+}
+
+.card-category {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.card-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  line-height: 1.3;
+}
+
+.card-desc {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.6;
+  margin: 0 0 16px 0;
+  flex: 1;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: #999;
+}
+
+.meta-dot {
+  color: #DDD;
+}
+
+.difficulty.easy { color: #22c55e; }
+.difficulty.medium { color: #f59e0b; }
+.difficulty.hard { color: #ef4444; }
+
+.card-platforms {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.platform-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border: 1px solid #E5E5E5;
+  color: #666;
+  text-transform: lowercase;
+}
+
+.launch-btn {
+  width: 100%;
+  padding: 10px;
+  background: #000;
+  color: #fff;
+  border: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+
+.launch-btn:hover:not(:disabled) {
+  background: #FF4500;
+}
+
+.launch-btn:disabled {
+  background: #CCC;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1024px) {
+  .template-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .template-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

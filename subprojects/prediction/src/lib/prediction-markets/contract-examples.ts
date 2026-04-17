@@ -1,6 +1,7 @@
 import {
   PREDICTION_MARKETS_BASELINE_MODEL,
   PREDICTION_MARKETS_SCHEMA_VERSION,
+  approvalTradeTicketSchema,
   capitalLedgerSnapshotSchema,
   crossVenueMarketRefSchema,
   crossVenueMatchSchema,
@@ -16,6 +17,9 @@ import {
   predictionMarketPacketBundleSchema,
   marketSnapshotSchema,
   predictionMarketBudgetsSchema,
+  predictionMarketResearchPipelineStageSchema,
+  predictionMarketResearchPipelineSummarySchema,
+  predictionMarketResearchPipelineTraceSchema,
   predictionMarketRunSummarySchema,
   predictionMarketsAdviceRequestSchema,
   predictionMarketsReplayRequestSchema,
@@ -33,6 +37,10 @@ import {
   venueCapabilitiesSchema,
   venueHealthSnapshotSchema,
 } from './schemas'
+import { getPolymarketOperatorSidecarSurface } from './polymarket-operator-sidecars'
+import { buildPredictionMarketForecastGovernanceArtifact } from './forecast-governance'
+import { buildPredictionMarketCopReadModel } from './cop-read-models'
+import { buildPredictionMarketWatchlistAudit } from './watchlist-audit'
 
 export type PredictionMarketContractFieldDoc = {
   field: string
@@ -361,6 +369,54 @@ const tradeIntentExample = tradeIntentSchema.parse({
   notes: 'Canonical example intent for downstream execution or shadow simulation.',
 })
 
+const approvalTradeTicketExample = approvalTradeTicketSchema.parse({
+  schema_version: PREDICTION_MARKETS_SCHEMA_VERSION,
+  ticket_id: 'ticket-2026-04-08-001',
+  ticket_kind: 'approval_trade_ticket',
+  workflow_stage: 'approved_trade',
+  run_id: 'pm-run-2026-04-08-001',
+  venue: marketDescriptorExample.venue,
+  market_id: marketDescriptorExample.market_id,
+  market_slug: marketDescriptorExample.slug,
+  source_bundle_id: 'pm-run-2026-04-08-001:approval_bundle',
+  source_packet_refs: [decisionPacketExample.correlation_id, forecastPacketExample.market_id],
+  social_context_refs: ['social:deliberation:2026-04-08-001'],
+  market_context_refs: [marketDescriptorExample.market_id, marketDescriptorExample.slug ?? marketDescriptorExample.market_id],
+  recommendation: 'bet',
+  side: 'yes',
+  size_usd: 100,
+  limit_price: 0.49,
+  edge_bps: 1900,
+  spread_bps: 200,
+  confidence: 0.72,
+  rationale: 'Approval request clears the trade path once the second reviewer signs off.',
+  summary: 'Trade ticket approved after committee review and ready for governed execution.',
+  approval_state: {
+    status: 'approved',
+    requested_by: 'operator-a',
+    requested_at: PRODUCED_AT,
+    required_approvals: 2,
+    current: 2,
+    approvers: ['reviewer-a', 'reviewer-b'],
+    rejections: [],
+    approved_at: COMPLETED_AT,
+    summary: 'Approved by two distinct reviewers for governed execution.',
+    metadata: {
+      approval_chain: 'double_review',
+    },
+  },
+  approved_trade_intent_ref: 'intent-2026-04-08-001',
+  approved_by: ['reviewer-a', 'reviewer-b'],
+  rejected_by: [],
+  notes: ['Approval trail preserved for audit and replay.'],
+  created_at: PRODUCED_AT,
+  updated_at: COMPLETED_AT,
+  metadata: {
+    ticket_source: 'clonehorse_style',
+    routing: 'governed_trade',
+  },
+})
+
 const marketRegimeExample = marketRegimeSchema.parse({
   regime_id: 'regime-2026-04-08-001',
   label: 'stable_bullish',
@@ -676,10 +732,135 @@ const predictionMarketBudgetsExample = predictionMarketBudgetsSchema.parse({
   backpressure_policy: 'degrade-to-wait',
 })
 
+const researchPipelineStageIngestionExample = predictionMarketResearchPipelineStageSchema.parse({
+  stage_id: 'ingestion',
+  stage_kind: 'ingestion',
+  status: 'complete',
+  model_family: 'llm-superforecaster',
+  prompt_ref: 'prompt:ingestion:001',
+  input_refs: [decisionPacketExample.correlation_id],
+  output_refs: ['ingestion:signals:001'],
+  signal_refs: ['social:deliberation:2026-04-08-001'],
+  evidence_refs: [evidencePacketExample.evidence_id],
+  probability_yes: 0.54,
+  confidence: 0.68,
+  rationale: 'Initial ingestion keeps the base market and external thesis in sync.',
+  summary: 'Ingested market state, committee output, and external references.',
+  metadata: {
+    stage_role: 'collector',
+  },
+})
+
+const researchPipelineStageRetrievalExample = predictionMarketResearchPipelineStageSchema.parse({
+  stage_id: 'retrieval',
+  stage_kind: 'retrieval',
+  status: 'complete',
+  model_family: 'oracle',
+  prompt_ref: 'prompt:retrieval:001',
+  input_refs: [evidencePacketExample.evidence_id],
+  output_refs: ['retrieval:context:001'],
+  signal_refs: [evidencePacketExample.evidence_id],
+  evidence_refs: [evidencePacketExample.evidence_id],
+  probability_yes: 0.56,
+  confidence: 0.7,
+  rationale: 'Oracle-style retrieval bundles the most relevant evidence for the forecaster.',
+  summary: 'Retrieved and normalized the core evidence bundle.',
+  metadata: {
+    stage_role: 'retriever',
+  },
+})
+
+const researchPipelineStageForecastExample = predictionMarketResearchPipelineStageSchema.parse({
+  stage_id: 'forecast',
+  stage_kind: 'forecast',
+  status: 'complete',
+  model_family: 'llm-superforecaster',
+  prompt_ref: 'prompt:forecast:001',
+  input_refs: [researchPipelineStageRetrievalExample.output_refs[0] ?? 'retrieval:context:001'],
+  output_refs: ['forecast:probability:001'],
+  signal_refs: ['social:deliberation:2026-04-08-001'],
+  evidence_refs: [evidencePacketExample.evidence_id],
+  probability_yes: 0.64,
+  confidence: 0.72,
+  rationale: 'Forecast stage lifts the probability after retrieval and thesis calibration.',
+  summary: 'Produced a calibrated probability estimate for the market.',
+  metadata: {
+    stage_role: 'forecaster',
+  },
+})
+
+const predictionMarketResearchPipelineTraceExample = predictionMarketResearchPipelineTraceSchema.parse({
+  schema_version: PREDICTION_MARKETS_SCHEMA_VERSION,
+  trace_id: 'trace-2026-04-08-001',
+  pipeline_id: 'research-pipeline-001',
+  pipeline_version: '2026.04.08',
+  run_id: 'pm-run-2026-04-08-001',
+  venue: marketDescriptorExample.venue,
+  market_id: marketDescriptorExample.market_id,
+  model_family: 'llm-superforecaster/oracle',
+  started_at: PRODUCED_AT,
+  completed_at: COMPLETED_AT,
+  stage_count: 3,
+  stages: [
+    researchPipelineStageIngestionExample,
+    researchPipelineStageRetrievalExample,
+    researchPipelineStageForecastExample,
+  ],
+  current_stage_id: undefined,
+  terminal_stage_id: researchPipelineStageForecastExample.stage_id,
+  summary: 'Research pipeline trace for a supervised market thesis with oracle-style retrieval and forecasting.',
+  key_factors: [
+    'Ingestion stage kept the market, decision packet, and social context aligned.',
+    'Retrieval stage concentrated evidence around the strongest supporting signals.',
+    'Forecast stage produced a calibrated yes probability above the market midpoint.',
+  ],
+  source_refs: [decisionPacketExample.correlation_id, evidencePacketExample.evidence_id],
+  metadata: {
+    trace_style: 'llm-superforecaster-oracle',
+  },
+})
+
+const predictionMarketResearchPipelineSummaryExample = predictionMarketResearchPipelineSummarySchema.parse({
+  schema_version: PREDICTION_MARKETS_SCHEMA_VERSION,
+  summary_id: 'research-summary-2026-04-08-001',
+  trace_id: predictionMarketResearchPipelineTraceExample.trace_id,
+  pipeline_id: predictionMarketResearchPipelineTraceExample.pipeline_id,
+  pipeline_version: predictionMarketResearchPipelineTraceExample.pipeline_version,
+  run_id: predictionMarketResearchPipelineTraceExample.run_id,
+  venue: predictionMarketResearchPipelineTraceExample.venue,
+  market_id: predictionMarketResearchPipelineTraceExample.market_id,
+  model_family: predictionMarketResearchPipelineTraceExample.model_family,
+  generated_at: COMPLETED_AT,
+  forecaster_count: 3,
+  contributor_count: 3,
+  signal_count: 3,
+  evidence_count: 3,
+  stage_count: predictionMarketResearchPipelineTraceExample.stage_count,
+  base_rate_probability_yes: 0.5,
+  aggregate_probability_yes: 0.58,
+  forecast_probability_yes: 0.64,
+  abstention_recommended: false,
+  key_factors: [
+    'Base rate remains anchored at 50%.',
+    'Oracle-style retrieval confirms the strongest evidence is still modestly supportive.',
+  ],
+  caveats: [
+    'The trace remains advisory and should not be treated as a live execution signal.',
+  ],
+  summary: 'Research summary for the llm-superforecaster/oracle trace indicates a moderate yes lean with no abstention gate.',
+  source_refs: [predictionMarketResearchPipelineTraceExample.trace_id, evidencePacketExample.evidence_id],
+  metadata: {
+    summary_style: 'oracle_forecaster',
+  },
+})
+
 const predictionMarketsAdviceRequestExample = predictionMarketsAdviceRequestSchema.parse({
   venue: marketDescriptorExample.venue,
   market_id: marketDescriptorExample.market_id,
+  request_mode: 'predict_deep',
+  response_variant: 'research_heavy',
   strategy_profile: 'hybrid',
+  variant_tags: ['polfish', 'research-heavy'],
   enabled_strategy_families: ['directional', 'cross_venue'],
   thesis_probability: forecastPacketExample.probability_yes,
   thesis_rationale: 'Deliberation packet suggests a slight yes edge, but spread remains the main execution limiter.',
@@ -712,6 +893,7 @@ export const predictionMarketContractExamples = {
   venueHealthSnapshot: venueHealthSnapshotExample,
   capitalLedgerSnapshot: capitalLedgerSnapshotExample,
   tradeIntent: tradeIntentExample,
+  approvalTradeTicket: approvalTradeTicketExample,
   marketRegime: marketRegimeExample,
   latencyReferenceBundle: latencyReferenceBundleExample,
   quotePairIntentPreview: quotePairIntentPreviewExample,
@@ -731,6 +913,8 @@ export const predictionMarketContractExamples = {
   predictionMarketRunSummary: predictionMarketRunSummaryExample,
   predictionMarketsAdviceRequest: predictionMarketsAdviceRequestExample,
   predictionMarketsReplayRequest: predictionMarketsReplayRequestExample,
+  predictionMarketResearchPipelineTrace: predictionMarketResearchPipelineTraceExample,
+  predictionMarketResearchPipelineSummary: predictionMarketResearchPipelineSummaryExample,
 }
 
 export type PredictionMarketContractExampleName = keyof typeof predictionMarketContractExamples
@@ -896,6 +1080,20 @@ export const predictionMarketContractDocs: Record<
       requiredField('forecast_ref', 'string', 'Reference back to the forecast that justified the intent.'),
       requiredField('risk_checks_passed', 'boolean', 'Whether pre-trade checks passed at emission time.'),
       requiredField('created_at', 'ISO datetime string', 'When the intent was created.'),
+    ],
+  },
+  approvalTradeTicket: {
+    schema: 'approvalTradeTicketSchema',
+    purpose: 'Governed approval-and-trade ticket that carries approval state, trade preview, and execution readiness.',
+    required_fields: [
+      requiredField('ticket_id', 'string', 'Stable approval-trade ticket identifier.'),
+      requiredField('ticket_kind', 'approval_trade_ticket', 'Canonical ticket kind for governed approval flows.'),
+      requiredField('run_id', 'string', 'Run that produced the ticket.'),
+      requiredField('venue', 'polymarket | kalshi', 'Venue targeted by the ticket.'),
+      requiredField('market_id', 'string', 'Market covered by the ticket.'),
+      requiredField('approval_state', '{ status, requested_by, requested_at, ... }', 'Structured approval state with approvers and outcome.'),
+      requiredField('summary', 'string', 'Short human-readable ticket summary.'),
+      requiredField('created_at', 'ISO datetime string', 'When the ticket was created.'),
     ],
   },
   marketRegime: {
@@ -1119,7 +1317,7 @@ export const predictionMarketContractDocs: Record<
   },
   predictionMarketsAdviceRequest: {
     schema: 'predictionMarketsAdviceRequestSchema',
-    purpose: 'Minimal API request for an advice run on a single market.',
+    purpose: 'Product-facing advice request for a single market, with request_mode / response_variant variants.',
     required_fields: [
       requiredField('market_id', 'string', 'Venue market ID. This may be replaced by slug in user-facing flows.'),
     ],
@@ -1131,4 +1329,52 @@ export const predictionMarketContractDocs: Record<
       requiredField('run_id', 'string', 'Existing run identifier to replay.'),
     ],
   },
+  predictionMarketResearchPipelineTrace: {
+    schema: 'predictionMarketResearchPipelineTraceSchema',
+    purpose: 'Structured llm-superforecaster/oracle-style trace of the research pipeline stages and transitions.',
+    required_fields: [
+      requiredField('trace_id', 'string', 'Stable research trace identifier.'),
+      requiredField('pipeline_id', 'string', 'Canonical research pipeline identifier.'),
+      requiredField('pipeline_version', 'string', 'Version of the research pipeline contract.'),
+      requiredField('run_id', 'string', 'Run that produced the trace.'),
+      requiredField('venue', 'polymarket | kalshi', 'Venue associated with the trace.'),
+      requiredField('market_id', 'string', 'Market covered by the trace.'),
+      requiredField('model_family', 'string', 'Model family or oracle family used by the trace.'),
+      requiredField('started_at', 'ISO datetime string', 'When the trace began.'),
+      requiredField('stage_count', 'integer', 'Number of pipeline stages recorded.'),
+      requiredField('stages', 'pipeline stage[]', 'Stage-by-stage trace payload.'),
+      requiredField('summary', 'string', 'Short human-readable trace summary.'),
+    ],
+  },
+  predictionMarketResearchPipelineSummary: {
+    schema: 'predictionMarketResearchPipelineSummarySchema',
+    purpose: 'Compact llm-superforecaster/oracle-style summary of the pipeline trace and aggregate forecast outputs.',
+    required_fields: [
+      requiredField('summary_id', 'string', 'Stable pipeline summary identifier.'),
+      requiredField('trace_id', 'string', 'Trace that produced the summary.'),
+      requiredField('pipeline_id', 'string', 'Canonical research pipeline identifier.'),
+      requiredField('pipeline_version', 'string', 'Version of the research pipeline contract.'),
+      requiredField('run_id', 'string', 'Run that produced the summary.'),
+      requiredField('venue', 'polymarket | kalshi', 'Venue associated with the summary.'),
+      requiredField('market_id', 'string', 'Market covered by the summary.'),
+      requiredField('model_family', 'string', 'Model or oracle family used to build the summary.'),
+      requiredField('generated_at', 'ISO datetime string', 'When the summary was generated.'),
+      requiredField('base_rate_probability_yes', 'number 0..1', 'Base-rate probability hint.'),
+      requiredField('abstention_recommended', 'boolean', 'Whether the pipeline recommends abstention.'),
+      requiredField('summary', 'string', 'Short human-readable pipeline summary.'),
+    ],
+  },
+}
+
+export const predictionMarketReadOnlyIntegrationExamples = {
+  polymarketOperatorSidecars: getPolymarketOperatorSidecarSurface(),
+  forecastGovernance: buildPredictionMarketForecastGovernanceArtifact({
+    operator_thesis_present: true,
+    research_pipeline_trace_present: true,
+    benchmark_summary: 'local benchmark summary attached',
+  }),
+  copReadModel: buildPredictionMarketCopReadModel({
+    geo_context: null,
+  }),
+  watchlistAudit: buildPredictionMarketWatchlistAudit(),
 }

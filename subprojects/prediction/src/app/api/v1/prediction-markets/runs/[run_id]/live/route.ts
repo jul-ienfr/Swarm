@@ -12,8 +12,14 @@ function hasApprovedLiveIntent(intent: Record<string, unknown>) {
       ? intent.approval_state
       : null
   ) as Record<string, unknown> | null
+  const executionResult = (
+    intent.execution_result && typeof intent.execution_result === 'object'
+      ? intent.execution_result
+      : null
+  ) as Record<string, unknown> | null
   const status = typeof intent.status === 'string' ? intent.status : null
   const legacyStatus = typeof approvalState?.status === 'string' ? approvalState.status : null
+  const executionStatus = typeof executionResult?.status === 'string' ? executionResult.status : null
   const approvals = Array.isArray(approvalState?.approvals) ? approvalState.approvals.length : 0
   const requiredApprovals = typeof approvalState?.required_approvals === 'number'
     ? approvalState.required_approvals
@@ -21,10 +27,31 @@ function hasApprovedLiveIntent(intent: Record<string, unknown>) {
       ? approvalState.required
       : 1
 
+  if (status === 'execution_failed' || executionStatus === 'execution_failed') {
+    return false
+  }
+
   return legacyStatus === 'approved'
     || status === 'executed_preflight'
     || status === 'executed_live'
+    || executionStatus === 'executed_live'
     || approvals >= requiredApprovals
+}
+
+function extractStoredExecutionReceipt(intent: Record<string, unknown>): Record<string, unknown> | null {
+  const executionResult = (
+    intent.execution_result && typeof intent.execution_result === 'object'
+      ? intent.execution_result
+      : null
+  ) as Record<string, unknown> | null
+  const status = typeof executionResult?.status === 'string' ? executionResult.status : null
+  const receipt = (
+    executionResult?.receipt && typeof executionResult.receipt === 'object' && !Array.isArray(executionResult.receipt)
+      ? executionResult.receipt
+      : null
+  ) as Record<string, unknown> | null
+
+  return status === 'executed_live' && receipt ? receipt : null
 }
 
 function extractApprovedIntentId(intent: Record<string, unknown>): string | null {
@@ -58,6 +85,17 @@ function extractApprovedActors(intent: Record<string, unknown>): string[] {
   }
 
   return [...actors]
+}
+
+function extractLiveRequestContext(body: Record<string, unknown>): Record<string, unknown> | null {
+  const context = Object.entries(body).reduce<Record<string, unknown>>((accumulator, [key, value]) => {
+    if (value == null) return accumulator
+    if (!/^(decision_|strategy_|research_|benchmark_|governance_)/.test(key)) return accumulator
+    accumulator[key] = value
+    return accumulator
+  }, {})
+
+  return Object.keys(context).length > 0 ? context : null
 }
 
 async function parseLiveRequestBody(request: NextRequest): Promise<Record<string, unknown>> {
@@ -117,6 +155,7 @@ export async function POST(
   try {
     const body = await parseLiveRequestBody(request)
     const executionMode = resolveExecutionMode(request, body)
+    const requestContext = extractLiveRequestContext(body)
     const { run_id } = await params
     const approvedIntent = listDashboardLiveIntents(run_id, auth.user.workspace_id ?? 1)
       .find((intent) => hasApprovedLiveIntent(intent as Record<string, unknown>))
@@ -131,20 +170,31 @@ export async function POST(
       )
     }
 
-    const payload = executionMode === 'live'
-      ? executePredictionMarketRunLive({
+    let payload: Record<string, unknown> | ReturnType<typeof preparePredictionMarketRunLive>
+    if (executionMode === 'live') {
+      const storedReceipt = extractStoredExecutionReceipt(approvedIntent as Record<string, unknown>)
+      payload = storedReceipt ?? executePredictionMarketRunLive({
         runId: run_id,
         workspaceId: auth.user.workspace_id ?? 1,
         actor: auth.user.username ?? 'operator',
         approvedIntentId: extractApprovedIntentId(approvedIntent as Record<string, unknown>),
         approvedBy: extractApprovedActors(approvedIntent as Record<string, unknown>),
       })
-      : preparePredictionMarketRunLive({
+    } else {
+      payload = preparePredictionMarketRunLive({
         runId: run_id,
         workspaceId: auth.user.workspace_id ?? 1,
       })
+    }
 
-    return NextResponse.json(payload, {
+    const responsePayload = requestContext && payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? {
+          ...payload,
+          request_context: requestContext,
+        }
+      : payload
+
+    return NextResponse.json(responsePayload, {
       status: 200,
       headers: { 'X-Prediction-Markets-API': 'v1' },
     })

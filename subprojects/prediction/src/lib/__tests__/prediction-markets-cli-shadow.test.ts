@@ -124,6 +124,12 @@ describe('prediction markets CLI shadow', () => {
           execution_projection_selected_path: 'shadow',
           execution_projection_selected_path_status: 'ready',
           execution_projection_selected_path_effective_mode: 'shadow',
+          execution_projection_selected_edge_bucket: 'arbitrage_alpha',
+          execution_projection_selected_pre_trade_gate_verdict: 'pass',
+          execution_projection_selected_pre_trade_gate_summary:
+            'Hard no-trade gate pass. bucket=arbitrage_alpha gross=980bps frictions=190bps net=790bps minimum=240bps',
+          execution_projection_selected_path_net_edge_bps: 790,
+          execution_projection_selected_path_minimum_net_edge_bps: 240,
           execution_projection_verdict: 'downgraded',
           execution_projection_highest_safe_requested_mode: 'shadow',
           execution_projection_recommended_effective_mode: 'shadow',
@@ -308,6 +314,9 @@ describe('prediction markets CLI shadow', () => {
       'benchmark_state: verdict=preview_only promotion_gate_kind=preview_only ready=no evidence_level=benchmark_preview promotion_blocker_summary=out_of_sample_unproven',
     )
     expect(result.stdout).toContain('execution_projection: requested=live selected=shadow verdict=downgraded')
+    expect(result.stdout).toContain(
+      'execution_projection pre_trade: edge_bucket=arbitrage_alpha verdict=pass net=790bps minimum=240bps',
+    )
   })
 
   it('prints the benchmark gate summary with the dedicated flag', async () => {

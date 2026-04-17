@@ -7,6 +7,8 @@
     "ops": "node ./scripts/prediction-ops.cjs",
     "dashboard": "node ./scripts/prediction-dashboard.cjs",
     "dashboard:help": "node ./scripts/prediction-dashboard.cjs --help",
+    "dashboard-ui:adapter": "node ./scripts/prediction-dashboard-ui-adapter.cjs",
+    "dashboard-ui:adapter:help": "node ./scripts/prediction-dashboard-ui-adapter.cjs --help",
     "pm:help": "node ./scripts/prediction-ops.cjs --help",
     "pm:feed": "node ./scripts/prediction-ops.cjs feed",
     "pm:feed:summary": "node ./scripts/prediction-ops.cjs feed --print-summary",

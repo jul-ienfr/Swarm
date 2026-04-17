@@ -92,6 +92,11 @@ function makeRunFixture(overrides: Record<string, unknown> = {}) {
     execution_projection_selected_path: 'live',
     execution_projection_selected_path_status: 'ready',
     execution_projection_selected_path_effective_mode: 'live',
+    execution_projection_selected_edge_bucket: 'forecast_alpha',
+    execution_projection_selected_pre_trade_gate_verdict: 'pass',
+    execution_projection_selected_pre_trade_gate_summary: 'Hard no-trade gate pass. bucket=forecast_alpha gross=2300bps frictions=400bps net=1900bps minimum=800bps',
+    execution_projection_selected_path_net_edge_bps: 1900,
+    execution_projection_selected_path_minimum_net_edge_bps: 800,
     execution_projection_selected_path_reason_summary: 'selected live path is ready.',
     execution_projection_highest_safe_requested_mode: 'live',
     execution_projection_recommended_effective_mode: 'live',
@@ -132,6 +137,41 @@ function makeRunFixture(overrides: Record<string, unknown> = {}) {
     microstructure_lab: { kind: 'microstructure' },
     order_trace_audit: { kind: 'order-trace' },
     market_graph: { kind: 'graph' },
+    backtest_summary: {
+      summary: 'Backtest over 120 samples remains profitable after frictions.',
+      sample_count: 120,
+      win_rate: 0.61,
+      brier_score: 0.182,
+      log_loss: 0.491,
+      uplift_bps: 220,
+    },
+    resolved_history_summary: 'Resolved history built from 18/18 evaluation records spanning 2026-01-01T00:00:00.000Z -> 2026-04-01T00:00:00.000Z.',
+    resolved_history_source_summary: 'Resolved 18 local evaluation records from 4 stored runs.',
+    resolved_history_points: 18,
+    cost_model_summary: 'Cost model evaluated 18 resolved points; average net edge=142 bps, viable rate=0.666667.',
+    cost_model_total_points: 18,
+    cost_model_viable_point_rate: 0.666667,
+    cost_model_average_net_edge_bps: 142,
+    walk_forward_summary: {
+      summary: 'Walk-forward split is stable across 8 windows.',
+      window_count: 8,
+      win_rate: 0.58,
+      brier_score: 0.191,
+      uplift_bps: 145,
+      promotion_ready: true,
+    },
+    monte_carlo_summary: {
+      summary: 'Monte Carlo drawdowns stay within guardrails.',
+      trial_count: 1000,
+      win_rate: 0.63,
+      uplift_bps: 175,
+    },
+    paper_validation_summary: {
+      summary: 'Paper captures the same directionality as backtest.',
+      sample_count: 80,
+      win_rate: 0.59,
+      uplift_bps: 130,
+    },
     artifact_refs: [],
     artifact_readback: { run_id: 'run-1' },
     artifact_audit: { manifest_ref_count: 1, observed_ref_count: 1, canonical_ref_count: 1 },
@@ -174,6 +214,15 @@ beforeEach(() => {
     supports_trades: true,
     supported_order_types: ['limit'],
     automation_constraints: ['read-only advisory mode only'],
+    metadata: {
+      p0_a_lineage: {
+        adapter_lineage: {
+          typescript_reference: 'Polymarket/clob-client',
+          python_reference: 'Polymarket/py-clob-client',
+          canonical_gate: 'execution_projection',
+        },
+      },
+    },
   })
   mocks.getVenueFeedSurfaceContract.mockReturnValue({
     venue: 'polymarket',
@@ -190,6 +239,11 @@ beforeEach(() => {
     degraded_mode: 'normal',
     incident_flags: [],
     notes: 'healthy',
+    metadata: {
+      p0_a_lineage: {
+        canonical_gate: 'execution_projection',
+      },
+    },
   })
   mocks.getVenueStrategyContract.mockReturnValue({
     source_of_truth: 'polymarket',
@@ -284,14 +338,153 @@ describe('prediction markets dashboard models', () => {
     expect(runList.items[0]?.benchmark_state).toBe('eligible')
     expect(runList.items[0]?.benchmark_ready).toBe(true)
     expect(runList.items[0]?.selected_path).toBe('live')
+    expect(runList.items[0]?.selected_edge_bucket).toBe('forecast_alpha')
+    expect(runList.items[0]?.pre_trade_gate_verdict).toBe('pass')
+    expect(runList.items[0]?.pre_trade_gate_summary).toContain('Hard no-trade gate pass')
+    expect(runList.items[0]?.selected_path_minimum_net_edge_bps).toBe(800)
+    expect(runList.items[0]?.validation?.resolved_history?.status).toBe('ready')
+    expect(runList.items[0]?.validation?.resolved_history?.summary).toContain('Resolved 18 local evaluation records')
+    expect(runList.items[0]?.validation?.cost_model?.summary).toContain('Cost model evaluated 18 resolved points')
+    expect(runList.items[0]?.validation?.backtest?.summary).toContain('Backtest over 120 samples')
+    expect(runList.items[0]?.validation?.blockers).toEqual([])
+    expect(runList.items[0]?.validation?.blocker_summary).toBeNull()
     expect(runDetail?.benchmark.ready).toBe(true)
     expect(runDetail?.benchmark.status).toBe('eligible')
     expect(runDetail?.benchmark.gate_kind).toBe('local_benchmark')
     expect(runDetail?.benchmark.evidence_level).toBe('out_of_sample_promotion_evidence')
     expect(runDetail?.benchmark.summary).toContain('canonical blocker')
+    expect(runDetail?.validation?.resolved_history?.sample_count).toBe(18)
+    expect(runDetail?.validation?.resolved_history?.status).toBe('ready')
+    expect(runDetail?.validation?.cost_model?.uplift_bps).toBe(142)
+    expect(runDetail?.validation?.cost_model?.promotion_ready).toBe(true)
+    expect(runDetail?.validation?.walk_forward?.summary).toContain('Walk-forward split is stable')
+    expect(runDetail?.validation?.walk_forward?.promotion_ready).toBe(true)
+    expect(runDetail?.validation?.blockers).toEqual([])
+    expect(runDetail?.validation?.blocker_summary).toBeNull()
+    expect(runDetail?.validation?.operator_summary).toContain('resolved_history:Resolved 18 local evaluation records from 4 stored runs.')
+    expect(runDetail?.validation?.operator_summary).toContain('cost_model:Cost model evaluated 18 resolved points; average net edge=142 bps, viable rate=0.666667.')
     expect(runDetail?.execution.live_promotable).toBe(true)
+    expect(runDetail?.execution.selected_edge_bucket).toBe('forecast_alpha')
+    expect(runDetail?.execution.pre_trade_gate_verdict).toBe('pass')
+    expect(runDetail?.execution.pre_trade_gate_summary).toContain('Hard no-trade gate pass')
+    expect(runDetail?.execution.selected_path_net_edge_bps).toBe(1900)
+    expect(runDetail?.execution.selected_path_minimum_net_edge_bps).toBe(800)
     expect(benchmark.comparison.benchmark_gate_blocks_live).toBe(false)
     expect(benchmark.comparison.benchmark_gate_live_block_reason).toBeNull()
+  })
+
+  it('falls back to nested execution projection selection fields and raises a fail alert', async () => {
+    const {
+      buildPredictionDashboardRunDetail,
+      buildPredictionDashboardRunList,
+    } = await import('@/lib/prediction-markets/dashboard-models')
+
+    const nestedGate = {
+      gate_name: 'hard_no_trade',
+      verdict: 'fail',
+      edge_bucket: 'arbitrage_alpha',
+      net_edge_bps: 120,
+      minimum_net_edge_bps: 220,
+      summary: 'Hard no-trade gate fail. bucket=arbitrage_alpha gross=310bps frictions=190bps net=120bps minimum=220bps',
+    }
+    const nestedProjection = {
+      selected_path: 'shadow',
+      selected_edge_bucket: 'arbitrage_alpha',
+      selected_pre_trade_gate: nestedGate,
+      preflight_summary: {
+        selected_edge_bucket: 'arbitrage_alpha',
+        selected_pre_trade_gate: nestedGate,
+      },
+      projected_paths: {
+        shadow: {
+          edge_bucket: 'arbitrage_alpha',
+          pre_trade_gate: nestedGate,
+        },
+      },
+    }
+    const nestedFixture = makeRunFixture({
+      execution_projection_selected_edge_bucket: null,
+      execution_projection_selected_pre_trade_gate_verdict: null,
+      execution_projection_selected_pre_trade_gate_summary: null,
+      execution_projection_selected_path_net_edge_bps: null,
+      execution_projection_selected_path_minimum_net_edge_bps: null,
+      resolved_history_points: 4,
+      resolved_history_source_summary: 'Resolved 4 local evaluation records from 1 stored run.',
+      execution_projection: nestedProjection,
+    })
+
+    mocks.listPredictionMarketRuns.mockReturnValueOnce([nestedFixture])
+    mocks.getPredictionMarketRunDetails.mockReturnValueOnce(nestedFixture)
+
+    const runList = buildPredictionDashboardRunList(7, 'polymarket', 10)
+    const runDetail = buildPredictionDashboardRunDetail(7, 'run-1')
+
+    expect(runList.items[0]?.selected_edge_bucket).toBe('arbitrage_alpha')
+    expect(runList.items[0]?.pre_trade_gate_verdict).toBe('fail')
+    expect(runList.items[0]?.selected_path_net_edge_bps).toBe(120)
+    expect(runList.items[0]?.selected_path_minimum_net_edge_bps).toBe(220)
+    expect(runList.items[0]?.validation?.resolved_history?.status).toBe('thin')
+    expect(runList.items[0]?.validation?.blockers).toEqual([
+      'resolved history thin (4 < 12 samples)',
+    ])
+    expect(runList.items[0]?.validation?.blocker_summary).toBe('resolved history thin (4 < 12 samples)')
+    expect(runDetail?.execution.selected_edge_bucket).toBe('arbitrage_alpha')
+    expect(runDetail?.execution.pre_trade_gate_verdict).toBe('fail')
+    expect(runDetail?.execution.pre_trade_gate_summary).toContain('Hard no-trade gate fail')
+    expect(runDetail?.validation?.resolved_history?.status).toBe('thin')
+    expect(runDetail?.validation?.blockers).toEqual([
+      'resolved history thin (4 < 12 samples)',
+    ])
+    expect(runDetail?.validation?.blocker_summary).toBe('resolved history thin (4 < 12 samples)')
+    expect(runDetail?.alerts.map((alert) => alert.code)).toContain('pre_trade_gate_failed')
+  })
+
+  it('derives preview blockers when cost model and walk-forward are not promotion-ready', async () => {
+    const {
+      buildPredictionDashboardRunDetail,
+      buildPredictionDashboardRunList,
+    } = await import('@/lib/prediction-markets/dashboard-models')
+
+    const previewFixture = makeRunFixture({
+      resolved_history_points: 3,
+      resolved_history_source_summary: 'Resolved 3 local evaluation records from 1 stored run.',
+      cost_model_summary: 'Cost model still preview.',
+      cost_model_total_points: 3,
+      cost_model_viable_point_rate: 0.42,
+      cost_model_average_net_edge_bps: -12,
+      walk_forward_summary: {
+        summary: 'Walk-forward still preview.',
+        window_count: 1,
+        win_rate: 0.41,
+        uplift_bps: -8,
+        promotion_ready: false,
+      },
+    })
+
+    mocks.listPredictionMarketRuns.mockReturnValueOnce([previewFixture])
+    mocks.getPredictionMarketRunDetails.mockReturnValueOnce(previewFixture)
+
+    const runList = buildPredictionDashboardRunList(7, 'polymarket', 10)
+    const runDetail = buildPredictionDashboardRunDetail(7, 'run-1')
+
+    expect(runList.items[0]?.validation?.blockers).toEqual([
+      'resolved history thin (3 < 12 samples)',
+      'cost model viable rate 42.0% < 50.0%',
+      'cost model mean net edge -12bps <= 0bps',
+      'walk-forward only 1 window',
+    ])
+    expect(runList.items[0]?.validation?.blocker_summary).toBe(
+      'resolved history thin (3 < 12 samples); cost model viable rate 42.0% < 50.0%; cost model mean net edge -12bps <= 0bps; walk-forward only 1 window',
+    )
+    expect(runDetail?.validation?.blockers).toEqual([
+      'resolved history thin (3 < 12 samples)',
+      'cost model viable rate 42.0% < 50.0%',
+      'cost model mean net edge -12bps <= 0bps',
+      'walk-forward only 1 window',
+    ])
+    expect(runDetail?.validation?.blocker_summary).toBe(
+      'resolved history thin (3 < 12 samples); cost model viable rate 42.0% < 50.0%; cost model mean net edge -12bps <= 0bps; walk-forward only 1 window',
+    )
   })
 
   it('builds overview and venue snapshots with stable polling payloads', async () => {
@@ -306,6 +499,27 @@ describe('prediction markets dashboard models', () => {
     expect(overview.metrics.live_promotable).toBe(1)
     expect(overview.venue_snapshot.venue).toBe('polymarket')
     expect(overview.benchmark?.benchmark.ready).toBe(true)
+    expect(overview.validation?.resolved_history?.summary).toContain('Resolved 18 local evaluation records')
+    expect(overview.validation?.cost_model?.win_rate).toBeCloseTo(0.666667)
+    expect(overview.validation?.monte_carlo?.summary).toContain('Monte Carlo drawdowns')
+    expect(overview.external_integrations.source_scope).toBe('conversation_registry')
+    expect(overview.external_integrations.integration.profile_ids).toEqual(
+      expect.arrayContaining(['polymarket-clob-client', 'geomapdata-cn']),
+    )
+    expect(overview.external_integrations.runtime_batches).toMatchObject({
+      p0_a: expect.stringContaining('P0-A runtime summary'),
+      p1_a: expect.stringContaining('P1-A runtime summary'),
+      p1_b: expect.stringContaining('P1-B runtime summary'),
+      p1_c: expect.stringContaining('P1-C runtime summary'),
+      p2_b: expect.stringContaining('P2-B runtime summary'),
+      p2_c: expect.stringContaining('P2-C runtime summary'),
+    })
+    expect(overview.venue_snapshot.capabilities.metadata.p0_a_lineage.adapter_lineage).toMatchObject({
+      typescript_reference: 'Polymarket/clob-client',
+      python_reference: 'Polymarket/py-clob-client',
+      canonical_gate: 'execution_projection',
+    })
+    expect(overview.venue_snapshot.health.metadata.p0_a_lineage.canonical_gate).toBe('execution_projection')
     expect(venue.transport).toBe('polling')
     expect(venue.capabilities.venue).toBe('polymarket')
     expect(venue.health.api_status).toBe('ok')

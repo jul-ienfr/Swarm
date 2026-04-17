@@ -26,6 +26,11 @@ const OPERATOR_SUMMARY_FLAGS = [
   '--execution-pathways-summary',
   '--research-summary',
   '--benchmark-summary',
+  '--validation-summary',
+  '--approval-ticket-summary',
+  '--operator-thesis-summary',
+  '--research-pipeline-trace-summary',
+  '--live-dashboard-summary',
 ]
 
 const FEED_BOOTSTRAP_SURFACES = new Set(['markets', 'capabilities', 'health', 'feed'])
@@ -87,10 +92,10 @@ function buildSurfaceSemantics(surface) {
         default_venue_applies: false,
         execution_projection_path: 'live',
         runtime_distinction: 'execution_projection_first',
-        readiness_semantics: 'blocked_until_live_path_and_benchmark_ready',
-        promotion_semantics: 'benchmark_gated_preview_only',
+        readiness_semantics: 'blocked_until_live_path_benchmark_and_transport_ready',
+        promotion_semantics: 'benchmark_gated_governed_live_materialization',
         feed_transport_semantics: null,
-        summary: 'Live stays preflight-only, benchmark-gated, and read-only; it threads execution_readiness plus multi_venue_execution through the canonical execution_projection preview.',
+        summary: 'Live remains the canonical preflight surface for governed routing; it stays benchmark-gated by default, and real venue execution can be materialized with execution_mode=live after an approved live intent.',
       }
     case 'capabilities':
       return {

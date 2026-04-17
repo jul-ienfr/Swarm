@@ -13,10 +13,27 @@ export type ConservativePredictionMarketSizingInput = {
   signals: PredictionMarketSizingSignals
 }
 
+export type KellyCappedPredictionMarketSizingInput = ConservativePredictionMarketSizingInput & {
+  side?: 'yes' | 'no' | null
+  market_probability_yes?: number | null
+  forecast_probability_yes?: number | null
+  capital_available_usd?: number | null
+}
+
 export type ConservativePredictionMarketSizingResult = {
   base_size_usd: number
   size_usd: number
   multiplier: number
+  max_size_usd: number | null
+  conservative_cap_usd: number | null
+  kelly_cap_usd: number | null
+  effective_cap_usd: number | null
+  kelly_fraction: number | null
+  kelly_edge_bps: number | null
+  kelly_applicable: boolean
+  kelly_reason: string | null
+  market_probability_yes: number | null
+  forecast_probability_yes: number | null
   factors: {
     confidence_factor: number
     calibration_factor: number
@@ -73,11 +90,121 @@ function portfolioCorrelationFactor(portfolioCorrelation: number | null | undefi
   if (portfolioCorrelation == null) return DEFAULT_MISSING_PORTFOLIO_CORRELATION_FACTOR
 
   const normalizedCorrelation = clamp(Math.abs(portfolioCorrelation), 0, 1)
-  return clamp(1 - (0.4 * normalizedCorrelation), 0.6, 1)
+  return clamp(1 - (0.55 * normalizedCorrelation), 0.5, 1)
 }
 
 function formatPercent(value: number): string {
   return `${Math.round(value * 1000) / 10}%`
+}
+
+function roundTwo(value: number): number {
+  return Number(value.toFixed(2))
+}
+
+function normalizeProbability(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null
+  return clamp(value, 0, 1)
+}
+
+function formatKellyFraction(value: number): string {
+  return `${Math.round(value * 1000) / 10}% Kelly`
+}
+
+function computeKellyOverlay(input: KellyCappedPredictionMarketSizingInput): {
+  market_probability_yes: number | null
+  forecast_probability_yes: number | null
+  kelly_fraction: number | null
+  kelly_cap_usd: number | null
+  kelly_edge_bps: number | null
+  kelly_applicable: boolean
+  kelly_reason: string | null
+} {
+  const side = input.side ?? null
+  const marketProbabilityYes = normalizeProbability(input.market_probability_yes)
+  const forecastProbabilityYes = normalizeProbability(input.forecast_probability_yes)
+  const capitalAvailableUsd = typeof input.capital_available_usd === 'number' && Number.isFinite(input.capital_available_usd) && input.capital_available_usd > 0
+    ? input.capital_available_usd
+    : null
+
+  if (!side || marketProbabilityYes == null || forecastProbabilityYes == null || capitalAvailableUsd == null) {
+    return {
+      market_probability_yes: marketProbabilityYes,
+      forecast_probability_yes: forecastProbabilityYes,
+      kelly_fraction: null,
+      kelly_cap_usd: null,
+      kelly_edge_bps: null,
+      kelly_applicable: false,
+      kelly_reason: !side
+        ? 'Kelly overlay unavailable because no bet side was selected.'
+        : marketProbabilityYes == null || forecastProbabilityYes == null
+          ? 'Kelly overlay unavailable because forecast or market probability is missing.'
+          : 'Kelly overlay unavailable because no capital ledger is attached.',
+    }
+  }
+
+  const directionalForecastProbability = side === 'no' ? 1 - forecastProbabilityYes : forecastProbabilityYes
+  const directionalMarketProbability = side === 'no' ? 1 - marketProbabilityYes : marketProbabilityYes
+  const edge = directionalForecastProbability - directionalMarketProbability
+  const denominator = Math.max(1 - directionalMarketProbability, 0.0001)
+  const rawKellyFraction = clamp(edge / denominator, 0, 1)
+  const kellyCapUsd = roundTwo(capitalAvailableUsd * rawKellyFraction)
+
+  return {
+    market_probability_yes: marketProbabilityYes,
+    forecast_probability_yes: forecastProbabilityYes,
+    kelly_fraction: Number(rawKellyFraction.toFixed(4)),
+    kelly_cap_usd: kellyCapUsd,
+    kelly_edge_bps: Math.round(edge * 10_000),
+    kelly_applicable: rawKellyFraction > 0,
+    kelly_reason: rawKellyFraction > 0
+      ? `Kelly overlay recommends ${formatKellyFraction(rawKellyFraction)} before conservative caps.`
+      : 'Kelly overlay sees no positive edge and does not increase the stake.',
+  }
+}
+
+export function buildKellyCappedPredictionMarketSizing(
+  input: KellyCappedPredictionMarketSizingInput,
+): ConservativePredictionMarketSizingResult {
+  const conservative = buildConservativePredictionMarketSizing(input)
+  const overlay = computeKellyOverlay(input)
+  const conservativeCapUsd = conservative.max_size_usd
+  const effectiveCapUsd = overlay.kelly_cap_usd == null
+    ? conservativeCapUsd
+    : overlay.kelly_cap_usd > 0
+      ? Math.min(conservativeCapUsd, overlay.kelly_cap_usd)
+      : conservativeCapUsd
+
+  const isKellyBinding = overlay.kelly_cap_usd != null && overlay.kelly_cap_usd > 0 && effectiveCapUsd < conservative.size_usd
+  const size_usd = isKellyBinding ? roundTwo(effectiveCapUsd) : conservative.size_usd
+  const multiplier = roundTwo(size_usd / conservative.base_size_usd)
+
+  const notes = [
+    ...conservative.notes,
+    overlay.kelly_reason,
+    overlay.kelly_fraction != null
+      ? `Kelly overlay: market=${overlay.market_probability_yes == null ? 'n/a' : formatPercent(overlay.market_probability_yes)} forecast=${overlay.forecast_probability_yes == null ? 'n/a' : formatPercent(overlay.forecast_probability_yes)} edge=${overlay.kelly_edge_bps ?? 0}bps cap=${overlay.kelly_cap_usd?.toFixed(2) ?? 'n/a'} USD.`
+      : null,
+    isKellyBinding
+      ? `Kelly overlay caps the recommended size to ${size_usd.toFixed(2)} USD from ${conservative.size_usd.toFixed(2)} USD.`
+      : null,
+  ].filter((note): note is string => typeof note === 'string' && note.trim().length > 0)
+
+  return {
+    ...conservative,
+    size_usd,
+    multiplier,
+    max_size_usd: conservative.max_size_usd,
+    conservative_cap_usd: conservativeCapUsd,
+    kelly_cap_usd: overlay.kelly_cap_usd,
+    effective_cap_usd: effectiveCapUsd,
+    kelly_fraction: overlay.kelly_fraction,
+    kelly_edge_bps: overlay.kelly_edge_bps,
+    kelly_applicable: overlay.kelly_applicable,
+    kelly_reason: overlay.kelly_reason,
+    market_probability_yes: overlay.market_probability_yes,
+    forecast_probability_yes: overlay.forecast_probability_yes,
+    notes,
+  }
 }
 
 export function buildConservativePredictionMarketSizing(
@@ -147,6 +274,16 @@ export function buildConservativePredictionMarketSizing(
     base_size_usd: Number(baseSizeUsd.toFixed(2)),
     size_usd,
     multiplier: Number(multiplier.toFixed(4)),
+    max_size_usd: Number.isFinite(maxSizeUsd) ? Number(maxSizeUsd.toFixed(2)) : null,
+    conservative_cap_usd: Number.isFinite(maxSizeUsd) ? Number(maxSizeUsd.toFixed(2)) : null,
+    kelly_cap_usd: null,
+    effective_cap_usd: Number(clampedSizeUsd.toFixed(2)),
+    kelly_fraction: null,
+    kelly_edge_bps: null,
+    kelly_applicable: false,
+    kelly_reason: null,
+    market_probability_yes: null,
+    forecast_probability_yes: null,
     factors: {
       confidence_factor: Number(confidence_factor.toFixed(4)),
       calibration_factor: Number(calibration_factor.toFixed(4)),

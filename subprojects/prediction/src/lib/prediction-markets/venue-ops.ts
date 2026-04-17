@@ -5,6 +5,7 @@ import {
 } from '@/lib/prediction-markets/kalshi'
 import {
   getPolymarketDefaultBudgets,
+  getPolymarketVenueP0ALineageStatus,
   getPolymarketVenueCapabilities,
   getPolymarketVenueHealthSnapshot,
 } from '@/lib/prediction-markets/polymarket'
@@ -59,6 +60,7 @@ export type VenueHealthSnapshot = {
   read_only: true
   configured_endpoints: string[]
   reasons: string[]
+  metadata?: Record<string, unknown>
 }
 
 export type VenueBudgets = {
@@ -137,6 +139,9 @@ export function getVenueCapabilitiesContract(venue: PredictionMarketVenueId) {
   const supportsPaperMode = venue === 'kalshi'
   const tradeable = capabilities.venue_type === 'execution-equivalent'
   const manualReviewRequired = true
+  const metadata = venue === 'polymarket'
+    ? { p0_a_lineage: getPolymarketVenueP0ALineageStatus() }
+    : {}
 
   return venueCapabilitiesSchema.parse({
     venue: capabilities.venue,
@@ -162,12 +167,16 @@ export function getVenueCapabilitiesContract(venue: PredictionMarketVenueId) {
     automation_constraints: supportsExecution
       ? []
       : ['read-only advisory mode only'],
+    metadata,
   })
 }
 
 export function getVenueHealthSnapshotContract(venue: PredictionMarketVenueId) {
   const health = getVenueHealthSnapshot(venue)
   const degraded = health.status !== 'ready' || health.reasons.length > 0
+  const metadata = health.metadata && typeof health.metadata === 'object'
+    ? health.metadata
+    : {}
 
   return venueHealthSnapshotSchema.parse({
     venue: health.venue,
@@ -179,6 +188,7 @@ export function getVenueHealthSnapshotContract(venue: PredictionMarketVenueId) {
     degraded_mode: degraded,
     incident_flags: health.reasons,
     notes: health.configured_endpoints.join(', '),
+    metadata,
   })
 }
 
@@ -202,6 +212,7 @@ export function getVenueFeedSurfaceContract(venue: PredictionMarketVenueId): Mar
   const sourceHierarchy = strategy.source_hierarchy
   const communityReference = strategy.community_reference
   const websocketSummary = 'WebSocket market/user feeds and RTDS are operator-bound surfaces, not auto-connected live transports.'
+  const p0a = venue === 'polymarket' ? getPolymarketVenueP0ALineageStatus() : null
   const apiAccess = [
     `source_of_truth:${strategy.source_of_truth}`,
     `community_reference:${communityReference.source}`,
@@ -301,6 +312,7 @@ export function getVenueFeedSurfaceContract(venue: PredictionMarketVenueId): Mar
       market_websocket_status: 'operator_bound',
       user_feed_websocket_status: 'operator_bound',
       rtds_status: 'operator_bound',
+      p0_a_lineage: p0a,
     },
   })
 }

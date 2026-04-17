@@ -30,11 +30,62 @@ function makeResearchHints() {
     research_promotion_gate_kind: 'preview_only',
     research_benchmark_gate_blockers: ['out_of_sample_unproven'],
     research_benchmark_gate_reasons: ['out_of_sample_unproven'],
+    approval_ticket: {
+      ticket_id: 'ticket-live-001',
+      ticket_kind: 'approval_trade_ticket',
+      workflow_stage: 'approved_trade',
+      market_id: 'run-live-001-market',
+      venue: 'polymarket',
+      summary: 'Approval ticket for governed live execution.',
+      recommendation: 'bet',
+      side: 'yes',
+      size_usd: 20,
+      limit_price: 0.46,
+      approval_state: {
+        status: 'approved',
+        requested_by: 'operator-a',
+        requested_at: '2026-04-08T00:00:00.000Z',
+        required_approvals: 2,
+        current: 2,
+        approvers: ['reviewer-a', 'reviewer-b'],
+        rejections: [],
+        approved_at: '2026-04-08T00:00:03.000Z',
+        summary: 'Approved for live execution.',
+      },
+      trade_intent_preview: {
+        size_usd: 20,
+        limit_price: 0.46,
+        time_in_force: 'ioc',
+        max_slippage_bps: 15,
+      },
+    },
+    operator_thesis: {
+      probability_yes: 0.67,
+      confidence: 0.71,
+      source: 'llm-superforecaster',
+      rationale: 'Committee and retrieval traces remain modestly supportive.',
+      summary: 'Operator thesis remains yes-leaning with manageable execution friction.',
+    },
+    research_pipeline_trace: {
+      trace_id: 'trace-live-001',
+      pipeline_id: 'research-pipeline-runtime',
+      pipeline_version: 'v3',
+      model_family: 'llm-superforecaster/oracle',
+      stage_count: 3,
+      stages: [
+        { stage_id: 'ingestion', stage_kind: 'ingestion', status: 'complete' },
+        { stage_id: 'retrieval', stage_kind: 'retrieval', status: 'complete' },
+        { stage_id: 'forecast', stage_kind: 'forecast', status: 'complete' },
+      ],
+      summary: 'Research pipeline trace is stable and ready for operator review.',
+    },
+    live_dashboard_summary: 'Live dashboard shows governed live execution as ready.',
+    dashboard_summary: 'Dashboard snapshot remains aligned with the live route.',
   }
 }
 
 const liveSurfaceSummary =
-  'Live surface is ready using execution_projection.selected_path=live; it remains preflight-only and threads execution_readiness plus multi_venue_execution through the canonical execution_projection preview.'
+  'Live surface is ready using execution_projection.selected_path=live; it remains the canonical preflight surface for governed live routing, and real venue execution is available via execution_mode=live after an approved live intent.'
 
 describe('prediction markets CLI live', () => {
   let server: ReturnType<typeof createServer>
@@ -56,6 +107,48 @@ describe('prediction markets CLI live', () => {
         })
         lastRequestBody = body ? JSON.parse(body) as Record<string, unknown> : null
         res.writeHead(200, { 'content-type': 'application/json' })
+        if (lastRequestBody?.execution_mode === 'live') {
+          res.end(JSON.stringify({
+            gate_name: 'execution_projection_live_materialization',
+            execution_mode: 'live',
+            source_run_id: 'run-live-001',
+            materialized_run_id: 'run-live-001__live_abcd1234',
+            approved_intent_id: 'intent-live-001',
+            approved_by: ['reviewer-a', 'reviewer-b'],
+            transport_mode: 'live',
+            performed_live: true,
+            live_execution_status: 'filled',
+            receipt_summary: 'Live execution materialized from run-live-001 as run-live-001__live_abcd1234.',
+            preflight_surface: {
+              gate_name: 'execution_projection_live',
+              preflight_only: true,
+              run_id: 'run-live-001',
+              workspace_id: 1,
+              surface_mode: 'live',
+              live_status: 'ready',
+              live_blocking_reasons: [],
+              summary: liveSurfaceSummary,
+              ...makeResearchHints(),
+              execution_projection_requested_path: 'live',
+              execution_projection_selected_path: 'live',
+              live_trade_intent_preview: {
+                size_usd: 20,
+              },
+              live_trade_intent_preview_source: 'canonical_trade_intent_preview',
+              live_path: {
+                path: 'live',
+                status: 'ready',
+                effective_mode: 'live',
+              },
+            },
+            order_trace_audit: {
+              transport_mode: 'live',
+              live_submission_performed: true,
+              live_execution_status: 'filled',
+            },
+          }))
+          return
+        }
         res.end(JSON.stringify({
           gate_name: 'execution_projection_live',
           preflight_only: true,
@@ -124,6 +217,12 @@ describe('prediction markets CLI live', () => {
           execution_projection_selected_path: 'live',
           execution_projection_selected_path_status: 'ready',
           execution_projection_selected_path_effective_mode: 'live',
+          execution_projection_selected_edge_bucket: 'execution_alpha',
+          execution_projection_selected_pre_trade_gate_verdict: 'pass',
+          execution_projection_selected_pre_trade_gate_summary:
+            'Hard no-trade gate pass. bucket=execution_alpha gross=1220bps frictions=180bps net=1040bps minimum=280bps',
+          execution_projection_selected_path_net_edge_bps: 1040,
+          execution_projection_selected_path_minimum_net_edge_bps: 280,
           execution_projection_verdict: 'allowed',
           execution_projection_highest_safe_requested_mode: 'live',
           execution_projection_recommended_effective_mode: 'live',
@@ -263,6 +362,10 @@ describe('prediction markets CLI live', () => {
         '--run-id',
         'run-live-001',
         '--execution-pathways-summary',
+        '--approval-ticket-summary',
+        '--operator-thesis-summary',
+        '--research-pipeline-trace-summary',
+        '--live-dashboard-summary',
         '--url',
         baseUrl,
       ],
@@ -280,6 +383,10 @@ describe('prediction markets CLI live', () => {
     expect(result.stdout).toContain('live_surface: status=ready gate=execution_projection_live preflight=yes run_id=run-live-001 requested=live path_status=ready effective_mode=live selected=live research_mode=research_driven research_origin=research_driven blockers=0 size=20')
     expect(result.stdout).toContain('source=canonical_trade_intent_preview')
     expect(result.stdout).toContain(`summary="${liveSurfaceSummary}"`)
+    expect(result.stdout).toContain('approval_ticket: status=approved workflow=approved_trade ticket=ticket-live-001 market=run-live-001-market venue=polymarket recommendation=')
+    expect(result.stdout).toContain('operator_thesis: probability=0.67 confidence=0.71 source=llm-superforecaster')
+    expect(result.stdout).toContain('research_pipeline_trace: trace=trace-live-001 pipeline=research-pipeline-runtime v=v3 model=llm-superforecaster/oracle stages=3 kinds=ingestion|retrieval|forecast')
+    expect(result.stdout).toContain('live_dashboard_summary: live="Live dashboard shows governed live execution as ready." dashboard="Dashboard snapshot remains aligned with the live route."')
     expect(result.stdout).toContain(
       'research: mode=research_driven pipeline=research-pipeline-runtime v=v3 forecasters=2 weighted=0.67 coverage=0.83 compare=aggregate abstention=structured-abstention-v1 blocks=no forecast=0.69 summary="Preferred mode: aggregate."',
     )
@@ -294,6 +401,9 @@ describe('prediction markets CLI live', () => {
       'benchmark_state: verdict=preview_only promotion_gate_kind=preview_only ready=no evidence_level=benchmark_preview promotion_blocker_summary=out_of_sample_unproven',
     )
     expect(result.stdout).toContain('execution_projection: requested=live selected=live verdict=allowed')
+    expect(result.stdout).toContain(
+      'execution_projection pre_trade: edge_bucket=execution_alpha verdict=pass net=1040bps minimum=280bps',
+    )
     expect(result.stdout).toContain('live:ready')
   })
 
@@ -333,7 +443,7 @@ describe('prediction markets CLI live', () => {
   it('sends execution_mode=live when requested explicitly', async () => {
     lastRequestBody = null
 
-    await execFileAsync(
+    const result = await execFileAsync(
       process.execPath,
       [
         CLI,
@@ -343,7 +453,6 @@ describe('prediction markets CLI live', () => {
         'run-live-001',
         '--execution-mode',
         'live',
-        '--json',
         '--url',
         baseUrl,
       ],
@@ -360,6 +469,12 @@ describe('prediction markets CLI live', () => {
       run_id: 'run-live-001',
       execution_mode: 'live',
     })
+    expect(result.stdout).toContain(
+      'live_receipt: source_run=run-live-001 materialized_run=run-live-001__live_abcd1234 intent=intent-live-001 approvers=2 transport=live performed_live=yes status=filled',
+    )
+    expect(result.stdout).toContain(
+      'live_receipt_summary: summary="Live execution materialized from run-live-001 as run-live-001__live_abcd1234."',
+    )
   })
 
   it('returns live_status under data in json mode', async () => {

@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   listPredictionMarketVenues: vi.fn(),
   evaluatePredictionMarketCompliance: vi.fn(),
   evaluatePredictionMarketRuntimeGuard: vi.fn(),
+  runPredictionMarketTimesFMSidecar: vi.fn(),
+  resolvePredictionMarketEvaluationHistory: vi.fn(),
+  extractForecastEvaluationHistoryFromArtifacts: vi.fn(() => []),
 }))
 
 vi.mock('@/lib/prediction-markets/polymarket', () => ({
@@ -64,11 +67,27 @@ vi.mock('@/lib/prediction-markets/runtime-guard', () => ({
   evaluatePredictionMarketRuntimeGuard: mocks.evaluatePredictionMarketRuntimeGuard,
 }))
 
+vi.mock('@/lib/prediction-markets/timesfm', async () => {
+  const actual = await vi.importActual('@/lib/prediction-markets/timesfm') as typeof import('@/lib/prediction-markets/timesfm')
+
+  return {
+    ...actual,
+    runPredictionMarketTimesFMSidecar: mocks.runPredictionMarketTimesFMSidecar,
+  }
+})
+
+vi.mock('@/lib/prediction-markets/evaluation-history-source', () => ({
+  resolvePredictionMarketEvaluationHistory: mocks.resolvePredictionMarketEvaluationHistory,
+  extractForecastEvaluationHistoryFromArtifacts: mocks.extractForecastEvaluationHistoryFromArtifacts,
+}))
+
 import {
   advisePredictionMarket,
   listPredictionMarketRuns as listPredictionMarketRunsService,
   replayPredictionMarketRun,
+  buildStrategyExecutionIntentArtifacts,
 } from '@/lib/prediction-markets/service'
+import { resetPredictionMarketResearchMemoryRuntimeForTests } from '@/lib/prediction-markets/memory/runtime'
 import {
   decisionPacketSchema,
   evidencePacketSchema,
@@ -147,6 +166,60 @@ function makeSnapshot(overrides: Partial<MarketSnapshot> = {}): MarketSnapshot {
     ],
     ...overrides,
   })
+}
+
+function makeTimesFMSidecar(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: 'v1',
+    sidecar_name: 'timesfm_sidecar',
+    run_id: 'run-timesfm',
+    market_id: 'service-hardening-market',
+    venue: 'polymarket',
+    question: 'Will the service hardening test stay stable?',
+    requested_mode: 'auto',
+    effective_mode: 'auto',
+    requested_lanes: ['microstructure', 'event_probability'],
+    selected_lane: 'microstructure',
+    generated_at: '2026-04-08T00:00:00.000Z',
+    health: {
+      healthy: true,
+      status: 'healthy',
+      backend: 'fixture',
+      dependency_status: 'fixture_backend',
+      issues: [],
+      summary: 'fixture backend ready',
+    },
+    vendor: {
+      source: 'master_snapshot',
+    },
+    lanes: {
+      microstructure: {
+        lane: 'microstructure',
+        status: 'ready',
+        eligible: true,
+        influences_research_aggregate: true,
+        comparator_id: 'candidate_timesfm_microstructure',
+        comparator_kind: 'candidate_model',
+        basis: 'timesfm_microstructure',
+        model_family: 'timesfm-2.5',
+        pipeline_id: 'timesfm-master-snapshot',
+        pipeline_version: 'd720daa67865',
+        probability_yes: 0.56,
+        confidence: 0.62,
+        probability_band: { low: 0.5, center: 0.56, high: 0.62 },
+        quantiles: { p10: 0.5, p50: 0.56, p90: 0.62 },
+        horizon: 24,
+        summary: 'microstructure lane ready',
+        rationale: 'fixture backend forecast',
+        reasons: [],
+        source_refs: ['commit:d720daa6786539c2566a44464fbda1019c0a82c0'],
+        metadata: {},
+      },
+    },
+    summary: 'TimesFM ready',
+    metadata: {},
+    ...overrides,
+  }
 }
 
 function makeDecisionPacket() {
@@ -306,6 +379,9 @@ describe('prediction markets service hardening', () => {
     mocks.listPredictionMarketVenues.mockReset()
     mocks.evaluatePredictionMarketCompliance.mockReset()
     mocks.evaluatePredictionMarketRuntimeGuard.mockReset()
+    mocks.runPredictionMarketTimesFMSidecar.mockReset()
+    mocks.resolvePredictionMarketEvaluationHistory.mockReset()
+    mocks.extractForecastEvaluationHistoryFromArtifacts.mockReset()
 
     mocks.computeConfigHash.mockImplementation(() => 'cfg-hash')
     mocks.createRun.mockImplementation((run) => run)
@@ -447,6 +523,17 @@ describe('prediction markets service hardening', () => {
       summary: 'Compliance degraded for service hardening test.',
       effective_mode: 'discovery',
     })
+    mocks.resolvePredictionMarketEvaluationHistory.mockReturnValue({
+      evaluation_history: [],
+      source: 'none',
+      source_summary: 'No local resolved history was available from stored runs.',
+      considered_runs: 0,
+      used_runs: 0,
+      same_market_records: 0,
+      same_category_records: 0,
+      same_venue_records: 0,
+    })
+    mocks.extractForecastEvaluationHistoryFromArtifacts.mockReturnValue([])
     mocks.persistPredictionMarketExecution.mockImplementation(({ runId, sourceRunId, venue, mode, snapshot, recommendation }: any) => ({
       artifactRefs: [
         { artifact_id: `${runId}:run_manifest`, artifact_type: 'run_manifest', sha256: 'sha-run-manifest' },
@@ -473,6 +560,7 @@ describe('prediction markets service hardening', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    resetPredictionMarketResearchMemoryRuntimeForTests()
   })
 
   it('returns a stable advise payload when research is absent and cross-venue discovery fails best-effort', async () => {
@@ -645,6 +733,123 @@ describe('prediction markets service hardening', () => {
     expect(mocks.updateRun).toHaveBeenCalled()
   })
 
+  it('enriches maker spread capture previews with bounded inventory, adverse selection, and quote transport summaries', () => {
+    const snapshot = marketSnapshotSchema.parse({
+      ...structuredClone(makeSnapshot()),
+      captured_at: '2026-04-07T23:59:34.000Z',
+      book: {
+        ...structuredClone(makeSnapshot().book),
+        fetched_at: '2026-04-07T23:59:34.000Z',
+      },
+    })
+    const makerCandidate = {
+      kind: 'maker_spread_capture',
+      summary: 'Maker spread capture candidate with bounded inventory.',
+      related_market_ids: [],
+      metrics: {
+        spread_bps: 200,
+        quote_age_ms: 26_000,
+        maker_quote_freshness_budget_ms: 30_000,
+        maker_quote_state: 'viable',
+        quote_freshness_score: 0.1333,
+        liquidity_usd: 90_000,
+      },
+      metadata: {
+        maker_quote_freshness_budget_ms: 30_000,
+        maker_quote_state: 'viable',
+        quote_freshness_score: 0.1333,
+      },
+    } as any
+    const makerDiagnostics = {
+      inventory_summary: 'inventory: preview size 25.00 USD; liquidity 90,000.00 USD; depth near touch 800.00 USD; quote state viable',
+      adverse_selection_summary: 'adverse selection: spread 200 bps; freshness score 0.13; quote age 26000 ms / budget 30000 ms; freshness state fresh; latency state fresh',
+      quote_transport_summary: 'quote transport: orderbook_snapshot; fetched_at 2026-04-07T23:59:34.000Z; source refs 2; observed age 26000 ms',
+      blockers: ['quote_transport_near_freshness_limit'],
+      risk_caps: [
+        'recommended_size_usd:25.00',
+        'max_slippage_bps:50',
+        'quote_freshness_budget_ms:30000',
+        'quote_age_ms:26000',
+      ],
+    }
+
+    const artifacts = buildStrategyExecutionIntentArtifacts({
+      runId: 'source-run',
+      snapshot,
+      forecast: forecastPacketSchema.parse({
+        market_id: snapshot.market.market_id,
+        venue: snapshot.venue,
+        basis: 'manual_thesis',
+        probability_yes: 0.62,
+        confidence: 0.56,
+        rationale: 'Maker spread capture research preview.',
+        evidence_refs: [],
+        produced_at: '2026-04-08T00:00:00.000Z',
+      }),
+      recommendation: marketRecommendationPacketSchema.parse({
+        market_id: snapshot.market.market_id,
+        venue: snapshot.venue,
+        action: 'bet',
+        side: 'yes',
+        confidence: 0.56,
+        fair_value_yes: 0.62,
+        market_price_yes: 0.5,
+        market_bid_yes: 0.49,
+        market_ask_yes: 0.51,
+        edge_bps: 1200,
+        spread_bps: 200,
+        reasons: ['Maker spread capture bounded preview.'],
+        risk_flags: [],
+        produced_at: '2026-04-08T00:00:00.000Z',
+      }),
+      strategyProfile: 'hybrid',
+      primaryCandidate: makerCandidate,
+      strategySummary: 'maker spread capture strategy decision',
+      shadowSummary: {
+        schema_version: '1.0.0',
+        shadow_id: 'source-run:strategy-shadow',
+        run_id: 'source-run',
+        venue: snapshot.venue,
+        market_id: snapshot.market.market_id,
+        strategy_profile: 'hybrid',
+        strategy_family: 'maker_spread_capture',
+        candidate_count: 1,
+        decision_count: 1,
+        disagreement_count: 0,
+        alignment_rate: 1,
+        summary: 'Shadow summary for maker spread capture.',
+        metadata: {},
+      } as any,
+      makerSpreadCaptureDiagnostics: makerDiagnostics,
+    })
+
+    expect(artifacts.quote_pair_intent_preview).toMatchObject({
+      preview_kind: 'quote_pair',
+      strategy_family: 'maker_spread_capture',
+      summary: expect.stringContaining('inventory: preview size'),
+      metadata: expect.objectContaining({
+        maker_spread_capture_inventory_summary: expect.stringContaining('inventory: preview size'),
+        maker_spread_capture_adverse_selection_summary: expect.stringContaining('adverse selection:'),
+        maker_spread_capture_quote_transport_summary: expect.stringContaining('quote transport:'),
+        maker_spread_capture_blockers: expect.arrayContaining(['quote_transport_near_freshness_limit']),
+        maker_spread_capture_risk_caps: expect.arrayContaining([
+          expect.stringMatching(/^recommended_size_usd:/),
+          expect.stringMatching(/^max_slippage_bps:/),
+          expect.stringMatching(/^quote_freshness_budget_ms:/),
+        ]),
+      }),
+    })
+    expect(artifacts.maker_spread_capture_inventory_summary).toContain('inventory: preview size')
+    expect(artifacts.maker_spread_capture_adverse_selection_summary).toContain('adverse selection:')
+    expect(artifacts.maker_spread_capture_quote_transport_summary).toContain('quote transport:')
+    expect(artifacts.maker_spread_capture_blockers).toContain('quote_transport_near_freshness_limit')
+    expect(artifacts.maker_spread_capture_risk_caps).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^recommended_size_usd:/),
+      expect.stringMatching(/^max_slippage_bps:/),
+      expect.stringMatching(/^quote_freshness_budget_ms:/),
+    ]))
+  })
+
   it('keeps benchmark summaries canonical in listPredictionMarketRuns when runtime hints carry conflicting research aliases', () => {
     const snapshot = makeSnapshot()
     const stored = makeStoredRunDetails('run-list-benchmark-001', snapshot)
@@ -731,6 +936,297 @@ describe('prediction markets service hardening', () => {
       benchmark_gate_live_block_reason: null,
       research_benchmark_gate_summary: 'benchmark gate: canonical promotion',
       research_benchmark_promotion_ready: true,
+    })
+  })
+
+  it('hydrates validation summaries from resolved history, cost model, and walk-forward artifacts in listPredictionMarketRuns', () => {
+    const snapshot = makeSnapshot()
+    const stored = makeStoredRunDetails('run-list-validation-001', snapshot)
+    const manifest = stored.artifacts.find((artifact) => artifact.artifact_type === 'run_manifest')?.payload
+    const storedSummary = {
+      ...structuredClone(stored.summary),
+      artifact_refs: [
+        { artifact_id: 'run-list-validation-001:run_manifest', artifact_type: 'run_manifest', sha256: 'sha-run-manifest' },
+        { artifact_id: 'run-list-validation-001:resolved_history', artifact_type: 'resolved_history', sha256: 'sha-resolved-history' },
+        { artifact_id: 'run-list-validation-001:cost_model_report', artifact_type: 'cost_model_report', sha256: 'sha-cost-model' },
+        { artifact_id: 'run-list-validation-001:walk_forward_report', artifact_type: 'walk_forward_report', sha256: 'sha-walk-forward' },
+      ],
+      manifest,
+    } as never
+    const storedDetails = {
+      ...structuredClone(stored),
+      artifacts: [
+        ...structuredClone(stored.artifacts),
+        {
+          artifact_type: 'resolved_history',
+          payload: {
+            artifact_kind: 'resolved_history',
+            summary: 'Resolved history built from 18/18 evaluation records spanning 2026-01-01T00:00:00.000Z -> 2026-04-01T00:00:00.000Z.',
+            resolved_records: 18,
+            source_summary: 'Resolved 18 local evaluation records from 4 stored runs.',
+            first_cutoff_at: '2026-01-01T00:00:00.000Z',
+            last_cutoff_at: '2026-04-01T00:00:00.000Z',
+          },
+        },
+        {
+          artifact_type: 'cost_model_report',
+          payload: {
+            artifact_kind: 'cost_model_report',
+            summary: 'Cost model evaluated 18 resolved points; average net edge=142 bps, viable rate=0.666667.',
+            total_points: 18,
+            viable_point_count: 12,
+            viable_point_rate: 0.666667,
+            average_cost_bps: 39,
+            average_net_edge_bps: 142,
+          },
+        },
+        {
+          artifact_type: 'walk_forward_report',
+          payload: {
+            artifact_kind: 'walk_forward_report',
+            summary: 'Walk-forward ran 5 windows; mean brier improvement=0.015, mean net edge=142 bps.',
+            total_points: 18,
+            total_windows: 5,
+            stable_window_rate: 0.8,
+            mean_calibrated_brier_score: 0.166,
+            mean_calibrated_log_loss: 0.421,
+            mean_brier_improvement: 0.015,
+            mean_log_loss_improvement: 0.022,
+            mean_net_edge_bps: 142,
+            promotion_ready: true,
+            notes: ['stable_windows', 'net_edge_positive'],
+          },
+        },
+      ],
+    } as never
+
+    mocks.listPredictionMarketRuns.mockReturnValue([storedSummary])
+    mocks.getStoredPredictionMarketRunDetails.mockReturnValue(storedDetails)
+
+    const runs = listPredictionMarketRunsService({
+      workspaceId: 1,
+      venue: 'polymarket',
+      recommendation: undefined,
+      limit: 10,
+    })
+
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({
+      run_id: 'run-list-validation-001',
+      resolved_history_points: 18,
+      resolved_history_source_summary: 'Resolved 18 local evaluation records from 4 stored runs.',
+      cost_model_total_points: 18,
+      cost_model_average_net_edge_bps: 142,
+      walk_forward_total_points: 18,
+      walk_forward_windows: 5,
+      walk_forward_stable_window_rate: 0.8,
+      walk_forward_mean_brier_improvement: 0.015,
+      walk_forward_mean_log_loss_improvement: 0.022,
+      walk_forward_mean_net_edge_bps: 142,
+      walk_forward_promotion_ready: true,
+      walk_forward_summary: {
+        summary: 'Walk-forward ran 5 windows; mean brier improvement=0.015, mean net edge=142 bps.',
+        sample_count: 18,
+        window_count: 5,
+        win_rate: 0.8,
+        brier_score: 0.166,
+        log_loss: 0.421,
+        uplift_bps: 142,
+        promotion_ready: true,
+        notes: ['stable_windows', 'net_edge_positive'],
+      },
+    })
+  })
+
+  it('records the research pipeline trace in the runtime memory adapter when research is present', async () => {
+    const snapshot = makeSnapshot()
+
+    mocks.buildPolymarketSnapshot.mockResolvedValue(snapshot)
+    mocks.listKalshiMarkets.mockRejectedValue(new Error('kalshi discovery offline'))
+
+    const result = await advisePredictionMarket({
+      venue: 'polymarket',
+      market_id: snapshot.market.market_id,
+      research_signals: [
+        {
+          signal_type: 'manual_note',
+          headline: 'Desk thesis',
+          note: 'Research-driven deep mode keeps the forecast lane active.',
+          thesis_probability: 0.63,
+          thesis_rationale: 'Desk evidence points to a modest yes edge.',
+          captured_at: '2026-04-08T10:00:00.000Z',
+          tags: ['desk', 'deep'],
+          stance: 'supportive',
+        },
+      ],
+      workspaceId: 1,
+      actor: 'operator',
+    })
+
+    expect(result.research_memory).toMatchObject({
+      provider_kind: 'memory',
+      subject_id: `polymarket:${snapshot.market.market_id}:polymarket-research-pipeline`,
+    })
+    expect(result.research_sidecar?.synthesis.pipeline_trace.trace_id).toBeTruthy()
+  })
+
+  it('hydrates resolved history artifacts from the automatic local history source', async () => {
+    const snapshot = makeSnapshot({
+      market: makeDescriptor({
+        market_id: 'BTC / Jun 2026',
+        slug: 'btc-jun-2026',
+        question: 'Will BTC finish June 2026 above 100k?',
+      }),
+    })
+    mocks.buildPolymarketSnapshot.mockResolvedValue(snapshot)
+    mocks.resolvePredictionMarketEvaluationHistory.mockReturnValue({
+      evaluation_history: [
+        {
+          evaluation_id: 'eval-001',
+          question_id: 'question-001',
+          market_id: 'BTC / Jun 2026',
+          venue: 'polymarket',
+          cutoff_at: '2026-04-01T00:00:00.000Z',
+          forecast_probability: 0.72,
+          market_baseline_probability: 0.61,
+          resolved_outcome: true,
+          brier_score: 0.0784,
+          log_loss: 0.328504,
+          ece_bucket: '60_80',
+          abstain_flag: false,
+          basis: 'manual_thesis',
+          comparator_id: 'candidate_manual_thesis',
+          comparator_kind: 'candidate_model',
+          comparator_role: 'candidate',
+          pipeline_id: 'forecast-market',
+          pipeline_version: 'baseline-v0',
+        },
+        {
+          evaluation_id: 'eval-002',
+          question_id: 'question-002',
+          market_id: 'ETH / Jun 2026',
+          venue: 'polymarket',
+          cutoff_at: '2026-04-02T00:00:00.000Z',
+          forecast_probability: 0.68,
+          market_baseline_probability: 0.57,
+          resolved_outcome: true,
+          brier_score: 0.1024,
+          log_loss: 0.385662,
+          ece_bucket: '60_80',
+          abstain_flag: false,
+          basis: 'manual_thesis',
+          comparator_id: 'candidate_manual_thesis',
+          comparator_kind: 'candidate_model',
+          comparator_role: 'candidate',
+          pipeline_id: 'forecast-market',
+          pipeline_version: 'baseline-v0',
+        },
+      ],
+      source: 'stored_runs',
+      source_summary: 'Resolved 2 local evaluation records from 1 stored run (same_category=2).',
+      considered_runs: 1,
+      used_runs: 1,
+      same_market_records: 0,
+      same_category_records: 2,
+      same_venue_records: 0,
+    })
+
+    await advisePredictionMarket({
+      workspaceId: 1,
+      venue: 'polymarket',
+      market_id: 'BTC / Jun 2026',
+      actor: 'hardening-test',
+    })
+
+    const persistCall = mocks.persistPredictionMarketExecution.mock.calls[0]?.[0]
+    expect(persistCall?.resolvedHistory).toMatchObject({
+      artifact_kind: 'resolved_history',
+      resolved_records: 2,
+      source_summary: 'Resolved 2 local evaluation records from 1 stored run (same_category=2).',
+    })
+    expect(Array.isArray(persistCall?.resolvedHistory?.points)).toBe(true)
+    expect(persistCall?.resolvedHistory?.points).toHaveLength(2)
+    expect(mocks.computeConfigHash.mock.calls.some((call) => {
+      const value = call.at(0)
+      return (
+        value != null
+        && typeof value === 'object'
+        && 'evaluation_history_source' in value
+        && (value as Record<string, unknown>).evaluation_history_source === 'stored_runs'
+      )
+    })).toBe(true)
+  })
+
+  it('persists TimesFM sidecar artifacts on predict_deep requests', async () => {
+    const snapshot = makeSnapshot({
+      history: Array.from({ length: 24 }, (_, index) => ({
+        timestamp: 1712534400 + (index * 3600),
+        price: Number((0.45 + (index * 0.004)).toFixed(4)),
+      })),
+    })
+    mocks.buildPolymarketSnapshot.mockResolvedValue(snapshot)
+    mocks.runPredictionMarketTimesFMSidecar.mockReturnValue(makeTimesFMSidecar({
+      market_id: snapshot.market.market_id,
+      venue: snapshot.venue,
+      question: snapshot.market.question,
+    }))
+
+    const result = await advisePredictionMarket({
+      workspaceId: 1,
+      venue: 'polymarket',
+      market_id: snapshot.market.market_id,
+      request_mode: 'predict_deep',
+      actor: 'hardening-test',
+    })
+
+    const persistCall = mocks.persistPredictionMarketExecution.mock.calls.at(0)?.[0]
+
+    expect(mocks.runPredictionMarketTimesFMSidecar).toHaveBeenCalledTimes(1)
+    expect(persistCall?.timesfmSidecar).toMatchObject({
+      sidecar_name: 'timesfm_sidecar',
+      selected_lane: 'microstructure',
+    })
+    expect(result.prediction_run.timesfm_requested_mode).toBe('auto')
+    expect(result.prediction_run.timesfm_selected_lane).toBe('microstructure')
+    expect(result.prediction_run.timesfm_summary).toContain('timesfm:')
+    expect(result.timesfm_sidecar).toMatchObject({
+      selected_lane: 'microstructure',
+    })
+  })
+
+  it('fails cleanly when TimesFM required mode has no ready lanes', async () => {
+    const snapshot = makeSnapshot({
+      history: Array.from({ length: 24 }, (_, index) => ({
+        timestamp: 1712534400 + (index * 3600),
+        price: Number((0.45 + (index * 0.004)).toFixed(4)),
+      })),
+    })
+    mocks.buildPolymarketSnapshot.mockResolvedValue(snapshot)
+    mocks.runPredictionMarketTimesFMSidecar.mockReturnValue(makeTimesFMSidecar({
+      requested_mode: 'required',
+      effective_mode: 'required',
+      selected_lane: null,
+      health: {
+        healthy: false,
+        status: 'blocked',
+        backend: 'fixture',
+        dependency_status: 'fixture_backend',
+        issues: ['required_no_ready_lane'],
+        summary: 'required mode produced no ready lanes',
+      },
+      lanes: {},
+      summary: 'TimesFM unavailable',
+    }))
+
+    await expect(advisePredictionMarket({
+      workspaceId: 1,
+      venue: 'polymarket',
+      market_id: snapshot.market.market_id,
+      request_mode: 'predict_deep',
+      timesfm_mode: 'required',
+      actor: 'hardening-test',
+    })).rejects.toMatchObject({
+      code: 'timesfm_required_unavailable',
     })
   })
 })

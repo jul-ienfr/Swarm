@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import urljoin, urlparse
 from uuid import uuid4
+
+import requests
 
 from .additional_venues import (
     AdditionalVenueProfile,
@@ -12,6 +17,7 @@ from .additional_venues import (
     build_additional_venue_registry,
 )
 from .arbitrage_lab import ArbitrageLabReport, assess_arbitrage
+from .adapters import _resolve_polymarket_execution_runtime_config
 from .capital_ledger import CapitalLedger, CapitalLedgerChange, CapitalLedgerStore
 from .cross_venue import CrossVenueIntelligence, CrossVenueIntelligenceReport
 from .execution_projection import ExecutionProjectionRuntime, build_execution_compliance_snapshot
@@ -26,7 +32,7 @@ from .live_execution import (
     LiveExecutionRequest,
     LiveExecutionStore,
 )
-from .market_execution import MarketExecutionEngine, MarketExecutionReport, MarketExecutionStore
+from .market_execution import MarketExecutionEngine, MarketExecutionOrder, MarketExecutionReport, MarketExecutionStore
 from .manipulation_guard import ManipulationGuard, ManipulationGuardReport
 from .market_comment_intel import CommentRecord, MarketCommentIntel, MarketCommentIntelReport
 from .market_graph import MarketGraph, MarketGraphBuilder
@@ -127,6 +133,221 @@ NEGATIVE_TOKENS = (
 )
 
 DEFAULT_LEDGER_CASH = 1000.0
+
+
+def _compat_env_text(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _resolve_live_transport_endpoint(path_or_url: str | None, *, base_url: str | None = None) -> str | None:
+    candidate = str(path_or_url or "").strip()
+    if not candidate:
+        return None
+    parsed_candidate = urlparse(candidate)
+    if parsed_candidate.scheme in {"http", "https"} and parsed_candidate.netloc:
+        return candidate
+
+    normalized_base = str(base_url or "").strip()
+    if not normalized_base:
+        return None
+    parsed_base = urlparse(normalized_base)
+    if parsed_base.scheme not in {"http", "https"} or not parsed_base.netloc:
+        return None
+    return urljoin(normalized_base.rstrip("/") + "/", candidate.lstrip("/"))
+
+
+def _build_live_transport_headers(auth_token: str | None, auth_scheme: str | None) -> dict[str, str]:
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+    }
+    token = str(auth_token or "").strip()
+    if not token:
+        return headers
+
+    scheme = str(auth_scheme or "bearer").strip()
+    normalized_scheme = scheme.lower()
+    if normalized_scheme in {"none", "disabled"}:
+        return headers
+    if normalized_scheme == "bearer":
+        headers["authorization"] = f"Bearer {token}"
+        return headers
+    if normalized_scheme == "token":
+        headers["authorization"] = f"Token {token}"
+        return headers
+    if normalized_scheme in {"raw", "header"}:
+        headers["authorization"] = token
+        return headers
+    headers["authorization"] = f"{scheme} {token}"
+    return headers
+
+
+def _fallback_external_order_id(payload: dict[str, Any], *, order: MarketExecutionOrder, action: str) -> str:
+    candidates = [
+        payload.get("venue_order_id"),
+        payload.get("order_id"),
+        payload.get("id"),
+        payload.get("external_order_id"),
+    ]
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return f"external_{action}_{order.execution_id}_{order.order_id}"
+
+
+def _normalize_live_transport_response(
+    payload: Any,
+    *,
+    action: str,
+    order: MarketExecutionOrder,
+    order_path: str,
+    cancel_path: str,
+) -> dict[str, Any]:
+    normalized = dict(payload) if isinstance(payload, dict) else {"value": payload}
+    normalized.setdefault("venue_order_id", _fallback_external_order_id(normalized, order=order, action=action))
+    normalized.setdefault("venue_order_source", "external")
+    normalized.setdefault("venue_order_status", "submitted" if action == "place" else "cancelled")
+    normalized.setdefault("venue_order_path", order_path)
+    normalized.setdefault("venue_order_cancel_path", cancel_path)
+    normalized.setdefault("venue_order_trace_kind", "external_live")
+    normalized.setdefault(
+        "venue_order_flow",
+        "submitted->acknowledged" if action == "place" else "cancelled",
+    )
+    return normalized
+
+
+def _request_live_transport(
+    *,
+    action: str,
+    endpoint: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    order: MarketExecutionOrder,
+    order_path: str,
+    cancel_path: str,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    try:
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(f"live_transport_request_failed:{type(exc).__name__}") from exc
+
+    try:
+        parsed_payload = response.json()
+    except ValueError:
+        parsed_payload = {
+            "response_status_code": response.status_code,
+            "response_text": response.text,
+        }
+
+    if not response.ok:
+        raise RuntimeError(f"live_transport_http_error:{response.status_code}")
+
+    return _normalize_live_transport_response(
+        parsed_payload,
+        action=action,
+        order=order,
+        order_path=order_path,
+        cancel_path=cancel_path,
+    )
+
+
+def _build_default_live_execution_transport_bindings() -> tuple[
+    dict[VenueName, Callable[[MarketExecutionOrder, dict[str, Any]], Any]],
+    dict[VenueName, Callable[[MarketExecutionOrder, dict[str, Any]], Any]],
+]:
+    runtime_config = _resolve_polymarket_execution_runtime_config()
+    selected_backend_mode = str(runtime_config.get("selected_backend_mode") or "auto").strip().lower()
+    mock_transport = bool(runtime_config.get("mock_transport", False))
+    auth_token = _compat_env_text(
+        "POLYMARKET_EXECUTION_AUTH_TOKEN",
+        "POLYMARKET_AUTH_TOKEN",
+        "POLYMARKET_API_KEY",
+        "POLYMARKET_CLOB_API_KEY",
+    )
+    auth_scheme = str(runtime_config.get("auth_scheme") or "bearer").strip() or "bearer"
+    execution_base_url = _compat_env_text(
+        "POLYMARKET_EXECUTION_BASE_URL",
+        "POLYMARKET_EXECUTION_API_BASE_URL",
+    )
+    live_order_url = _resolve_live_transport_endpoint(
+        str(runtime_config.get("live_order_path") or "").strip() or None,
+        base_url=execution_base_url,
+    )
+    cancel_order_url = _resolve_live_transport_endpoint(
+        str(runtime_config.get("cancel_order_path") or "").strip() or None,
+        base_url=execution_base_url,
+    )
+
+    if (
+        selected_backend_mode != "live"
+        or mock_transport
+        or not auth_token
+        or not live_order_url
+        or not cancel_order_url
+    ):
+        return {}, {}
+
+    headers = _build_live_transport_headers(auth_token, auth_scheme)
+    timeout_ms = _compat_env_text("POLYMARKET_EXECUTION_TIMEOUT_MS")
+    timeout_seconds = max(1.0, float(timeout_ms) / 1000.0) if timeout_ms else 10.0
+
+    def _submit_order(order: MarketExecutionOrder, request_payload: dict[str, Any]) -> dict[str, Any]:
+        envelope = {
+            "action": "place_order",
+            "venue": VenueName.polymarket.value,
+            "order": order.model_dump(mode="json"),
+            "request": dict(request_payload or {}),
+            "source": "prediction_markets.compat",
+        }
+        return _request_live_transport(
+            action="place",
+            endpoint=live_order_url,
+            headers=headers,
+            payload=envelope,
+            order=order,
+            order_path=live_order_url,
+            cancel_path=cancel_order_url,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def _cancel_order(order: MarketExecutionOrder, request_payload: dict[str, Any]) -> dict[str, Any]:
+        envelope = {
+            "action": "cancel_order",
+            "venue": VenueName.polymarket.value,
+            "order": order.model_dump(mode="json"),
+            "request": dict(request_payload or {}),
+            "source": "prediction_markets.compat",
+        }
+        return _request_live_transport(
+            action="cancel",
+            endpoint=cancel_order_url,
+            headers=headers,
+            payload=envelope,
+            order=order,
+            order_path=live_order_url,
+            cancel_path=cancel_order_url,
+            timeout_seconds=timeout_seconds,
+        )
+
+    return (
+        {VenueName.polymarket: _submit_order},
+        {VenueName.polymarket: _cancel_order},
+    )
 
 
 def _coerce_root(base_dir: str | Path | None = None) -> Path:
@@ -3319,13 +3540,16 @@ class PredictionMarketAdvisor:
                 "manipulation_suspicion": bool(isinstance(payload.get("manipulation_guard"), ManipulationGuardReport) and (payload["manipulation_guard"].signal_only or payload["manipulation_guard"].severity.value in {"medium", "high", "critical"})),
             },
         )
+        venue_order_submitters, venue_order_cancel_submitters = _build_default_live_execution_transport_bindings()
         record = LiveExecutionEngine(
             policy=LiveExecutionPolicy(
                 dry_run_enabled=dry_run,
                 allow_live_execution=allow_live_execution,
                 require_human_approval_before_live=require_human_approval_before_live,
                 allowed_venues={payload["descriptor"].venue},
-            )
+            ),
+            venue_order_submitters=venue_order_submitters,
+            venue_order_cancel_submitters=venue_order_cancel_submitters,
         ).execute(
             request,
             persist=persist,

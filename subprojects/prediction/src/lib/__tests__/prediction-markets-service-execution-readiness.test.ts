@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listKalshiMarkets: vi.fn(),
   findRecentPredictionMarketRunByConfig: vi.fn(),
   getStoredPredictionMarketRunDetails: vi.fn(),
+  listPredictionMarketRuns: vi.fn(),
   persistPredictionMarketExecution: vi.fn(),
   createRun: vi.fn(),
   updateRun: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('@/lib/prediction-markets/kalshi', () => ({
 vi.mock('@/lib/prediction-markets/store', () => ({
   findRecentPredictionMarketRunByConfig: mocks.findRecentPredictionMarketRunByConfig,
   getPredictionMarketRunDetails: mocks.getStoredPredictionMarketRunDetails,
+  listPredictionMarketRuns: mocks.listPredictionMarketRuns,
   persistPredictionMarketExecution: mocks.persistPredictionMarketExecution,
 }))
 
@@ -107,6 +109,13 @@ type FutureTopLevelTradeIntentPreviewSurface = {
 type FutureTradeIntentPreview = {
   size_usd: number
   notes?: string
+}
+
+const originalLiveTransportEnv = {
+  backend: process.env.POLYMARKET_EXECUTION_BACKEND,
+  token: process.env.POLYMARKET_EXECUTION_AUTH_TOKEN,
+  liveOrderPath: process.env.POLYMARKET_EXECUTION_LIVE_ORDER_PATH,
+  cancelPath: process.env.POLYMARKET_EXECUTION_CANCEL_PATH,
 }
 
 function asFutureTradeIntentPreview(value: unknown): FutureTradeIntentPreview | null {
@@ -942,6 +951,10 @@ describe('prediction markets service execution readiness', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T00:00:00.000Z'))
+    process.env.POLYMARKET_EXECUTION_BACKEND = 'live'
+    process.env.POLYMARKET_EXECUTION_AUTH_TOKEN = 'test-live-token'
+    process.env.POLYMARKET_EXECUTION_LIVE_ORDER_PATH = 'https://executor.example.test/polymarket/orders'
+    process.env.POLYMARKET_EXECUTION_CANCEL_PATH = 'https://executor.example.test/polymarket/orders/cancel'
 
     mocks.buildPolymarketSnapshot.mockReset()
     mocks.listPolymarketMarkets.mockReset()
@@ -949,6 +962,7 @@ describe('prediction markets service execution readiness', () => {
     mocks.listKalshiMarkets.mockReset()
     mocks.findRecentPredictionMarketRunByConfig.mockReset()
     mocks.getStoredPredictionMarketRunDetails.mockReset()
+    mocks.listPredictionMarketRuns.mockReset()
     mocks.persistPredictionMarketExecution.mockReset()
     mocks.createRun.mockReset()
     mocks.updateRun.mockReset()
@@ -970,6 +984,7 @@ describe('prediction markets service execution readiness', () => {
     mocks.listKalshiMarkets.mockResolvedValue([crossVenuePeer])
     mocks.findRecentPredictionMarketRunByConfig.mockReturnValue(null)
     mocks.getStoredPredictionMarketRunDetails.mockReturnValue(storedRunDetails)
+    mocks.listPredictionMarketRuns.mockReturnValue([])
     mocks.persistPredictionMarketExecution.mockReturnValue({
       summary: storedRunDetails.summary,
       artifactRefs: snapshot.market.market_id ? [] : [],
@@ -1071,6 +1086,18 @@ describe('prediction markets service execution readiness', () => {
     }) => makeComplianceDecisionForMode(input.mode))
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+    if (originalLiveTransportEnv.backend === undefined) delete process.env.POLYMARKET_EXECUTION_BACKEND
+    else process.env.POLYMARKET_EXECUTION_BACKEND = originalLiveTransportEnv.backend
+    if (originalLiveTransportEnv.token === undefined) delete process.env.POLYMARKET_EXECUTION_AUTH_TOKEN
+    else process.env.POLYMARKET_EXECUTION_AUTH_TOKEN = originalLiveTransportEnv.token
+    if (originalLiveTransportEnv.liveOrderPath === undefined) delete process.env.POLYMARKET_EXECUTION_LIVE_ORDER_PATH
+    else process.env.POLYMARKET_EXECUTION_LIVE_ORDER_PATH = originalLiveTransportEnv.liveOrderPath
+    if (originalLiveTransportEnv.cancelPath === undefined) delete process.env.POLYMARKET_EXECUTION_CANCEL_PATH
+    else process.env.POLYMARKET_EXECUTION_CANCEL_PATH = originalLiveTransportEnv.cancelPath
+  })
+
   it('attaches execution_readiness additively on advise and replay payloads', async () => {
     const adviseResult = await advisePredictionMarket({
       workspaceId: 1,
@@ -1099,8 +1126,8 @@ describe('prediction markets service execution readiness', () => {
         status: 'authorized',
       }),
       execution_readiness: expect.objectContaining({
-        overall_verdict: 'degraded',
-        highest_safe_mode: 'paper',
+        overall_verdict: 'blocked',
+        highest_safe_mode: 'discovery',
         pipeline_status: 'degraded',
         cross_venue_summary: expect.objectContaining({
           manual_review: expect.any(Array),
@@ -1110,6 +1137,12 @@ describe('prediction markets service execution readiness', () => {
         venue_feed_surface: expect.objectContaining({
           backend_mode: 'read_only',
         }),
+      }),
+      prediction_run: expect.objectContaining({
+        primary_strategy: expect.any(String),
+        market_regime: expect.any(String),
+        execution_intent_preview_kind: expect.any(String),
+        resolution_anomalies: expect.any(Array),
       }),
     })
 
@@ -1121,8 +1154,8 @@ describe('prediction markets service execution readiness', () => {
         status: 'authorized',
       }),
       execution_readiness: expect.objectContaining({
-        overall_verdict: 'degraded',
-        highest_safe_mode: 'paper',
+        overall_verdict: 'blocked',
+        highest_safe_mode: 'discovery',
         pipeline_status: 'normal',
         cross_venue_summary: expect.objectContaining({
           manual_review: expect.any(Array),
@@ -1133,6 +1166,12 @@ describe('prediction markets service execution readiness', () => {
         venue_feed_surface: expect.objectContaining({
           backend_mode: 'read_only',
         }),
+      }),
+      prediction_run: expect.objectContaining({
+        primary_strategy: expect.any(String),
+        market_regime: expect.any(String),
+        execution_intent_preview_kind: expect.any(String),
+        resolution_anomalies: expect.any(Array),
       }),
     })
 
@@ -1291,6 +1330,70 @@ describe('prediction markets service execution readiness', () => {
       research_recommendation_origin: 'manual_thesis',
       research_recommendation_origin_summary: expect.stringContaining('manual thesis override'),
       research_abstention_flipped_recommendation: false,
+      approval_ticket: expect.objectContaining({
+        summary: expect.any(String),
+      }),
+      operator_thesis: expect.objectContaining({
+        source: 'manual_thesis',
+        probability_yes: 0.74,
+      }),
+      research_pipeline_trace: expect.objectContaining({
+        preferred_mode: 'aggregate',
+        oracle_family: 'llm_superforecaster',
+      }),
+      approval_ticket_summary: expect.any(String),
+      operator_thesis_summary: expect.stringContaining('74% yes via manual_thesis'),
+      research_pipeline_trace_summary: expect.any(String),
+    })
+    expect(adviseResult.execution_pathways).toMatchObject({
+      approval_ticket: expect.objectContaining({
+        summary: expect.any(String),
+      }),
+      operator_thesis: expect.objectContaining({
+        source: 'manual_thesis',
+        probability_yes: 0.74,
+      }),
+      research_pipeline_trace: expect.objectContaining({
+        preferred_mode: 'aggregate',
+        oracle_family: 'llm_superforecaster',
+      }),
+    })
+    const readbackDetails = {
+      ...storedRunDetails,
+      artifacts: [
+        ...storedRunDetails.artifacts,
+        {
+          artifact_type: 'execution_pathways',
+          payload: adviseResult.execution_pathways,
+        },
+      ],
+    }
+    mocks.getStoredPredictionMarketRunDetails.mockReturnValueOnce(readbackDetails)
+    expect(getPredictionMarketRunDetails(adviseResult.run.id, 1)).toMatchObject({
+      approval_ticket: expect.objectContaining({
+        summary: expect.any(String),
+      }),
+      operator_thesis: expect.objectContaining({
+        source: 'manual_thesis',
+        probability_yes: 0.74,
+      }),
+      research_pipeline_trace: expect.objectContaining({
+        preferred_mode: 'aggregate',
+        oracle_family: 'llm_superforecaster',
+      }),
+      execution_pathways: expect.objectContaining({
+        approval_ticket: expect.objectContaining({
+          summary: expect.any(String),
+        }),
+        operator_thesis: expect.objectContaining({
+          source: 'manual_thesis',
+          probability_yes: 0.74,
+        }),
+        research_pipeline_trace: expect.objectContaining({
+          preferred_mode: 'aggregate',
+          oracle_family: 'llm_superforecaster',
+        }),
+      }),
     })
   })
 
@@ -2362,6 +2465,12 @@ describe('prediction markets service execution readiness', () => {
     expect(adviseResult.execution_projection).toMatchObject({
       requested_path: 'paper',
       selected_path: 'paper',
+      selected_edge_bucket: 'no_trade',
+      selected_pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'not_applicable',
+        edge_bucket: 'no_trade',
+      }),
       verdict: 'allowed',
       ttl_ms: 30_000,
       highest_safe_requested_mode: 'paper',
@@ -2402,9 +2511,23 @@ describe('prediction markets service execution readiness', () => {
         }),
       }),
     })
+    expect(adviseResult.execution_projection?.preflight_summary).toMatchObject({
+      selected_edge_bucket: 'no_trade',
+      selected_pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'not_applicable',
+        edge_bucket: 'no_trade',
+      }),
+    })
     expect(replayResult.execution_projection).toMatchObject({
       requested_path: 'live',
       selected_path: 'paper',
+      selected_edge_bucket: 'execution_alpha',
+      selected_pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'pass',
+        edge_bucket: 'execution_alpha',
+      }),
       verdict: 'downgraded',
       highest_safe_requested_mode: 'paper',
       recommended_effective_mode: 'paper',
@@ -2473,8 +2596,20 @@ describe('prediction markets service execution readiness', () => {
       'reconciliation_unavailable',
       'effective_mode:live->paper',
     ])
-    expect(replayResult.execution_projection?.preflight_summary.summary).toBe(
-      'gate=execution_projection preflight=yes verdict=downgraded requested=live selected=paper highest_safe=paper recommended=paper manual_review=yes ttl_ms=30000 eligible=1/3 paths=ready:0|degraded:1|blocked:2 basis=readiness,compliance,microstructure microstructure=shadow:high:30bps refs=5 blockers=0 downgrades=7',
+    expect(replayResult.execution_projection?.preflight_summary.selected_edge_bucket).toBe('execution_alpha')
+    expect(replayResult.execution_projection?.preflight_summary.selected_pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'execution_alpha',
+    })
+    expect(replayResult.execution_projection?.preflight_summary.summary).toContain(
+      'gate=execution_projection preflight=yes verdict=downgraded requested=live selected=paper',
+    )
+    expect(replayResult.execution_projection?.preflight_summary.summary).toContain(
+      'edge_bucket=execution_alpha',
+    )
+    expect(replayResult.execution_projection?.preflight_summary.summary).toContain(
+      'pre_trade=pass:',
     )
     expect(replayResult.execution_projection?.preflight_summary.summary).not.toContain('\n')
     expect(replayResult.execution_projection?.basis.source_refs).toEqual({
@@ -2502,14 +2637,24 @@ describe('prediction markets service execution readiness', () => {
     ]))
     expect(adviseResult.prediction_run).toMatchObject({
       execution_pathways_highest_actionable_mode: 'paper',
+      execution_projection_selected_edge_bucket: 'no_trade',
+      execution_projection_selected_pre_trade_gate_verdict: 'not_applicable',
       shadow_arbitrage_present: false,
       shadow_arbitrage_recommended_size_usd: null,
     })
     expect(replayResult.prediction_run).toMatchObject({
       execution_pathways_highest_actionable_mode: 'paper',
+      execution_projection_selected_edge_bucket: 'execution_alpha',
+      execution_projection_selected_pre_trade_gate_verdict: 'pass',
       shadow_arbitrage_present: false,
       shadow_arbitrage_recommended_size_usd: null,
     })
+    expect(adviseResult.prediction_run?.execution_projection_selected_pre_trade_gate_summary).toContain(
+      'No-trade gate stays inactive',
+    )
+    expect(replayResult.prediction_run?.execution_projection_selected_pre_trade_gate_summary).toContain(
+      'Hard no-trade gate pass',
+    )
 
     expect(adviseResult.trade_intent_guard).toMatchObject({
       gate_name: 'trade_intent_guard',
@@ -3732,6 +3877,18 @@ describe('prediction markets service execution readiness', () => {
           result.execution_projection?.preflight_summary ?? null,
         execution_projection_capital_status: result.execution_projection?.basis.capital_status ?? null,
         execution_projection_reconciliation_status: result.execution_projection?.basis.reconciliation_status ?? null,
+        execution_projection_selected_edge_bucket:
+          result.execution_projection?.selected_edge_bucket ?? null,
+        execution_projection_selected_pre_trade_gate:
+          result.execution_projection?.selected_pre_trade_gate ?? null,
+        execution_projection_selected_pre_trade_gate_verdict:
+          result.execution_projection?.selected_pre_trade_gate?.verdict ?? null,
+        execution_projection_selected_pre_trade_gate_summary:
+          result.execution_projection?.selected_pre_trade_gate?.summary ?? null,
+        execution_projection_selected_path_net_edge_bps:
+          result.execution_projection?.selected_pre_trade_gate?.net_edge_bps ?? null,
+        execution_projection_selected_path_minimum_net_edge_bps:
+          result.execution_projection?.selected_pre_trade_gate?.minimum_net_edge_bps ?? null,
         execution_projection_selected_preview: expectedProjectionSelectedPreview,
         execution_projection_selected_preview_source: expectedProjectionSelectedPreviewSource,
         execution_projection_selected_path_canonical_size_usd: selectedProjectionPath?.sizing_signal?.canonical_size_usd ?? null,

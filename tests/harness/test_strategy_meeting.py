@@ -6,9 +6,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from runtime_pydanticai.models import MeetingTurnDraft, RuntimeBackend as StructuredRuntimeBackend
+from runtime_pydanticai.models import (
+    MeetingRoundSummary,
+    MeetingTurnDraft,
+    RuntimeBackend as StructuredRuntimeBackend,
+)
 from swarm_core.deliberation import _committee_result_to_deliberation
-from swarm_core.strategy_meeting import StrategyMeetingCoordinator, StrategyMeetingStatus, _dedupe_meeting_points
+from swarm_core.meeting_memory import MeetingEventLogger, MeetingMemory
+from swarm_core.strategy_meeting import (
+    StrategyMeetingCoordinator,
+    StrategyMeetingStatus,
+    _build_participant_instruction,
+    _dedupe_meeting_points,
+    _enrich_round_summary,
+)
 
 
 def _extract_phase(prompt: str) -> str:
@@ -265,6 +276,70 @@ def test_strategy_meeting_deduplication_is_order_stable() -> None:
     ]
 
 
+def test_strategy_meeting_instruction_includes_role_grounding_and_memory_discipline() -> None:
+    instruction = _build_participant_instruction(
+        participant="risk-ops",
+        round_index=2,
+        phase="critique",
+        topic="Estimate durable live gain for the strategy engine",
+        objective="Compare forecast alpha, arbitrage alpha, and no-trade",
+        participants=["architect", "risk-ops", "research"],
+        prior_summary=(
+            "Round 1 memory\n"
+            "Top options:\n"
+            "- Favor the parity strategy first\n"
+            "Key risks:\n"
+            "- Execution drag can erase the edge\n"
+            "Open disagreements:\n"
+            "- Whether no-trade still wins\n"
+        ),
+        critique_focus="execution realism",
+    )
+
+    assert "Role grounding:" in instruction
+    assert "kill criteria" in instruction.lower()
+    assert "Memory discipline:" in instruction
+    assert "Execution drag can erase the edge" in instruction
+    assert "do not silently drop earlier named risks or disagreements" in instruction.lower()
+
+
+def test_strategy_meeting_round_summary_preserves_prior_memory_points() -> None:
+    summary = _enrich_round_summary(
+        MeetingRoundSummary(
+            summary="thin summary",
+            top_options=["Validate the spread strategy"],
+            risks=["Freshness budgets may be too loose"],
+            unresolved_disagreements=["Whether no-trade is still the default"],
+        ),
+        topic="Estimate durable live gain for the strategy engine",
+        objective="Keep only executable edge",
+        round_index=2,
+        phase="critique",
+        prior_summary=(
+            "Round 1 memory\n"
+            "Top options:\n"
+            "- Favor the parity strategy first\n"
+            "Key risks:\n"
+            "- Execution drag can erase the edge\n"
+            "Open disagreements:\n"
+            "- Whether no-trade still wins\n"
+        ),
+        turns=[
+            MeetingTurnDraft(
+                thesis="Validate the spread strategy",
+                recommended_actions=["Tighten the executable edge gate"],
+                key_risks=["Freshness budgets may be too loose"],
+                disagreements=["Whether no-trade is still the default"],
+            )
+        ],
+    )
+
+    assert "Favor the parity strategy first" in summary.summary
+    assert "Execution drag can erase the edge" in summary.summary
+    assert "Whether no-trade still wins" in summary.summary
+    assert any("Prior options:" in line for line in summary.summary.splitlines())
+
+
 def test_strategy_meeting_score_is_zero_without_units() -> None:
     assert StrategyMeetingCoordinator._score_meeting(
         success_count=0,
@@ -346,6 +421,7 @@ def test_strategy_meeting_runs_and_persists_artifact(tmp_path: Path) -> None:
         output_dir=tmp_path,
         max_participants=8,
         parallelism_limit=2,
+        runtime="legacy",
     )
 
     result = coordinator.run_meeting(
@@ -364,7 +440,13 @@ def test_strategy_meeting_runs_and_persists_artifact(tmp_path: Path) -> None:
     assert result.transcript[0].phase == "independent"
     assert result.transcript[3].phase == "critique"
     assert result.transcript[6].phase == "synthesis"
-    assert result.strategy == "Adopt a staged rollout with explicit gates."
+    assert result.summary.startswith("Round 3 memory")
+    assert "Top options:" in result.summary
+    assert result.strategy.startswith("Decision brief")
+    assert "Recommendation: Adopt a staged rollout with explicit gates." in result.strategy
+    assert "Consensus:" in result.strategy
+    assert "Dissent:" in result.strategy
+    assert "Next actions:" in result.strategy
     assert result.consensus_points == [
         "Preserve reliability with phased deployment",
         "Make rollback criteria explicit",
@@ -383,8 +465,28 @@ def test_strategy_meeting_runs_and_persists_artifact(tmp_path: Path) -> None:
     assert result.metadata["duration_ms"] >= 0.0
     assert result.metadata["quality_score"] >= 0.0
     assert result.metadata["confidence_score"] >= 0.0
+    assert result.metadata["meeting_memory"]["round_count"] == 3
+    assert result.metadata["meeting_memory"]["participant_count"] == 3
+    assert Path(result.metadata["agent_log_path"]).exists()
+    assert len(result.metadata["round_reports"]) == 3
+    assert result.metadata["round_reports"][0]["round_index"] == 1
+    assert "decision_gate" in result.metadata["round_reports"][0]
+    assert "persistent" in result.metadata["round_reports"][0]
+    assert result.metadata["meeting_report"]["round_count"] == 3
+    assert result.metadata["meeting_report"]["strategy"] == result.strategy
+    assert result.metadata["meeting_report"]["runtime_status"] == "degraded"
+    assert len(result.metadata["round_timeline"]) == 4
+    assert result.metadata["round_timeline"][0]["phase"] == "independent"
+    assert result.metadata["round_timeline"][-1]["phase"] == "final_synthesis"
+    assert result.metadata["phase_metadata"]["phase_sequence"] == ["independent", "critique", "synthesis"]
+    assert result.metadata["phase_metadata"]["timeline_event_count"] == 4
     assert len(result.metadata["round_runtime_diagnostics"]) == 3
     assert result.metadata["final_runtime_diagnostics"]["stage"] == "final_synthesis"
+    assert "Current meeting memory:" in result.transcript[0].instruction
+    assert "Respond in four sections" in result.transcript[0].instruction
+    assert "[Participant belief lens]" in result.transcript[3].metadata["participant_memory"]
+    assert result.transcript[0].metadata["timeline_anchor"] == "round_1:independent:architect"
+    assert result.transcript[0].metadata["simulation_trace_style"] == "report_agent"
     assert result.transcript[0].metadata["runtime_diagnostics"]["runtime_attempt_count"] >= 1
     resilience = result.metadata["runtime_resilience"]
     assert resilience["stage_count"] == 3
@@ -461,6 +563,14 @@ def test_strategy_meeting_comparability_is_canonical_and_additive(monkeypatch, t
     assert len(comparability["participant_fingerprint"]) == 64
     assert len(comparability["input_fingerprint"]) == 64
     assert len(comparability["execution_fingerprint"]) == 64
+    assert flat_result.summary.startswith("Round 3 memory")
+    assert flat_result.strategy.startswith("Decision brief")
+    assert "Consensus:" in flat_result.strategy
+    assert "Dissent:" in flat_result.strategy
+    assert "Next actions:" in flat_result.strategy
+    assert flat_result.transcript[0].content.startswith("Thesis:")
+    assert "Recommended actions:" in flat_result.transcript[0].content
+    assert "Key risks:" in flat_result.transcript[0].content
 
     persisted = json.loads(Path(flat_result.persisted_path).read_text(encoding="utf-8"))
     assert persisted["metadata"]["comparability"] == comparability
@@ -489,6 +599,8 @@ def test_strategy_meeting_comparability_is_canonical_and_additive(monkeypatch, t
     assert hierarchical_comparability["participant_count"] == 9
     assert hierarchical_comparability["cluster_count"] == 3
     assert hierarchical_comparability["phase_count"] == 4
+    assert hierarchical_result.summary.startswith("Round 4 memory")
+    assert hierarchical_result.strategy.startswith("Decision brief")
 
 
 def test_strategy_meeting_runtime_resilience_summarizes_degraded_fallbacks(monkeypatch, tmp_path: Path) -> None:
@@ -535,6 +647,39 @@ def test_strategy_meeting_runtime_resilience_summarizes_degraded_fallbacks(monke
     assert result.fallback_used is True
     assert result.degraded_runtime_used == "legacy"
     assert result.decision_degraded is True
+    assert result.metadata["meeting_report"]["runtime_status"] == "degraded"
+    assert result.metadata["round_timeline"][0]["fallback_used"] is True
+    assert result.metadata["round_timeline"][-1]["phase"] == "final_synthesis"
+
+
+def test_strategy_meeting_marks_degraded_analytical_runs_for_rerun(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("swarm_core.strategy_meeting.PydanticAIStrategyMeetingRuntime", ResilientFakeRuntime)
+
+    coordinator = StrategyMeetingCoordinator(
+        client=RecordingMeetingClient(),
+        output_dir=tmp_path,
+        max_participants=4,
+        parallelism_limit=2,
+    )
+
+    result = coordinator.run_meeting(
+        topic="Estimate the durable live gain probability for prediction markets arbitrage",
+        objective="Compare forecast alpha, arbitrage alpha, and no-trade",
+        participants=["architect", "research"],
+        max_agents=2,
+        rounds=1,
+        persist=False,
+    )
+
+    assert result.metadata["analytical_run"] is True
+    assert result.metadata["analytical_rerun_required"] is True
+    assert result.metadata["comparability"]["analytical_run"] is True
+    assert result.metadata["comparability"]["analytical_rerun_required"] is True
+    assert result.metadata["meeting_report"]["analytical_run"] is True
+    assert result.metadata["meeting_report"]["analytical_rerun_required"] is True
+    assert "Analytical run: yes" in result.strategy
+    assert "Analytical rerun required: yes" in result.strategy
+    assert any("structured runtime" in item.lower() or "advisory-only" in item.lower() for item in result.next_actions)
 
 
 def test_strategy_meeting_records_internal_fallback_even_when_final_stage_recovers(monkeypatch, tmp_path: Path) -> None:
@@ -622,6 +767,7 @@ def test_strategy_meeting_caps_requested_participants(tmp_path: Path) -> None:
         output_dir=tmp_path,
         max_participants=4,
         parallelism_limit=4,
+        runtime="legacy",
     )
 
     result = coordinator.run_meeting(
@@ -645,6 +791,7 @@ def test_strategy_meeting_uses_hierarchical_clusters_with_dissent(tmp_path: Path
         cluster_size=4,
         forced_dissent_per_cluster=1,
         parallelism_limit=4,
+        runtime="legacy",
     )
 
     result = coordinator.run_meeting(
@@ -707,3 +854,118 @@ def test_strategy_meeting_uses_hierarchical_clusters_with_dissent(tmp_path: Path
     assert all(summary.quality_score > 0.0 for summary in result.cluster_summaries)
     assert all(summary.confidence_score > 0.0 for summary in result.cluster_summaries)
     assert any("Phase: critique" in call["instruction"] for call in client.agent_calls)
+
+
+def test_meeting_memory_builds_round_snapshots_and_compacted_preflight_text(tmp_path: Path) -> None:
+    memory = MeetingMemory(topic="Launch the rollout", objective="Protect reliability while scaling")
+    turns = [
+        SimpleNamespace(
+            speaker="architect",
+            phase="independent",
+            content="Thesis: stage the rollout.",
+            metadata={
+                "draft": {
+                    "thesis": "Stage the rollout.",
+                    "recommended_actions": ["Ship in phases", "Keep rollback gates explicit"],
+                    "key_risks": ["Hidden regressions"],
+                    "disagreements": ["Ship now vs stage it"],
+                    "closing_note": "Keep the rollout observable.",
+                }
+            },
+        ),
+        SimpleNamespace(
+            speaker="risk",
+            phase="critique",
+            content="Thesis: the rollout still needs stronger guardrails.",
+            metadata={
+                "draft": {
+                    "thesis": "Add stronger guardrails.",
+                    "recommended_actions": ["Add kill-switches"],
+                    "key_risks": ["Operational overload"],
+                    "disagreements": ["Too much confidence in the baseline"],
+                    "closing_note": "Treat this as advisory-only.",
+                }
+            },
+        ),
+    ]
+    memory.record_round(
+        round_index=1,
+        phase="independent",
+        turns=turns,
+        round_summary="Round 1 summary with enough detail to trigger compaction. " * 8,
+    )
+
+    round_snapshot = memory.build_round_snapshot(round_index=1)
+    preflight_text = memory.preflight_text(current_round=2, max_chars=360)
+    global_snapshot = memory.snapshot()
+
+    assert round_snapshot["found"] is True
+    assert round_snapshot["round_index"] == 1
+    assert round_snapshot["turn_count"] == 2
+    assert round_snapshot["participants"] == ["architect", "risk"]
+    assert round_snapshot["preflight_text"].startswith("Round 1 (independent)")
+    assert round_snapshot["belief_lens"]["architect"]["participant"] == "architect"
+    assert "Launch the rollout" in preflight_text
+    assert "Current round: 2" in preflight_text
+    assert "[...compacted...]" in preflight_text or len(preflight_text) <= 360
+    assert global_snapshot["round_count"] == 1
+    assert global_snapshot["round_snapshots"][0]["round_index"] == 1
+    assert "preflight_text" in global_snapshot
+    assert "architect" in global_snapshot["beliefs"]
+
+
+def test_meeting_event_logger_writes_richer_jsonl_records(tmp_path: Path) -> None:
+    logger = MeetingEventLogger(output_dir=tmp_path, meeting_id="meeting_demo")
+    logger.log_turn(
+        participant="architect",
+        round_index=1,
+        phase="independent",
+        content="Thesis: stage the rollout.",
+        metadata={"phase_role": "participant", "runtime_diagnostics": {"fallback_used": False}},
+    )
+    logger.log_round_summary(round_index=1, phase="independent", summary="Round 1 moved from exploration to gating.")
+    logger.log_round_snapshot(
+        round_snapshot={
+            "round_index": 1,
+            "phase": "independent",
+            "participant_count": 2,
+            "turn_count": 2,
+        }
+    )
+    logger.log_preflight_context(
+        current_round=2,
+        context="Preflight memory block with compacted history.",
+        snapshot={"topic": "Launch the rollout", "round_count": 1},
+    )
+    logger.log_final_synthesis(
+        strategy="Adopt a staged rollout.",
+        consensus_points=["Preserve reliability"],
+        dissent_points=["Watch for overload"],
+        next_actions=["Define rollout gates"],
+    )
+    logger.log_meeting_report(
+        report={
+            "strategy": "Adopt a staged rollout.",
+            "round_reports": [{"round_index": 1}],
+            "consensus_points": ["Preserve reliability"],
+            "dissent_points": ["Watch for overload"],
+            "next_actions": ["Define rollout gates"],
+        }
+    )
+
+    lines = [json.loads(line) for line in logger.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert len(lines) == 6
+    assert all("event_id" in line and line["event_id"].startswith("evt_") for line in lines)
+    assert all("timestamp" in line for line in lines)
+    assert all("sequence" in line for line in lines)
+    assert all("event_type" in line for line in lines)
+    assert lines[0]["event_type"] == "meeting_turn"
+    assert lines[0]["snapshot"]["participant"] == "architect"
+    assert lines[0]["snapshot"]["metadata_keys"] == ["phase_role", "runtime_diagnostics"]
+    assert lines[2]["event_type"] == "round_snapshot"
+    assert lines[2]["snapshot"]["turn_count"] == 2
+    assert lines[3]["event_type"] == "preflight_context"
+    assert "context_preview" in lines[3]["snapshot"]
+    assert lines[5]["event_type"] == "meeting_report"
+    assert lines[5]["snapshot"]["round_count"] == 1

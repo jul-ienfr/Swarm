@@ -3,6 +3,9 @@ import {
   buildPredictionMarketExecutionPathways,
 } from '@/lib/prediction-markets/execution-pathways'
 import {
+  detectStrategyCandidates,
+} from '@/lib/prediction-markets/strategy-engine'
+import {
   buildPredictionMarketExecutionReadiness,
 } from '@/lib/prediction-markets/execution-readiness'
 import {
@@ -333,5 +336,54 @@ describe('prediction markets strategy engine', () => {
     expect(sizing.notes).toEqual(expect.arrayContaining([
       'Portfolio correlation 80% is elevated.',
     ]))
+  })
+
+  it('suppresses maker spread capture when quote freshness is stale enough to invite adverse selection', () => {
+    const market = makeDescriptor({
+      market_id: 'maker-spread-capture-market',
+      slug: 'maker-spread-capture-market',
+      best_bid: 0.44,
+      best_ask: 0.5,
+      last_trade_price: 0.47,
+    })
+    const snapshot = marketSnapshotSchema.parse({
+      ...makeSnapshot(market),
+      yes_price: 0.47,
+      midpoint_yes: 0.47,
+      best_bid_yes: 0.44,
+      best_ask_yes: 0.5,
+      spread_bps: 600,
+      book: {
+        ...makeSnapshot(market).book!,
+        best_bid: 0.44,
+        best_ask: 0.5,
+        last_trade_price: 0.47,
+      },
+    })
+
+    const freshCandidates = detectStrategyCandidates({
+      snapshot,
+      as_of_at: '2026-04-08T00:00:05.000Z',
+    })
+    const staleCandidates = detectStrategyCandidates({
+      snapshot,
+      as_of_at: '2026-04-08T00:10:00.000Z',
+    })
+
+    const freshMakerCandidate = freshCandidates.find((candidate) => candidate.kind === 'maker_spread_capture')
+    expect(freshMakerCandidate).toBeTruthy()
+    expect(freshMakerCandidate?.reasons).toEqual(expect.arrayContaining([
+      'maker_quote_freshness_budget_ms:15000',
+      'maker_quote_state:guarded',
+      'freshness_state:fresh',
+      'latency_state:fresh',
+    ]))
+    expect(freshMakerCandidate?.metrics).toMatchObject({
+      maker_quote_freshness_budget_ms: 15_000,
+      maker_quote_state: 'guarded',
+      freshness_state: 'fresh',
+      latency_state: 'fresh',
+    })
+    expect(staleCandidates.some((candidate) => candidate.kind === 'maker_spread_capture')).toBe(false)
   })
 })

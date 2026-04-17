@@ -193,6 +193,34 @@ function makeExecutionProjectionArtifact(input: {
   shadowRecommendedSizeUsd: number
   shadowPreviewSizeUsd?: number
 }) {
+  const preTradeByPath = {
+    paper: {
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'forecast_alpha',
+      net_edge_bps: 640,
+      minimum_net_edge_bps: 180,
+      summary: 'Hard no-trade gate pass. bucket=forecast_alpha gross=880bps frictions=240bps net=640bps minimum=180bps',
+    },
+    shadow: {
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'arbitrage_alpha',
+      net_edge_bps: 980,
+      minimum_net_edge_bps: 240,
+      summary: 'Hard no-trade gate pass. bucket=arbitrage_alpha gross=1240bps frictions=260bps net=980bps minimum=240bps',
+    },
+    live: {
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'execution_alpha',
+      net_edge_bps: 1210,
+      minimum_net_edge_bps: 320,
+      summary: 'Hard no-trade gate pass. bucket=execution_alpha gross=1480bps frictions=270bps net=1210bps minimum=320bps',
+    },
+  } as const
+  const selectedPreTradeGate = preTradeByPath[input.selectedPath]
+  const selectedEdgeBucket = selectedPreTradeGate.edge_bucket
   const microstructure = {
     recommended_mode: 'shadow',
     worst_case_severity: 'medium',
@@ -234,6 +262,8 @@ function makeExecutionProjectionArtifact(input: {
     expires_at: '2026-04-08T00:00:30.000Z',
     highest_safe_requested_mode: input.selectedPath,
     recommended_effective_mode: input.selectedPath,
+    selected_edge_bucket: selectedEdgeBucket,
+    selected_pre_trade_gate: selectedPreTradeGate,
     basis: {
       uses_execution_readiness: true,
       uses_compliance: true,
@@ -294,6 +324,8 @@ function makeExecutionProjectionArtifact(input: {
         blockers: [],
         warnings: [],
         reason_summary: 'Paper projection is ready.',
+        edge_bucket: preTradeByPath.paper.edge_bucket,
+        pre_trade_gate: preTradeByPath.paper,
         simulation: {
           expected_fill_confidence: 0.97,
           expected_slippage_bps: 0,
@@ -313,6 +345,8 @@ function makeExecutionProjectionArtifact(input: {
         blockers: [],
         warnings: [],
         reason_summary: 'Shadow projection is ready.',
+        edge_bucket: preTradeByPath.shadow.edge_bucket,
+        pre_trade_gate: preTradeByPath.shadow,
         simulation: {
           expected_fill_confidence: 0.88,
           expected_slippage_bps: 12,
@@ -366,6 +400,8 @@ function makeExecutionProjectionArtifact(input: {
         blockers: input.selectedPath === 'live' ? [] : ['selected_path_downgraded'],
         warnings: [],
         reason_summary: input.selectedPath === 'live' ? 'Live projection is ready.' : 'Live projection is downgraded.',
+        edge_bucket: preTradeByPath.live.edge_bucket,
+        pre_trade_gate: preTradeByPath.live,
         simulation: {
           expected_fill_confidence: 0.74,
           expected_slippage_bps: 25,
@@ -448,6 +484,8 @@ function makeExecutionProjectionArtifact(input: {
       downgrade_reasons: input.requestedPath === input.selectedPath
         ? []
         : [`selected_path:${input.requestedPath}->${input.selectedPath}`],
+      selected_edge_bucket: selectedEdgeBucket,
+      selected_pre_trade_gate: selectedPreTradeGate,
       microstructure,
       summary: `gate=execution_projection preflight=yes verdict=${input.requestedPath === input.selectedPath ? 'allowed' : 'downgraded'} requested=${input.requestedPath} selected=${input.selectedPath}`,
     },
@@ -645,6 +683,17 @@ describe('prediction markets API run surfaces', () => {
       execution_projection_verdict: 'downgraded',
       execution_projection_capital_status: 'attached',
       execution_projection_reconciliation_status: 'unavailable',
+      execution_projection_selected_edge_bucket: 'arbitrage_alpha',
+      execution_projection_selected_pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'pass',
+        edge_bucket: 'arbitrage_alpha',
+      }),
+      execution_projection_selected_pre_trade_gate_verdict: 'pass',
+      execution_projection_selected_pre_trade_gate_summary:
+        'Hard no-trade gate pass. bucket=arbitrage_alpha gross=1240bps frictions=260bps net=980bps minimum=240bps',
+      execution_projection_selected_path_net_edge_bps: 980,
+      execution_projection_selected_path_minimum_net_edge_bps: 240,
       execution_projection_selected_preview: expect.objectContaining({
         size_usd: 75,
       }),
@@ -1250,6 +1299,22 @@ describe('prediction markets API run surfaces', () => {
     expect(details?.execution_projection).toBeDefined()
     expect(details?.execution_pathways?.highest_actionable_mode).toBeDefined()
     expect(details?.execution_projection?.requested_path).toBe('live')
+    expect(details?.execution_projection).toMatchObject({
+      selected_edge_bucket: 'arbitrage_alpha',
+      selected_pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'pass',
+        edge_bucket: 'arbitrage_alpha',
+      }),
+      preflight_summary: expect.objectContaining({
+        selected_edge_bucket: 'arbitrage_alpha',
+        selected_pre_trade_gate: expect.objectContaining({
+          gate_name: 'hard_no_trade',
+          verdict: 'pass',
+          edge_bucket: 'arbitrage_alpha',
+        }),
+      }),
+    })
     expect(details?.execution_projection?.projected_paths.shadow.trade_intent_preview?.size_usd).toBe(100)
     expect(details?.execution_projection?.projected_paths.shadow.canonical_trade_intent_preview?.size_usd).toBe(60)
     expect(details).toMatchObject({
@@ -1282,6 +1347,17 @@ describe('prediction markets API run surfaces', () => {
         size_usd: 60,
       }),
       execution_projection_selected_preview_source: 'canonical_trade_intent_preview',
+      execution_projection_selected_edge_bucket: 'arbitrage_alpha',
+      execution_projection_selected_pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'pass',
+        edge_bucket: 'arbitrage_alpha',
+      }),
+      execution_projection_selected_pre_trade_gate_verdict: 'pass',
+      execution_projection_selected_pre_trade_gate_summary:
+        'Hard no-trade gate pass. bucket=arbitrage_alpha gross=1240bps frictions=260bps net=980bps minimum=240bps',
+      execution_projection_selected_path_net_edge_bps: 980,
+      execution_projection_selected_path_minimum_net_edge_bps: 240,
       execution_projection_selected_path_canonical_size_usd: 60,
       execution_projection_selected_path_shadow_signal_present: true,
     })

@@ -370,6 +370,7 @@ describe('prediction market execution projection', () => {
       preflight_only: true,
       requested_path: 'live',
       selected_path: 'live',
+      selected_edge_bucket: 'forecast_alpha',
       verdict: 'allowed',
       manual_review_required: false,
       ttl_ms: 30_000,
@@ -381,6 +382,17 @@ describe('prediction market execution projection', () => {
       status: 'ready',
       allowed: true,
       blockers: [],
+      edge_bucket: 'forecast_alpha',
+      pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'pass',
+        edge_bucket: 'forecast_alpha',
+      }),
+    })
+    expect(projection.selected_pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'forecast_alpha',
     })
     expect(projection.projected_paths.live.simulation.expected_fill_confidence).toBeCloseTo(0.68, 2)
     expect(projection.projected_paths.live.simulation.expected_slippage_bps).toBe(114)
@@ -583,9 +595,19 @@ describe('prediction market execution projection', () => {
 
     expect(projection.requested_path).toBe('paper')
     expect(projection.selected_path).toBe('paper')
+    expect(projection.selected_edge_bucket).toBe('no_trade')
     expect(projection.verdict).toBe('allowed')
     expect(projection.eligible_paths).toEqual(['paper'])
+    expect(projection.no_trade_baseline_summary).toContain('No-trade baseline')
+    expect(projection.no_trade_baseline_summary).toContain('Recommendation remains wait.')
+    expect(projection.projected_paths.paper.no_trade_baseline_summary).toContain('No-trade baseline')
     expect(projection.projected_paths.paper.status).toBe('ready')
+    expect(projection.projected_paths.paper.edge_bucket).toBe('no_trade')
+    expect(projection.projected_paths.paper.pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'not_applicable',
+      edge_bucket: 'no_trade',
+    })
     expect(projection.projected_paths.paper.simulation).toMatchObject({
       expected_fill_confidence: 0,
       expected_slippage_bps: 0,
@@ -693,6 +715,8 @@ describe('prediction market execution projection', () => {
     expect(projection.gate_name).toBe('execution_projection')
     expect(projection.preflight_only).toBe(true)
     expect(projection.eligible_paths).toEqual([])
+    expect(projection.no_trade_baseline_summary).toContain('No-trade baseline')
+    expect(projection.summary).toContain('Baseline:')
     expect(projection.projected_paths.paper).toMatchObject({
       allowed: false,
       blockers: expect.arrayContaining(['resolution:ambiguous']),
@@ -772,6 +796,12 @@ describe('prediction market execution projection', () => {
       read_only: true,
       failure_case_count: 3,
     })
+    expect(projection.projected_paths.shadow.edge_bucket).toBe('arbitrage_alpha')
+    expect(projection.projected_paths.shadow.pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'arbitrage_alpha',
+    })
     expect(projection.projected_paths.shadow.sizing_signal?.source).toBe('trade_intent_preview+shadow_arbitrage')
     expect(projection.projected_paths.shadow.sizing_signal?.preview_size_usd).toBe(
       projection.projected_paths.shadow.trade_intent_preview?.size_usd,
@@ -811,5 +841,136 @@ describe('prediction market execution projection', () => {
     expect(projection.projected_paths.live.canonical_trade_intent_preview?.size_usd).toBe(
       projection.projected_paths.live.trade_intent_preview?.size_usd,
     )
+  })
+
+  it('keeps maker spread capture paper-only when quote freshness is too stale for shadow and live execution', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: venueHealthSnapshotSchema.parse({
+        ...makeHealth(),
+        staleness_ms: 6_500,
+      }),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const projection = projectPredictionMarketExecutionPath({
+      run_id: 'run-execution-path-maker-stale',
+      recommendation: makeRecommendation('bet', 'yes'),
+      execution_readiness: readiness,
+      strategy_name: 'maker_spread_capture',
+    })
+
+    expect(projection.selected_path).toBe('paper')
+    expect(projection.verdict).toBe('downgraded')
+    expect(projection.projected_paths.paper).toMatchObject({
+      allowed: true,
+      warnings: expect.arrayContaining([
+        'maker_quote_stale_for_shadow_live',
+      ]),
+    })
+    expect(projection.projected_paths.shadow).toMatchObject({
+      allowed: false,
+      blockers: expect.arrayContaining([
+        'maker_quote_stale_for_execution',
+      ]),
+    })
+    expect(projection.projected_paths.live).toMatchObject({
+      allowed: false,
+      blockers: expect.arrayContaining([
+        'maker_quote_stale_for_execution',
+      ]),
+    })
+  })
+
+  it('keeps maker spread capture out of live when the market regime says quoting is only guarded', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: makeHealth(),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const projection = projectPredictionMarketExecutionPath({
+      run_id: 'run-execution-path-maker-guarded',
+      recommendation: makeRecommendation('bet', 'yes'),
+      execution_readiness: readiness,
+      strategy_name: 'maker_spread_capture',
+      market_regime_summary: 'maker-regime-market is in stress regime; price=wide; freshness=fresh; resolution=watch; research=supportive; latency=lagging; maker_quote=guarded',
+    })
+
+    expect(projection.selected_path).toBe('shadow')
+    expect(projection.projected_paths.shadow.allowed).toBe(true)
+    expect(projection.projected_paths.live).toMatchObject({
+      allowed: false,
+      blockers: expect.arrayContaining([
+        'maker_quote_guarded_live_only_shadow',
+      ]),
+      warnings: expect.arrayContaining([
+        'maker_quote_state:guarded',
+      ]),
+    })
+  })
+
+  it('blocks all bet projections when the net edge does not clear the hard no-trade gate', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: makeHealth(),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const projection = projectPredictionMarketExecutionPath({
+      run_id: 'run-execution-path-low-edge',
+      recommendation: marketRecommendationPacketSchema.parse({
+        ...makeRecommendation('bet', 'yes'),
+        edge_bps: 150,
+        spread_bps: 120,
+        confidence: 0.58,
+      }),
+      execution_readiness: readiness,
+    })
+
+    expect(projection.selected_path).toBeNull()
+    expect(projection.selected_edge_bucket).toBe('forecast_alpha')
+    expect(projection.selected_pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'fail',
+      edge_bucket: 'forecast_alpha',
+    })
+    expect(projection.projected_paths.paper).toMatchObject({
+      allowed: false,
+      blockers: expect.arrayContaining([
+        'pre_trade_gate:net_edge_below_conservative_threshold',
+      ]),
+      trade_intent_preview: null,
+      canonical_trade_intent_preview: null,
+      sizing_signal: null,
+    })
+    expect(projection.projected_paths.paper.pre_trade_gate?.net_edge_bps ?? 0).toBeLessThan(
+      projection.projected_paths.paper.pre_trade_gate?.minimum_net_edge_bps ?? Number.POSITIVE_INFINITY,
+    )
+    expect(projection.summary).toContain('Hard no-trade gate fail')
   })
 })

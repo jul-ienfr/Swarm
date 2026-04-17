@@ -5,6 +5,10 @@ export const PREDICTION_MARKETS_BASELINE_MODEL = 'baseline-v0'
 
 export const predictionMarketVenueSchema = z.enum(['polymarket', 'kalshi'])
 export const predictionMarketModeSchema = z.enum(['advise', 'replay'])
+export const predictionMarketAdviceRequestModeSchema = z.enum(['predict', 'predict_deep'])
+export const predictionMarketAdviceResponseVariantSchema = z.enum(['standard', 'research_heavy', 'execution_heavy'])
+export const predictionMarketTimesFMModeSchema = z.enum(['off', 'auto', 'required'])
+export const predictionMarketTimesFMLaneSchema = z.enum(['microstructure', 'event_probability'])
 export const predictionMarketRecommendationActionSchema = z.enum(['bet', 'no_trade', 'wait'])
 export const predictionMarketSideSchema = z.enum(['yes', 'no'])
 export const predictionMarketVenueTypeSchema = z.enum([
@@ -43,11 +47,25 @@ export const predictionMarketArtifactTypeSchema = z.enum([
   'evidence_bundle',
   'forecast_packet',
   'recommendation_packet',
+  'source_audit',
+  'rules_lineage',
+  'catalyst_timeline',
+  'world_state',
+  'ticket_payload',
+  'quant_signal_bundle',
+  'decision_ledger',
+  'calibration_report',
+  'resolved_history',
+  'cost_model_report',
+  'walk_forward_report',
+  'autopilot_cycle_summary',
+  'research_memory_summary',
   'paper_surface',
   'replay_surface',
   'market_events',
   'market_positions',
   'research_sidecar',
+  'timesfm_sidecar',
   'microstructure_lab',
   'cross_venue_intelligence',
   'provenance_bundle',
@@ -949,6 +967,7 @@ export const venueCapabilitiesSchema = z.preprocess((value) => {
   rate_limit_notes: z.string().min(1).optional(),
   automation_constraints: z.array(z.string().min(1)).default([]),
   last_verified_at: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 }))
 
 export const marketFeedSurfaceSchema = z.object({
@@ -1034,6 +1053,7 @@ export const venueHealthSnapshotSchema = z.preprocess((value) => {
   degraded_mode: predictionMarketDegradedModeSchema.default('normal'),
   incident_flags: z.array(z.string().min(1)).default([]),
   notes: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 }))
 
 export const capitalLedgerSnapshotSchema = z.preprocess((value) => {
@@ -1058,7 +1078,12 @@ export const capitalLedgerSnapshotSchema = z.preprocess((value) => {
   transfer_latency_estimate_ms: z.number().int().nonnegative(),
 }))
 
-export const forecastBasisSchema = z.enum(['market_midpoint', 'manual_thesis'])
+export const forecastBasisSchema = z.enum([
+  'market_midpoint',
+  'manual_thesis',
+  'timesfm_microstructure',
+  'timesfm_event_probability',
+])
 export const forecastBenchmarkComparatorKindSchema = z.enum([
   'market_only',
   'baseline_model',
@@ -1201,6 +1226,79 @@ export const predictionMarketResearchAbstentionPolicySchema = z.object({
   }),
 })
 
+export const predictionMarketResearchPipelineStageStatusSchema = z.enum([
+  'queued',
+  'running',
+  'complete',
+  'partial',
+  'blocked',
+])
+
+export const predictionMarketResearchPipelineStageSchema = z.object({
+  stage_id: z.string().min(1),
+  stage_kind: z.string().min(1),
+  status: predictionMarketResearchPipelineStageStatusSchema,
+  model_family: z.string().min(1).optional(),
+  prompt_ref: z.string().min(1).optional(),
+  input_refs: z.array(z.string().min(1)).default([]),
+  output_refs: z.array(z.string().min(1)).default([]),
+  signal_refs: z.array(z.string().min(1)).default([]),
+  evidence_refs: z.array(z.string().min(1)).default([]),
+  probability_yes: z.number().min(0).max(1).nullable().optional(),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  rationale: z.string().min(1).optional(),
+  summary: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+})
+
+export const predictionMarketResearchPipelineTraceSchema = z.object({
+  schema_version: z.string().default(PREDICTION_MARKETS_SCHEMA_VERSION),
+  trace_id: z.string().min(1),
+  pipeline_id: z.string().min(1),
+  pipeline_version: z.string().min(1),
+  run_id: z.string().min(1),
+  venue: predictionMarketVenueSchema,
+  market_id: z.string().min(1),
+  model_family: z.string().min(1),
+  started_at: z.string().min(1),
+  completed_at: z.string().min(1).nullable().optional(),
+  stage_count: z.number().int().nonnegative(),
+  stages: z.array(predictionMarketResearchPipelineStageSchema).default([]),
+  current_stage_id: z.string().min(1).optional(),
+  terminal_stage_id: z.string().min(1).optional(),
+  summary: z.string().min(1),
+  key_factors: z.array(z.string().min(1)).default([]),
+  source_refs: z.array(z.string().min(1)).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+})
+
+export const predictionMarketResearchPipelineSummarySchema = z.object({
+  schema_version: z.string().default(PREDICTION_MARKETS_SCHEMA_VERSION),
+  summary_id: z.string().min(1),
+  trace_id: z.string().min(1),
+  pipeline_id: z.string().min(1),
+  pipeline_version: z.string().min(1),
+  run_id: z.string().min(1),
+  venue: predictionMarketVenueSchema,
+  market_id: z.string().min(1),
+  model_family: z.string().min(1),
+  generated_at: z.string().min(1),
+  forecaster_count: z.number().int().nonnegative(),
+  contributor_count: z.number().int().nonnegative(),
+  signal_count: z.number().int().nonnegative(),
+  evidence_count: z.number().int().nonnegative(),
+  stage_count: z.number().int().nonnegative(),
+  base_rate_probability_yes: z.number().min(0).max(1),
+  aggregate_probability_yes: z.number().min(0).max(1).nullable().optional(),
+  forecast_probability_yes: z.number().min(0).max(1).nullable().optional(),
+  abstention_recommended: z.boolean(),
+  key_factors: z.array(z.string().min(1)).default([]),
+  caveats: z.array(z.string().min(1)).default([]),
+  summary: z.string().min(1),
+  source_refs: z.array(z.string().min(1)).default([]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+})
+
 export const calibrationSnapshotSchema = z.object({
   schema_version: z.string().default(PREDICTION_MARKETS_SCHEMA_VERSION),
   snapshot_id: z.string().min(1),
@@ -1252,6 +1350,63 @@ export const tradeIntentSchema = z.object({
   risk_checks_passed: z.boolean(),
   created_at: z.string().min(1),
   notes: z.string().optional(),
+})
+
+export const predictionMarketApprovalTicketApprovalStatusSchema = z.enum([
+  'pending',
+  'pending_second_approval',
+  'approved',
+  'rejected',
+  'blocked',
+  'executed',
+])
+
+export const predictionMarketApprovalTicketApprovalStateSchema = z.object({
+  status: predictionMarketApprovalTicketApprovalStatusSchema,
+  requested_by: z.string().min(1),
+  requested_at: z.string().min(1),
+  required_approvals: z.number().int().positive().default(2),
+  current: z.number().int().nonnegative().default(0),
+  approvers: z.array(z.string().min(1)).default([]),
+  rejections: z.array(z.string().min(1)).default([]),
+  approved_at: z.string().min(1).nullable().optional(),
+  rejected_at: z.string().min(1).nullable().optional(),
+  summary: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+})
+
+export const approvalTradeTicketSchema = z.object({
+  schema_version: z.string().default(PREDICTION_MARKETS_SCHEMA_VERSION),
+  ticket_id: z.string().min(1),
+  ticket_kind: z.literal('approval_trade_ticket').default('approval_trade_ticket'),
+  workflow_stage: z.enum(['approval', 'trade', 'approved_trade', 'blocked']).default('approval'),
+  run_id: z.string().min(1),
+  venue: predictionMarketVenueSchema,
+  market_id: z.string().min(1),
+  market_slug: z.string().min(1).optional(),
+  source_bundle_id: z.string().min(1).optional(),
+  source_packet_refs: z.array(z.string().min(1)).default([]),
+  social_context_refs: z.array(z.string().min(1)).default([]),
+  market_context_refs: z.array(z.string().min(1)).default([]),
+  recommendation: predictionMarketRecommendationActionSchema.optional(),
+  side: predictionMarketSideSchema.nullable().optional(),
+  size_usd: z.number().positive().optional(),
+  limit_price: z.number().min(0).max(1).optional(),
+  edge_bps: z.number().nullable().optional(),
+  spread_bps: z.number().nullable().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  rationale: z.string().min(1),
+  summary: z.string().min(1),
+  approval_state: predictionMarketApprovalTicketApprovalStateSchema,
+  trade_intent_preview: z.lazy(() => tradeIntentSchema).nullable().optional(),
+  execution_intent_preview: z.lazy(() => executionIntentPreviewSchema).nullable().optional(),
+  approved_trade_intent_ref: z.string().min(1).optional(),
+  approved_by: z.array(z.string().min(1)).default([]),
+  rejected_by: z.array(z.string().min(1)).default([]),
+  notes: z.array(z.string().min(1)).default([]),
+  created_at: z.string().min(1),
+  updated_at: z.string().min(1).optional(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 })
 
 export const tradeIntentGuardSchema = z.object({
@@ -1450,16 +1605,39 @@ export const predictionMarketsAdviceRequestSchema = z.object({
   venue: predictionMarketVenueSchema.default('polymarket'),
   market_id: z.string().trim().min(1).optional(),
   slug: z.string().trim().min(1).optional(),
+  request_mode: z.preprocess((value) => {
+    if (value == null || value === '') return undefined
+    const normalized = String(value).trim().toLowerCase()
+    if (normalized === 'predict-deep' || normalized === 'predict_deep' || normalized === 'deep') {
+      return 'predict_deep'
+    }
+    return normalized
+  }, predictionMarketAdviceRequestModeSchema.optional()),
+  response_variant: z.preprocess((value) => {
+    if (value == null || value === '') return undefined
+    const normalized = String(value).trim().toLowerCase()
+    if (normalized === 'research-heavy' || normalized === 'research_heavy' || normalized === 'deep') {
+      return 'research_heavy'
+    }
+    if (normalized === 'execution-heavy' || normalized === 'execution_heavy') {
+      return 'execution_heavy'
+    }
+    return normalized
+  }, predictionMarketAdviceResponseVariantSchema.optional()),
   strategy_profile: z.preprocess((value) => {
     if (value == null || value === '' || value === 'default') return 'hybrid'
     return value
   }, z.enum(['forecast_only', 'execution_only', 'hybrid']).default('hybrid')),
+  variant_tags: z.array(z.string().trim().min(1)).max(12).default([]),
   enabled_strategy_families: z.array(strategyFamilySchema).default([...DEFAULT_ENABLED_STRATEGY_FAMILIES]),
   thesis_probability: z.number().min(0).max(1).optional(),
   thesis_rationale: z.string().trim().min(1).max(4000).optional(),
   min_edge_bps: z.number().min(1).max(10_000).optional(),
   max_spread_bps: z.number().min(1).max(10_000).optional(),
   history_limit: z.number().int().min(0).max(500).optional(),
+  timesfm_mode: predictionMarketTimesFMModeSchema.optional(),
+  timesfm_lanes: z.array(predictionMarketTimesFMLaneSchema).min(1).max(2).optional(),
+  evaluation_history: z.array(forecastEvaluationRecordSchema).max(1_000).optional(),
   research_signals: z.array(z.record(z.string(), z.unknown())).max(100).optional(),
   decision_packet: z.preprocess((value) => {
     if (value == null || value === '') return undefined
@@ -1483,6 +1661,10 @@ export type MarketDescriptor = z.infer<typeof marketDescriptorSchema>
 export type PredictionMarketVenue = z.infer<typeof predictionMarketVenueSchema>
 export type PredictionMarketSide = z.infer<typeof predictionMarketSideSchema>
 export type PredictionMarketVenueType = z.infer<typeof predictionMarketVenueTypeSchema>
+export type PredictionMarketAdviceRequestMode = z.infer<typeof predictionMarketAdviceRequestModeSchema>
+export type PredictionMarketAdviceResponseVariant = z.infer<typeof predictionMarketAdviceResponseVariantSchema>
+export type PredictionMarketTimesFMMode = z.infer<typeof predictionMarketTimesFMModeSchema>
+export type PredictionMarketTimesFMLane = z.infer<typeof predictionMarketTimesFMLaneSchema>
 export type PredictionMarketHealthStatus = z.infer<typeof predictionMarketHealthStatusSchema>
 export type VenueHealthStatus = z.infer<typeof venueHealthStatusSchema>
 export type PredictionMarketDegradedMode = z.infer<typeof predictionMarketDegradedModeSchema>
@@ -1549,6 +1731,13 @@ export type ForecastPipelineStageName = z.infer<typeof forecastPipelineStageName
 export type ForecastPipelineStageMode = z.infer<typeof forecastPipelineStageModeSchema>
 export type ForecastAbstentionReason = z.infer<typeof forecastAbstentionReasonSchema>
 export type TradeIntent = z.infer<typeof tradeIntentSchema>
+export type PredictionMarketApprovalTicketApprovalStatus = z.infer<
+  typeof predictionMarketApprovalTicketApprovalStatusSchema
+>
+export type PredictionMarketApprovalTicketApprovalState = z.infer<
+  typeof predictionMarketApprovalTicketApprovalStateSchema
+>
+export type ApprovalTradeTicket = z.infer<typeof approvalTradeTicketSchema>
 export type TradeIntentGuard = z.infer<typeof tradeIntentGuardSchema>
 export type MultiVenueExecution = z.infer<typeof multiVenueExecutionSchema>
 export type PredictionMarketBudgets = z.infer<typeof predictionMarketBudgetsSchema>
@@ -1562,3 +1751,15 @@ export type PredictionMarketRunSummary = z.infer<typeof predictionMarketRunSumma
 export type PredictionMarketsAdviceRequest = z.infer<typeof predictionMarketsAdviceRequestSchema>
 export type PredictionMarketsReplayRequest = z.infer<typeof predictionMarketsReplayRequestSchema>
 export type PredictionMarketArtifactType = z.infer<typeof predictionMarketArtifactTypeSchema>
+export type PredictionMarketResearchPipelineStageStatus = z.infer<
+  typeof predictionMarketResearchPipelineStageStatusSchema
+>
+export type PredictionMarketResearchPipelineStage = z.infer<
+  typeof predictionMarketResearchPipelineStageSchema
+>
+export type PredictionMarketResearchPipelineTrace = z.infer<
+  typeof predictionMarketResearchPipelineTraceSchema
+>
+export type PredictionMarketResearchPipelineSummary = z.infer<
+  typeof predictionMarketResearchPipelineSummarySchema
+>

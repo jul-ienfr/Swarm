@@ -41,6 +41,11 @@ describe('prediction markets CLI research signal injection', () => {
         research_benchmark_gate_summary:
           'benchmark gate: market_only=0.5100 aggregate=0.5950 forecast=0.6200 uplift_vs_market_only=1100bps uplift_vs_aggregate=850bps status=preview_only promotion=unproven ready=no blockers=out_of_sample_unproven out_of_sample=unproven',
         research_benchmark_uplift_bps: 1100,
+        timesfm_requested_mode: 'auto',
+        timesfm_effective_mode: 'auto',
+        timesfm_selected_lane: 'microstructure',
+        timesfm_health: 'healthy',
+        timesfm_summary: 'timesfm: mode=auto health=healthy selected=microstructure backend=vendor_torch summary="TimesFM requested auto on microstructure, event_probability; selected=microstructure; TimesFM healthy; ready_lanes=2/2 backend=vendor_torch dependency=vendor_import_available."',
       },
     }
   }
@@ -69,12 +74,25 @@ describe('prediction markets CLI research signal injection', () => {
             ? makePredictionRun({ blocksForecast: true, recommendation: 'wait' })
             : makePredictionRun({ blocksForecast: false, recommendation: 'bet' })
 
+        const requestContract = {
+          request_mode: body?.request_mode ?? 'predict',
+          response_variant: body?.response_variant ?? 'standard',
+          request_variant_tags: body?.variant_tags ?? [],
+        }
+
         if (
           req.method === 'POST' &&
           (req.url === '/api/v1/prediction-markets/advise' || req.url === '/api/v1/prediction-markets/replay')
         ) {
           res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify(predictionRun))
+          res.end(JSON.stringify({
+            ...requestContract,
+            ...predictionRun,
+            prediction_run: {
+              ...predictionRun.prediction_run,
+              ...requestContract,
+            },
+          }))
           return
         }
 
@@ -122,6 +140,12 @@ describe('prediction markets CLI research signal injection', () => {
         'advise',
         '--market-id',
         '540816',
+        '--request-mode',
+        'predict-deep',
+        '--response-variant',
+        'research-heavy',
+        '--variant-tags',
+        JSON.stringify(['polfish', 'mirofish-pm']),
         '--research-signals',
         JSON.stringify([firstSignal]),
         '--research-signal',
@@ -148,6 +172,9 @@ describe('prediction markets CLI research signal injection', () => {
     expect(lastRequest.url).toBe('/api/v1/prediction-markets/advise')
     expect(lastRequest.body).toMatchObject({
       market_id: '540816',
+      request_mode: 'predict-deep',
+      response_variant: 'research-heavy',
+      variant_tags: ['polfish', 'mirofish-pm'],
     })
     expect(lastRequest.body.research_signals).toEqual([firstSignal, secondSignal])
     expect(stdout).toContain('Injected research signals: 2')
@@ -155,6 +182,7 @@ describe('prediction markets CLI research signal injection', () => {
       'research: mode=research_driven pipeline=polymarket-research-pipeline v=poly-025-research-v1 forecasters=2 weighted=0.62 coverage=0.85 compare=aggregate abstention=structured-abstention-v1 blocks=no forecast=0.62 summary="Preferred mode: aggregate."',
     )
     expect(stdout).toContain('research_origin: origin=research_driven recommendation=bet abstention_effect=clear')
+    expect(stdout).toContain('timesfm: requested=auto effective=auto lane=microstructure health=healthy')
     expect(stdout).toContain(
       'benchmark: status=preview_only promotion=unproven ready=no uplift=1100bps blockers=out_of_sample_unproven reasons=out_of_sample_unproven',
     )
@@ -163,6 +191,9 @@ describe('prediction markets CLI research signal injection', () => {
     )
     expect(stdout).toContain(
       'benchmark_state: verdict=preview_only promotion_gate_kind=preview_only ready=no evidence_level=benchmark_preview promotion_blocker_summary=out_of_sample_unproven',
+    )
+    expect(stdout).toContain(
+      'request_contract: request_mode=predict-deep response_variant=research-heavy variant_tags=polfish|mirofish-pm',
     )
     expect(stdout).toContain('"ok": true')
   })

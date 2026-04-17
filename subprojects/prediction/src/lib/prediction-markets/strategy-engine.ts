@@ -479,6 +479,49 @@ function spreadThreshold(base: number, regime: PredictionMarketStrategyMarketReg
   return Math.max(1, Math.round(threshold))
 }
 
+function freshnessBudgetMs(
+  regime: PredictionMarketStrategyMarketRegime,
+  mode: 'default' | 'latency_sensitive' = 'default',
+): number {
+  if (mode === 'latency_sensitive') {
+    if (regime.disposition === 'defense' || regime.latency_state === 'stale' || regime.freshness_state === 'stale') {
+      return 60_000
+    }
+    if (regime.disposition === 'watch' || regime.latency_state === 'lagging') return 90_000
+    return 120_000
+  }
+
+  if (regime.disposition === 'defense' || regime.freshness_state === 'stale') return 120_000
+  if (regime.disposition === 'watch') return 180_000
+  if (regime.disposition === 'stress') return 240_000
+  return 300_000
+}
+
+function frameIsFreshEnough(frame: StrategyComparableFrame, budgetMs: number): boolean {
+  if (!frame.active || frame.closed) return false
+  if (frame.quote_age_ms == null) return false
+  return frame.quote_age_ms <= budgetMs
+}
+
+function normalizeDimension(value: string): string {
+  return normalizeText(value).replace(/\s+/g, '_')
+}
+
+function groupHasExecutionMisalignment(group: ComparableGroup, dimensions: readonly string[]): boolean {
+  const blocked = new Set(group.desalignment_dimensions.map(normalizeDimension))
+  return dimensions.some((dimension) => blocked.has(normalizeDimension(dimension)))
+}
+
+function groupSupportsConstraintExecution(group: ComparableGroup): boolean {
+  if (group.manual_review_required && group.narrative_risk_flags.includes('not_compatible')) {
+    return false
+  }
+
+  if (!group.compatible_resolution || !group.compatible_payout) return false
+
+  return !groupHasExecutionMisalignment(group, ['resolution', 'timing', 'horizon', 'payout', 'currency'])
+}
+
 function buildShadowCandidates(input: {
   regime: PredictionMarketStrategyMarketRegime
   watchlist: PredictionMarketShadowStrategyWatch[]
@@ -516,6 +559,8 @@ function buildIntramarketParityCandidates(input: {
   const candidates: PredictionMarketStrategyCandidate[] = []
   const basePrice = input.base.price_yes
   if (basePrice == null) return candidates
+  const freshnessBudget = freshnessBudgetMs(input.regime)
+  if (!frameIsFreshEnough(input.base, freshnessBudget)) return candidates
 
   const seen = new Set<string>()
   const groups = input.graph_groups.length > 0
@@ -535,6 +580,7 @@ function buildIntramarketParityCandidates(input: {
       if (marketId === input.base.market_id) continue
       const related = input.frame_map.get(marketId)
       if (!related || related.venue !== input.base.venue || related.price_yes == null) continue
+      if (!frameIsFreshEnough(related, freshnessBudget)) continue
       const similarity = jaccard(tokenize(input.base.question), tokenize(related.question))
       if (similarity < 0.35 && group.relation_kind === 'comparison') continue
       const gapBps = priceGapBps(basePrice, related.price_yes)
@@ -550,7 +596,12 @@ function buildIntramarketParityCandidates(input: {
   }
 
   const fallbackRelated = [...input.frame_map.values()]
-    .filter((frame) => frame.market_id !== input.base.market_id && frame.venue === input.base.venue && frame.price_yes != null)
+    .filter((frame) =>
+      frame.market_id !== input.base.market_id &&
+      frame.venue === input.base.venue &&
+      frame.price_yes != null &&
+      frameIsFreshEnough(frame, freshnessBudget),
+    )
     .map((frame) => ({
       group_id: frame.group_ids[0] ?? null,
       canonical_event_id: frame.canonical_event_ids[0] ?? null,
@@ -625,15 +676,28 @@ function buildMakerSpreadCaptureCandidates(input: {
   const spreadBps = input.base.spread_bps
   const depthNearTouch = input.base.liquidity_usd ?? null
   const quoteAgeMs = input.base.quote_age_ms
+  const freshnessBudgetMs = input.regime.maker_quote_freshness_budget_ms
   if (spreadBps == null || spreadBps < input.min_spread_bps) return []
   if (input.base.closed) return []
   if (input.base.active === false) return []
+  if (input.regime.maker_quote_state === 'blocked') return []
+  if (freshnessBudgetMs <= 0) return []
+  if (quoteAgeMs == null || quoteAgeMs > freshnessBudgetMs) return []
+
+  const quoteFreshnessScore = clamp(1 - (quoteAgeMs / freshnessBudgetMs), 0, 1)
+  const adverseSelectionPenalty =
+    (input.regime.latency_state === 'lagging' ? 0.08 : 0) +
+    (input.regime.price_state === 'dislocated' ? 0.06 : 0) +
+    (input.regime.freshness_state === 'warm' ? 0.04 : 0) +
+    (input.regime.maker_quote_state === 'guarded' ? 0.08 : 0)
 
   const signalScore = clampProbability(
     (spreadBps / 250) +
       (depthNearTouch != null ? clamp(depthNearTouch / 100_000, 0, 1) * 0.2 : 0.05) +
       (input.regime.price_state === 'wide' ? 0.1 : 0) +
-      (input.regime.price_state === 'dislocated' ? 0.15 : 0),
+      (input.regime.price_state === 'dislocated' ? 0.15 : 0) +
+      (quoteFreshnessScore * 0.18) -
+      adverseSelectionPenalty,
   )
 
   return [
@@ -649,21 +713,39 @@ function buildMakerSpreadCaptureCandidates(input: {
       related_market_ids: [],
       severity: severityFromScore(signalScore),
       signal_score: signalScore,
-      confidence_score: clampProbability(0.4 + (spreadBps / 400) + (depthNearTouch != null ? clamp(depthNearTouch / 150_000, 0, 1) * 0.2 : 0)),
+      confidence_score: clampProbability(
+        0.36 +
+        (spreadBps / 400) +
+        (depthNearTouch != null ? clamp(depthNearTouch / 150_000, 0, 1) * 0.2 : 0) +
+        (quoteFreshnessScore * 0.22) -
+        adverseSelectionPenalty,
+      ),
       summary: `Maker spread capture candidate with ${spreadBps.toFixed(2)} bps spread on ${input.base.market_id}.`,
       reasons: uniqueStrings([
         `spread_bps:${spreadBps.toFixed(2)}`,
         input.base.quote_age_ms != null ? `quote_age_ms:${input.base.quote_age_ms}` : null,
+        `maker_quote_freshness_budget_ms:${freshnessBudgetMs}`,
+        `maker_quote_state:${input.regime.maker_quote_state}`,
+        `freshness_state:${input.regime.freshness_state}`,
+        `latency_state:${input.regime.latency_state}`,
       ]),
       evidence_refs: uniqueStrings(input.base.evidence_refs),
       metrics: {
         spread_bps: round(spreadBps),
         quote_age_ms: quoteAgeMs,
+        maker_quote_freshness_budget_ms: freshnessBudgetMs,
+        maker_quote_state: input.regime.maker_quote_state,
+        quote_freshness_score: round(quoteFreshnessScore),
         liquidity_usd: input.base.liquidity_usd,
+        freshness_state: input.regime.freshness_state,
+        latency_state: input.regime.latency_state,
         source: 'maker_spread_capture',
       },
       metadata: {
         source: 'maker_spread_capture',
+        maker_quote_freshness_budget_ms: freshnessBudgetMs,
+        maker_quote_state: input.regime.maker_quote_state,
+        quote_freshness_score: round(quoteFreshnessScore),
       },
     }),
   ]
@@ -678,9 +760,19 @@ function buildLatencyReferenceSpreadCandidates(input: {
 }): PredictionMarketStrategyCandidate[] {
   const basePrice = input.base.price_yes
   if (basePrice == null) return []
+  const freshnessBudget = freshnessBudgetMs(input.regime, 'latency_sensitive')
+  if (!frameIsFreshEnough(input.base, freshnessBudget)) return []
+  if (input.regime.freshness_state === 'stale' || input.regime.latency_state === 'stale') return []
 
   const eligibleReferences = [...input.latency_references]
-    .filter((reference) => reference.market_id !== input.base.market_id && reference.price_yes != null)
+    .filter((reference) =>
+      reference.market_id !== input.base.market_id &&
+      reference.price_yes != null &&
+      (
+        reference.source === 'cross_venue_candidate' ||
+        (reference.quote_age_ms != null && reference.quote_age_ms <= freshnessBudget)
+      ),
+    )
     .map((reference) => ({
       reference,
       price_gap_bps: priceGapBps(basePrice, reference.price_yes),
@@ -762,9 +854,12 @@ function buildLogicalConstraintArbCandidates(input: {
   min_gap_bps: number
 }): PredictionMarketStrategyCandidate[] {
   const candidates: PredictionMarketStrategyCandidate[] = []
+  const freshnessBudget = freshnessBudgetMs(input.regime)
+  if (!frameIsFreshEnough(input.base, freshnessBudget)) return candidates
 
   for (const group of input.graph_groups) {
     if (!group.market_ids.includes(input.base.market_id)) continue
+    if (!groupSupportsConstraintExecution(group)) continue
 
     let strongest: {
       pair_type: 'natural_hedge' | 'parent_child'
@@ -782,6 +877,7 @@ function buildLogicalConstraintArbCandidates(input: {
       const relatedId = ids.find((id) => id !== input.base.market_id)
       if (!relatedId) continue
       const related = input.frame_map.get(relatedId)
+      if (!related || !frameIsFreshEnough(related, freshnessBudget)) continue
       const basePrice = input.base.price_yes
       const relatedPrice = related?.price_yes ?? null
       const sum = basePrice != null && relatedPrice != null ? basePrice + relatedPrice : null
@@ -817,6 +913,7 @@ function buildLogicalConstraintArbCandidates(input: {
       if (input.base.market_id !== parentId && input.base.market_id !== childId) continue
       const parent = input.frame_map.get(parentId)
       const child = input.frame_map.get(childId)
+      if (!parent || !child || !frameIsFreshEnough(parent, freshnessBudget) || !frameIsFreshEnough(child, freshnessBudget)) continue
       if (parent?.price_yes == null || child?.price_yes == null) continue
       const gapBps = Math.abs(parent.price_yes - child.price_yes) * 10_000
       if (gapBps < input.min_gap_bps) continue
@@ -889,13 +986,17 @@ function buildNegativeRiskBasketCandidates(input: {
   min_gap_bps: number
 }): PredictionMarketStrategyCandidate[] {
   const candidates: PredictionMarketStrategyCandidate[] = []
+  const freshnessBudget = freshnessBudgetMs(input.regime)
+  if (!frameIsFreshEnough(input.base, freshnessBudget)) return candidates
 
   for (const group of input.graph_groups) {
     if (!group.market_ids.includes(input.base.market_id)) continue
     if (group.natural_hedge_market_ids.length < 2) continue
+    if (!groupSupportsConstraintExecution(group)) continue
     const prices: Array<{ market_id: string; price_yes: number }> = []
     for (const marketId of group.natural_hedge_market_ids) {
       const frame = input.frame_map.get(marketId)
+      if (!frame || !frameIsFreshEnough(frame, freshnessBudget)) continue
       if (frame?.price_yes == null) continue
       prices.push({ market_id: marketId, price_yes: frame.price_yes })
     }

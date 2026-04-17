@@ -82,4 +82,20 @@ describe('prediction market sizing helper', () => {
     expect(capped.base_size_usd).toBe(200)
     expect(capped.multiplier).toBeLessThanOrEqual(0.85)
   })
+
+  it('tightens the soft haircut when basket correlation is extreme', () => {
+    const sizing = buildConservativePredictionMarketSizing({
+      baseSizeUsd: 100,
+      signals: {
+        confidence: 0.95,
+        calibration_ece: 0.02,
+        liquidity_usd: 500_000,
+        depth_near_touch: 10_000,
+        portfolio_correlation: 0.9,
+      },
+    })
+
+    expect(sizing.factors.portfolio_correlation_factor).toBeCloseTo(0.505, 3)
+    expect(sizing.size_usd).toBeCloseTo(48.84, 2)
+  })
 })

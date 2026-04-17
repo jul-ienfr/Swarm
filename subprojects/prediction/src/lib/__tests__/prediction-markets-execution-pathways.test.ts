@@ -432,9 +432,21 @@ describe('prediction markets execution pathways', () => {
     })
 
     expect(pathways.highest_actionable_mode).toBe('live')
+    expect(pathways.selected_edge_bucket).toBe('forecast_alpha')
+    expect(pathways.selected_pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'forecast_alpha',
+    })
     expect(pathways.pathways.find((pathway) => pathway.mode === 'live')).toMatchObject({
       actionable: true,
       status: 'ready',
+      edge_bucket: 'forecast_alpha',
+      pre_trade_gate: expect.objectContaining({
+        gate_name: 'hard_no_trade',
+        verdict: 'pass',
+        edge_bucket: 'forecast_alpha',
+      }),
     })
     expect(pathways.pathways.find((pathway) => pathway.mode === 'live')?.trade_intent_preview).toMatchObject({
       run_id: 'run-pathways-001',
@@ -595,6 +607,12 @@ describe('prediction markets execution pathways', () => {
       read_only: true,
       failure_case_count: 3,
     })
+    expect(shadowPathway?.edge_bucket).toBe('arbitrage_alpha')
+    expect(shadowPathway?.pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'pass',
+      edge_bucket: 'arbitrage_alpha',
+    })
     expect(shadowPathway?.shadow_arbitrage_signal?.base_executable_edge_bps).toBeGreaterThan(0)
     expect(shadowPathway?.sizing_signal?.source).toBe('trade_intent_preview+shadow_arbitrage')
     expect(shadowPathway?.sizing_signal?.preview_size_usd).toBe(shadowPathway?.trade_intent_preview?.size_usd)
@@ -638,7 +656,206 @@ describe('prediction markets execution pathways', () => {
     })
 
     expect(pathways.highest_actionable_mode).toBeNull()
+    expect(pathways.selected_edge_bucket).toBe('no_trade')
+    expect(pathways.selected_pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'not_applicable',
+      edge_bucket: 'no_trade',
+    })
+    expect(pathways.no_trade_baseline_summary).toContain('No-trade baseline')
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'paper')?.no_trade_baseline_summary).toContain(
+      'No-trade baseline',
+    )
     expect(pathways.pathways.every((pathway) => pathway.status === 'inactive')).toBe(true)
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'paper')?.edge_bucket).toBe('no_trade')
+    expect(pathways.summary).toContain('Baseline:')
     expect(pathways.summary).toContain('inactive')
+  })
+
+  it('keeps maker spread capture paper-only when quote freshness breaks market-making discipline', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: venueHealthSnapshotSchema.parse({
+        ...makeHealth(),
+        staleness_ms: 6_500,
+      }),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const pathways = buildPredictionMarketExecutionPathways({
+      runId: 'run-pathways-maker-stale',
+      snapshot: makeSnapshot(),
+      resolutionPolicy: makeResolutionPolicy(),
+      forecast: makeForecast(),
+      recommendation: makeRecommendation('bet', 'yes'),
+      executionReadiness: readiness,
+      strategy_name: 'maker_spread_capture',
+    })
+
+    expect(pathways.highest_actionable_mode).toBe('paper')
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'paper')).toMatchObject({
+      actionable: true,
+      warnings: expect.arrayContaining([
+        'maker_quote_stale_for_shadow_live',
+      ]),
+    })
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'shadow')).toMatchObject({
+      actionable: false,
+      blockers: expect.arrayContaining([
+        'maker_quote_stale_for_execution',
+      ]),
+    })
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'live')).toMatchObject({
+      actionable: false,
+      blockers: expect.arrayContaining([
+        'maker_quote_stale_for_execution',
+      ]),
+    })
+  })
+
+  it('keeps maker spread capture on shadow when the regime says live quoting should stay guarded', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: makeHealth(),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const pathways = buildPredictionMarketExecutionPathways({
+      runId: 'run-pathways-maker-guarded',
+      snapshot: makeSnapshot(),
+      resolutionPolicy: makeResolutionPolicy(),
+      forecast: makeForecast(),
+      recommendation: makeRecommendation('bet', 'yes'),
+      executionReadiness: readiness,
+      strategy_name: 'maker_spread_capture',
+      market_regime_summary: 'maker-regime-market is in stress regime; price=wide; freshness=fresh; resolution=watch; research=supportive; latency=lagging; maker_quote=guarded',
+    })
+
+    expect(pathways.highest_actionable_mode).toBe('shadow')
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'shadow')).toMatchObject({
+      actionable: true,
+      warnings: expect.arrayContaining([
+        'maker_quote_state:guarded',
+      ]),
+    })
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'live')).toMatchObject({
+      actionable: false,
+      blockers: expect.arrayContaining([
+        'maker_quote_guarded_live_only_shadow',
+      ]),
+    })
+  })
+
+  it('blocks every actionable pathway when the hard no-trade gate says the edge is too thin', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: makeHealth(),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const pathways = buildPredictionMarketExecutionPathways({
+      runId: 'run-pathways-low-edge',
+      snapshot: makeSnapshot(),
+      resolutionPolicy: makeResolutionPolicy(),
+      forecast: makeForecast(),
+      recommendation: marketRecommendationPacketSchema.parse({
+        ...makeRecommendation('bet', 'yes'),
+        edge_bps: 150,
+        spread_bps: 120,
+        confidence: 0.58,
+      }),
+      executionReadiness: readiness,
+    })
+
+    expect(pathways.highest_actionable_mode).toBeNull()
+    expect(pathways.selected_edge_bucket).toBe('forecast_alpha')
+    expect(pathways.selected_pre_trade_gate).toMatchObject({
+      gate_name: 'hard_no_trade',
+      verdict: 'fail',
+      edge_bucket: 'forecast_alpha',
+    })
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'paper')).toMatchObject({
+      actionable: false,
+      blockers: expect.arrayContaining([
+        'pre_trade_gate:net_edge_below_conservative_threshold',
+      ]),
+      trade_intent_preview: null,
+      canonical_trade_intent_preview: null,
+      sizing_signal: null,
+    })
+    expect(pathways.pathways.find((pathway) => pathway.mode === 'paper')?.pre_trade_gate?.net_edge_bps ?? 0).toBeLessThan(
+      pathways.pathways.find((pathway) => pathway.mode === 'paper')?.pre_trade_gate?.minimum_net_edge_bps ?? Number.POSITIVE_INFINITY,
+    )
+  })
+
+  it('surfaces additive external governance metadata without changing canonical execution gating', () => {
+    const capitalLedger = makeCapitalLedger()
+    const reconciliation = reconcileCapitalLedger({
+      theoretical: capitalLedger,
+      observed: capitalLedger,
+    })
+    const readiness = buildPredictionMarketExecutionReadiness({
+      capabilities: makeCapabilities(),
+      health: makeHealth(),
+      budgets: makeBudgets(),
+      compliance_matrix: makeComplianceMatrix(),
+      capital_ledger: capitalLedger,
+      reconciliation,
+    })
+
+    const pathways = buildPredictionMarketExecutionPathways({
+      runId: 'run-pathways-governance',
+      snapshot: makeSnapshot(),
+      resolutionPolicy: makeResolutionPolicy(),
+      forecast: makeForecast(),
+      recommendation: makeRecommendation('bet', 'yes'),
+      executionReadiness: readiness,
+      operator_thesis: {
+        present: true,
+        source: 'manual_thesis',
+        probability_yes: 0.71,
+        rationale: 'Desk thesis present.',
+        evidence_refs: ['evidence:pathways'],
+        summary: 'Desk thesis present.',
+      },
+      research_pipeline_trace: {
+        pipeline_id: 'pipeline-1',
+        pipeline_version: 'v1',
+        preferred_mode: 'aggregate',
+        oracle_family: 'llm_superforecaster',
+        forecaster_count: 3,
+        evidence_count: 2,
+        source_refs: ['trace-1'],
+        summary: 'Research trace available.',
+      },
+    })
+
+    expect(pathways.external_governance_summary).toContain('P1-B runtime summary')
+    expect(pathways.summary).toContain('Operator thesis: Desk thesis present.')
+    expect(pathways.approval_ticket?.summary).toContain('approval ticket')
   })
 })

@@ -42,7 +42,7 @@ const runManifest = runManifestSchema.parse({
 })
 
 function mockStoredRunDetails() {
-  storeMocks.getPredictionMarketRunDetails.mockReturnValue({
+  const storedRunDetails = {
     run_id: 'run-456',
     source_run_id: null,
     workspace_id: 1,
@@ -211,7 +211,9 @@ function mockStoredRunDetails() {
       },
     },
   ],
-})
+  }
+  storeMocks.getPredictionMarketRunDetails.mockReturnValue(storedRunDetails)
+  return storedRunDetails
 }
 
 describe('prediction market run detail surface', () => {
@@ -287,5 +289,94 @@ describe('prediction market run detail surface', () => {
       'run-456:recommendation_packet',
       'run-456:shadow_arbitrage',
     ])
+  })
+
+  it('surfaces resolved history, cost model, and walk-forward summaries from stored artifacts', () => {
+    const stored = mockStoredRunDetails()
+    storeMocks.getPredictionMarketRunDetails.mockReturnValue({
+      ...stored,
+      artifacts: [
+        ...stored.artifacts,
+        {
+          artifact_id: 'run-456:resolved_history',
+          artifact_type: 'resolved_history',
+          sha256: 'sha-resolved-history',
+          payload: {
+            artifact_kind: 'resolved_history',
+            summary: 'Resolved history built from 14/14 evaluation records spanning 2026-01-01T00:00:00.000Z -> 2026-04-01T00:00:00.000Z.',
+            resolved_records: 14,
+            source_summary: 'Resolved 14 local evaluation records from 3 stored runs.',
+            first_cutoff_at: '2026-01-01T00:00:00.000Z',
+            last_cutoff_at: '2026-04-01T00:00:00.000Z',
+          },
+        },
+        {
+          artifact_id: 'run-456:cost_model_report',
+          artifact_type: 'cost_model_report',
+          sha256: 'sha-cost-model',
+          payload: {
+            artifact_kind: 'cost_model_report',
+            summary: 'Cost model evaluated 14 resolved points; average net edge=118 bps, viable rate=0.642857.',
+            total_points: 14,
+            viable_point_count: 9,
+            viable_point_rate: 0.642857,
+            average_cost_bps: 47,
+            average_net_edge_bps: 118,
+          },
+        },
+        {
+          artifact_id: 'run-456:walk_forward_report',
+          artifact_type: 'walk_forward_report',
+          sha256: 'sha-walk-forward',
+          payload: {
+            artifact_kind: 'walk_forward_report',
+            summary: 'Walk-forward ran 4 windows; mean brier improvement=0.012, mean net edge=118 bps.',
+            total_points: 14,
+            total_windows: 4,
+            stable_window_rate: 0.75,
+            mean_calibrated_brier_score: 0.171,
+            mean_calibrated_log_loss: 0.438,
+            mean_brier_improvement: 0.012,
+            mean_log_loss_improvement: 0.017,
+            mean_net_edge_bps: 118,
+            promotion_ready: true,
+            notes: ['stable_windows'],
+          },
+        },
+      ],
+    })
+
+    const detail = getPredictionMarketRunDetails('run-456', 1)
+
+    expect(detail).toMatchObject({
+      resolved_history_points: 14,
+      resolved_history_source_summary: 'Resolved 14 local evaluation records from 3 stored runs.',
+      resolved_history_first_cutoff_at: '2026-01-01T00:00:00.000Z',
+      resolved_history_last_cutoff_at: '2026-04-01T00:00:00.000Z',
+      cost_model_summary: 'Cost model evaluated 14 resolved points; average net edge=118 bps, viable rate=0.642857.',
+      cost_model_total_points: 14,
+      cost_model_viable_point_count: 9,
+      cost_model_viable_point_rate: 0.642857,
+      cost_model_average_cost_bps: 47,
+      cost_model_average_net_edge_bps: 118,
+      walk_forward_windows: 4,
+      walk_forward_total_points: 14,
+      walk_forward_stable_window_rate: 0.75,
+      walk_forward_mean_brier_improvement: 0.012,
+      walk_forward_mean_log_loss_improvement: 0.017,
+      walk_forward_mean_net_edge_bps: 118,
+      walk_forward_promotion_ready: true,
+      walk_forward_summary: {
+        summary: 'Walk-forward ran 4 windows; mean brier improvement=0.012, mean net edge=118 bps.',
+        sample_count: 14,
+        window_count: 4,
+        win_rate: 0.75,
+        brier_score: 0.171,
+        log_loss: 0.438,
+        uplift_bps: 118,
+        promotion_ready: true,
+        notes: ['stable_windows'],
+      },
+    })
   })
 })

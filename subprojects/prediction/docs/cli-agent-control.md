@@ -14,8 +14,14 @@ Designed for autonomous/headless usage first:
 - SSE streaming for real-time event watching
 - Compound subcommands for memory, soul, comments
 
-The `live` surface is still `preflight-only`: it threads `execution_readiness` and `multi_venue_execution` through the canonical `execution_projection` preview, but it does not claim a real websocket or live-execution transport in this autonomous subproject.
-The same `POST /api/v1/prediction-markets/runs/:run_id/live` route now also accepts an explicit `execution_mode` of `preflight` or `live`; the safe default remains `preflight`, and `live` still requires an already approved live intent.
+The `live` surface stays `preflight-first`: it threads `execution_readiness` and `multi_venue_execution` through the canonical `execution_projection` preview, and the same `POST /api/v1/prediction-markets/runs/:run_id/live` route can then materialize governed venue execution with an explicit `execution_mode=live`.
+The safe default remains `preflight`, and `live` still requires an already approved live intent plus a configured Polymarket transport.
+
+Current governance status:
+- canonical today: `execution_projection`, `execution_projection_selected_preview`, `live_trade_intent_preview`, `paper_trade_intent_preview`, `shadow_trade_intent_preview`, and `trade_intent_guard`
+- partially integrated: `approval_ticket`, `operator_thesis`, and `research_pipeline_trace` as optional metadata around `execution_pathways`
+- not yet fully wired end to end: the main `service.ts` flow does not yet guarantee these three fields on every `advise` / `replay` artifact, so CLI consumers must treat them as opportunistic fields rather than required operator inputs
+- no CLI command should infer that `live` is approved from `approval_ticket` alone; the existing approved live-intent flow remains the source of truth
 
 A same-origin operator dashboard app is now available too:
 - same-origin app route: `/prediction-markets/dashboard`
@@ -116,6 +122,14 @@ node scripts/prediction-dashboard.cjs --upstream http://127.0.0.1:3000
 - `--benchmark-summary`
 
 `--operator-json` adds the same operator preset and also enables `--json`.
+
+When `approval_ticket`, `operator_thesis`, or `research_pipeline_trace` appear in a run payload, they should be rendered as read-only governance/research context:
+
+- `approval_ticket`: explain whether the current pathway is `paper_only`, `shadow_only`, `pending_live_approval`, or `blocked`
+- `operator_thesis`: expose the operator-side thesis source and probability when present
+- `research_pipeline_trace`: expose pipeline lineage, preferred mode, and oracle family when present
+
+If these fields are absent, the CLI should fall back to the already canonical `execution_projection`, live-intent preview, and `trade_intent_guard` surfaces without treating the absence as an error.
 
 `--print-summary` prints a compact human-readable operator/feed surface line, including:
 
@@ -258,12 +272,22 @@ node subprojects/prediction/scripts/mc-cli.cjs prediction-markets replay --run-i
 - advise --market-id <id> [--research-signals ...]
 - replay --run-id <id>
 - capabilities --venue polymarket|kalshi
+
+## Documentation boundary
+
+This note documents two different states on purpose:
+
+- already governed and canonical: `live` preflight, approved live intent, `trade_intent_guard`, and transport-aware operator surfaces
+- newly introduced but not yet end-to-end canonical: `approval_ticket`, `operator_thesis`, and `research_pipeline_trace`
+
+Anything in the second group must stay optional in tooling until the service layer populates it reliably.
 - health --venue polymarket|kalshi
 
 `--artifact-audit-summary` adds compact text-mode summaries for `artifact_audit` and `artifact_readback` on `run`/`runs`.
 `--execution-readiness-summary` adds compact text-mode summaries for `execution_readiness` on `run`/`runs`.
 `--execution-pathways-summary` adds compact text-mode summaries for `execution_pathways`, `execution_projection`, or equivalent runtime projection fields on `run`/`runs`, `dispatch`, `paper`, `shadow`, and `live` when present. When the runtime exposes them, it also prints a compact `strategy_layer:` line covering primary strategy, market regime, strategy counts, strategy shadow summary, resolution anomalies, and execution-intent preview kind/source hints.
 `--research-summary` adds compact text-mode summaries for top-level research runtime hints on `run`/`runs`, `dispatch`, `paper`, `shadow`, and `live`, and also on `advise`/`replay` when the server response carries a nested `prediction_run`. When present, it also prints the benchmark/uplift gate summary derived from the research sidecar, and the research output now includes a separate `research_origin:` line so the summary makes the baseline vs research-driven distinction and any abstention-driven flip explicit.
+`--request-mode` and `--response-variant` are the product-facing `advise` aliases for `request_mode=predict|predict_deep` and `response_variant=standard|research_heavy|execution_heavy`; they travel through the same advice request body as `strategy_profile` and can be combined with `--variant-tags`.
 When present, `--research-summary` also prints a compact `benchmark:` gate line with `status`, `promotion`, `ready`, `uplift`, `blockers`, and `reasons` when the runtime exposes benchmark/uplift hints derived from the research comparative report. The CLI now also prints a sibling `benchmark_evidence:` line that makes the preview vs promotion-evidence split explicit (`preview=yes/no`, `promotion_evidence=...`, `promotion_status=...`, `ready=...`), plus a compact `benchmark_state:` line that carries the canonical verdict and blocker summary. When both canonical `benchmark_*` fields and legacy `research_benchmark_*` aliases are present, the CLI prefers the canonical `benchmark_*` values and only falls back to the research aliases when the canonical ones are absent.
 `--benchmark-summary` prints only the compact `benchmark:` gate line and the matching `benchmark_evidence:` companion line when benchmark/uplift hints exist, without requiring the rest of the research runtime summary. The compact lines follow the same `status/promotion/ready/uplift` shape as the ones surfaced via `--research-summary`, and they also work on `run`/`runs`, `dispatch`, plus `paper`, `shadow`, and `live` surfaces when they expose benchmark hints. `benchmark_state:` is printed alongside them when the runtime exposes a canonical verdict or promotion blocker summary, with the same canonical-over-legacy alias preference.
 `--research-signals-summary` remains the opt-in helper that only counts injected CLI research signals on `advise`.
@@ -271,7 +295,7 @@ When present, `--execution-pathways-summary` also surfaces the compact top-level
 `dispatch` is an operator-only preflight surface: it does not execute on venues, and the local CLI wrapper prints a compact `dispatch_preflight` line with status, selected path, blockers, and summary text.
 `paper` is the first bounded operator surface beyond generic preflight: it consumes `execution_projection.projected_paths.paper`, surfaces the canonical paper preview, stays without venue execution, and prints a compact `paper_surface` line in text mode.
 `shadow` is the second bounded operator surface beyond generic preflight: it consumes `execution_projection.projected_paths.shadow`, surfaces the canonical shadow preview, stays strictly `preflight-only`, and prints a compact `shadow_surface` line in text mode.
-`live` is the third bounded operator surface beyond generic preflight: it is benchmark-gated, consumes `execution_projection.projected_paths.live`, surfaces the canonical live preview, stays strictly `preflight-only`, and prints a compact `live_surface` line in text mode.
+`live` is the third bounded operator surface beyond generic preflight: it is benchmark-gated, consumes `execution_projection.projected_paths.live`, surfaces the canonical live preview, and remains the preflight-first surface that can later materialize governed live execution when `execution_mode=live` is requested with an approved live intent.
 `capabilities` and `health` are the feed/operator bootstrap surfaces for this subproject: they expose the local contracts, automation constraints, budget envelopes, and feed status (`market_feed`, `user_feed`, `rtds`) without requiring the legacy workspace shape.
 The `live` surface is execution_projection-first: it reads the canonical `execution_projection` preview, never recalculates venue execution on its own, and only reflects the selected live path when the benchmark gate is still open and the canonical selected path is `live`.
 When benchmark promotion is still unproven or the canonical selected path is not `live`, the `live` surface stays blocked and explains that state explicitly instead of bypassing `execution_projection`.

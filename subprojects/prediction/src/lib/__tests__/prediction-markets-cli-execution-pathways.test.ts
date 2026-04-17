@@ -271,6 +271,12 @@ describe('prediction markets CLI execution pathways', () => {
                 sizeUsd: 40,
               }),
               execution_projection_selected_preview_source: 'canonical_trade_intent_preview',
+              execution_projection_selected_edge_bucket: 'arbitrage_alpha',
+              execution_projection_selected_pre_trade_gate_verdict: 'pass',
+              execution_projection_selected_pre_trade_gate_summary:
+                'Hard no-trade gate pass. bucket=arbitrage_alpha gross=2200bps frictions=210bps net=1990bps minimum=420bps',
+              execution_projection_selected_path_net_edge_bps: 1990,
+              execution_projection_selected_path_minimum_net_edge_bps: 420,
               trade_intent_guard: makeTradeIntentGuard({
                 selectedPath: 'shadow',
                 preview: makeTradeIntentPreview({
@@ -364,6 +370,12 @@ describe('prediction markets CLI execution pathways', () => {
                 notes: 'paper canonical preview intent',
               },
               execution_projection_selected_preview_source: 'canonical_trade_intent_preview',
+              execution_projection_selected_edge_bucket: 'forecast_alpha',
+              execution_projection_selected_pre_trade_gate_verdict: 'pass',
+              execution_projection_selected_pre_trade_gate_summary:
+                'Hard no-trade gate pass. bucket=forecast_alpha gross=2200bps frictions=185bps net=2015bps minimum=370bps',
+              execution_projection_selected_path_net_edge_bps: 2015,
+              execution_projection_selected_path_minimum_net_edge_bps: 370,
               execution_projection_selected_path_canonical_size_usd: 35,
               execution_projection_selected_path_shadow_signal_present: false,
               trade_intent_guard: {
@@ -534,6 +546,15 @@ describe('prediction markets CLI execution pathways', () => {
               source_refs: ['run-pathways-002:pipeline_guard', 'run-pathways-002:compliance_report', 'run-pathways-002:execution_readiness', 'run-pathways-002:execution_readiness#capital_ledger'],
               blockers: ['manual_review_required_for_execution', 'reconciliation_unavailable'],
               downgrade_reasons: ['manual_review_required_for_execution', 'reconciliation_unavailable'],
+              selected_edge_bucket: 'arbitrage_alpha',
+              selected_pre_trade_gate: {
+                gate_name: 'hard_no_trade',
+                verdict: 'pass',
+                edge_bucket: 'arbitrage_alpha',
+                net_edge_bps: 1132,
+                minimum_net_edge_bps: 244,
+                summary: 'Hard no-trade gate pass. bucket=arbitrage_alpha gross=1800bps frictions=668bps net=1132bps minimum=244bps',
+              },
               summary: 'gate=execution_projection preflight=yes verdict=downgraded requested=live selected=shadow highest_safe=shadow recommended=shadow manual_review=yes ttl_ms=30000 eligible=2/3 counts=ready:1|degraded:1|blocked:1 basis=readiness,compliance,capital,reconciliation refs=4 blockers=2 downgrades=2',
             },
             projected_paths: {
@@ -541,6 +562,15 @@ describe('prediction markets CLI execution pathways', () => {
               shadow: {
                 status: 'degraded',
                 effective_mode: 'shadow',
+                edge_bucket: 'arbitrage_alpha',
+                pre_trade_gate: {
+                  gate_name: 'hard_no_trade',
+                  verdict: 'pass',
+                  edge_bucket: 'arbitrage_alpha',
+                  net_edge_bps: 1132,
+                  minimum_net_edge_bps: 244,
+                  summary: 'Hard no-trade gate pass. bucket=arbitrage_alpha gross=1800bps frictions=668bps net=1132bps minimum=244bps',
+                },
                 simulation: {
                   shadow_arbitrage: makeShadowArbitrageReport(),
                 },
@@ -559,6 +589,15 @@ describe('prediction markets CLI execution pathways', () => {
                 shadow_arbitrage_signal: makeShadowArbitrageSignal(),
               },
               live: { status: 'blocked', effective_mode: 'shadow' },
+            },
+            selected_edge_bucket: 'arbitrage_alpha',
+            selected_pre_trade_gate: {
+              gate_name: 'hard_no_trade',
+              verdict: 'pass',
+              edge_bucket: 'arbitrage_alpha',
+              net_edge_bps: 1132,
+              minimum_net_edge_bps: 244,
+              summary: 'Hard no-trade gate pass. bucket=arbitrage_alpha gross=1800bps frictions=668bps net=1132bps minimum=244bps',
             },
             summary: 'requested live, selected shadow; gate execution_projection; preflight only. requested live, selected shadow, recommended shadow',
             microstructure_lab: {
@@ -609,6 +648,12 @@ describe('prediction markets CLI execution pathways', () => {
             sizeUsd: 40,
           }),
           execution_projection_selected_preview_source: 'canonical_trade_intent_preview',
+          execution_projection_selected_edge_bucket: 'arbitrage_alpha',
+          execution_projection_selected_pre_trade_gate_verdict: 'pass',
+          execution_projection_selected_pre_trade_gate_summary:
+            'Hard no-trade gate pass. bucket=arbitrage_alpha gross=2200bps frictions=210bps net=1990bps minimum=420bps',
+          execution_projection_selected_path_net_edge_bps: 1990,
+          execution_projection_selected_path_minimum_net_edge_bps: 420,
           trade_intent_guard: makeTradeIntentGuard({
             selectedPath: 'shadow',
             preview: makeTradeIntentPreview({
@@ -868,6 +913,9 @@ describe('prediction markets CLI execution pathways', () => {
       '  execution_projection selected ops: canonical_size=40 capped_from=50 source=trade_intent_preview+shadow_arbitrage tif=ioc shadow_signal=edge=1210|size=40|pnl=88bps|worst=hedge_delay',
     )
     expect(runsResult.stdout).toContain(
+      '  execution_projection pre_trade: edge_bucket=arbitrage_alpha verdict=pass net=1990bps minimum=420bps',
+    )
+    expect(runsResult.stdout).toContain(
       '  execution_projection source: canonical gate=execution_projection recalc=no modes=paper|shadow|live',
     )
     expect(runsResult.stdout).toContain(
@@ -890,6 +938,9 @@ describe('prediction markets CLI execution pathways', () => {
     )
     expect(runsResult.stdout).toContain(
       '  execution_projection selected ops: canonical_size=35 source=trade_intent_preview tif=day',
+    )
+    expect(runsResult.stdout).toContain(
+      '  execution_projection pre_trade: edge_bucket=forecast_alpha verdict=pass net=2015bps minimum=370bps',
     )
     expect(runsResult.stdout).toContain(
       '  execution_projection preflight: gate=execution_projection verdict=downgraded requested=live selected=paper highest_safe=paper recommended=paper manual_review=yes ttl_ms=30000',
@@ -1000,6 +1051,12 @@ describe('prediction markets CLI execution pathways', () => {
     )
     expect(runResult.stdout).toContain(
       'execution_projection selected ops: canonical_size=40 capped_from=50 source=trade_intent_preview+shadow_arbitrage tif=ioc shadow_signal=edge=1210|size=40|pnl=88bps|worst=hedge_delay',
+    )
+    expect(runResult.stdout).toContain(
+      'execution_projection pre_trade: edge_bucket=arbitrage_alpha verdict=pass net=1990bps minimum=420bps',
+    )
+    expect(runResult.stdout).toContain(
+      'execution_projection pre_trade: edge_bucket=arbitrage_alpha verdict=pass net=1990bps minimum=420bps summary="Hard no-trade gate pass. bucket=arbitrage_alpha gross=2200bps frictions=210bps net=1990bps minimum=420bps"',
     )
     expect(runResult.stdout).toContain(
       'research: mode=research_driven pipeline=research-pipeline-runtime v=v3 forecasters=2 weighted=0.67 coverage=0.83 compare=aggregate abstention=structured-abstention-v1 blocks=no forecast=0.69 summary="Preferred mode: aggregate."',

@@ -17,6 +17,8 @@ from .models import (
     RuntimeFallbackPolicy,
 )
 
+PROMPT_COMPACTION_MAX_CHARS = 5000
+
 
 @dataclass(slots=True)
 class _LegacyMeetingTransport:
@@ -40,6 +42,7 @@ class _LegacyMeetingTransport:
         participants: list[str],
         prior_summary: str,
         critique_focus: str | None = None,
+        fallback_context: dict[str, Any] | None = None,
     ) -> MeetingTurnDraft:
         instruction = _build_participant_prompt(
             participant=participant,
@@ -57,15 +60,18 @@ class _LegacyMeetingTransport:
             messages=[{"role": "user", "content": instruction}],
         )
         content = str(result.get("content", "")).strip()
-        if not content and self.injected_client:
-            # Test/integration clients can still provide a generic chat-completion fallback.
+        if not content:
             fallback_messages = [
                 {
                     "role": "system",
                     "content": (
                         "You are participating in a structured strategy meeting.\n"
                         f"Adopt the point of view of agent '{participant}'.\n"
-                        "Return concise, concrete analysis."
+                        "Return concise, concrete analysis.\n"
+                        "Prefer structured output with a thesis, recommended actions, key risks, disagreements,\n"
+                        "and a closing note.\n"
+                        "If the topic is quantitative or comparative, explicitly separate forecast alpha,\n"
+                        "arbitrage alpha, execution alpha, and no-trade."
                     ),
                 },
                 {"role": "user", "content": instruction},
@@ -85,9 +91,17 @@ class _LegacyMeetingTransport:
                 objective=objective,
                 prior_summary=prior_summary,
                 critique_focus=critique_focus,
+                fallback_context=fallback_context,
             )
         parsed = _parse_turn_content(content)
-        return parsed if parsed.thesis else MeetingTurnDraft(thesis=content, closing_note=None)
+        if parsed.thesis:
+            if fallback_context and not parsed.closing_note:
+                parsed.closing_note = _fallback_note(fallback_context)
+            return parsed
+        return MeetingTurnDraft(
+            thesis=content,
+            closing_note=_fallback_note(fallback_context),
+        )
 
     def summarize_round(
         self,
@@ -98,28 +112,9 @@ class _LegacyMeetingTransport:
         phase: str,
         turns: list[MeetingTurnDraft],
         prior_summary: str,
+        fallback_context: dict[str, Any] | None = None,
     ) -> MeetingRoundSummary:
         transcript_block = _format_turns(turns)
-        if not self.injected_client:
-            top_options = [turn.thesis for turn in turns[:3]]
-            risks = [risk for turn in turns for risk in turn.key_risks][:5]
-            disagreements = [item for turn in turns for item in turn.disagreements][:5]
-            summary = _legacy_round_summary_text(
-                topic=topic,
-                objective=objective,
-                phase=phase,
-                prior_summary=prior_summary,
-                top_options=top_options,
-                risks=risks,
-                disagreements=disagreements,
-                transcript_block=transcript_block,
-            )
-            return MeetingRoundSummary(
-                summary=summary,
-                top_options=top_options,
-                risks=risks,
-                unresolved_disagreements=disagreements,
-            )
         messages = [
             {
                 "role": "system",
@@ -127,7 +122,8 @@ class _LegacyMeetingTransport:
                     "You are a neutral meeting facilitator. Summarize the discussion into a compact briefing "
                     "that can be fed into the next round. Keep it factual.\n"
                     "If the topic is quantitative or comparative, carry forward explicit probability ranges,\n"
-                    "gain-vs-no-trade tradeoffs, and the main invalidation test."
+                    "gain-vs-no-trade tradeoffs, and the main invalidation test.\n"
+                    "Prefer a brief with explicit sections for summary, top options, key risks, and unresolved disagreements."
                 ),
             },
             {
@@ -150,9 +146,39 @@ class _LegacyMeetingTransport:
             preferred_tier="tier3_paid",
             model_name="claude-sonnet-4-6",
         )
-        if not result.get("success"):
-            return MeetingRoundSummary(summary=transcript_block[:4000])
-        return MeetingRoundSummary(summary=str(result.get("content", "")).strip())
+        if result.get("success"):
+            content = str(result.get("content", "")).strip()
+            if content:
+                top_options = [turn.thesis for turn in turns[:3]]
+                risks = [risk for turn in turns for risk in turn.key_risks][:5]
+                disagreements = [item for turn in turns for item in turn.disagreements][:5]
+                summary = _append_fallback_context(content, fallback_context)
+                return MeetingRoundSummary(
+                    summary=summary,
+                    top_options=top_options,
+                    risks=risks,
+                    unresolved_disagreements=disagreements,
+                )
+        top_options = [turn.thesis for turn in turns[:3]]
+        risks = [risk for turn in turns for risk in turn.key_risks][:5]
+        disagreements = [item for turn in turns for item in turn.disagreements][:5]
+        summary = _legacy_round_summary_text(
+            topic=topic,
+            objective=objective,
+            phase=phase,
+            prior_summary=prior_summary,
+            top_options=top_options,
+            risks=risks,
+            disagreements=disagreements,
+            transcript_block=transcript_block,
+            fallback_context=fallback_context,
+        )
+        return MeetingRoundSummary(
+            summary=summary,
+            top_options=top_options,
+            risks=risks,
+            unresolved_disagreements=disagreements,
+        )
 
     def synthesize_meeting(
         self,
@@ -163,26 +189,9 @@ class _LegacyMeetingTransport:
         phase: str,
         turns: list[MeetingTurnDraft],
         summary: str,
+        fallback_context: dict[str, Any] | None = None,
     ) -> MeetingSynthesisDraft:
         transcript_block = _format_turns(turns)
-        if not self.injected_client:
-            consensus = [turn.thesis for turn in turns[:3]]
-            dissent = [item for turn in turns for item in turn.disagreements][:5]
-            next_actions = []
-            for turn in turns:
-                next_actions.extend(turn.recommended_actions)
-            next_actions = list(dict.fromkeys(next_actions))[:5]
-            profile = _meeting_intent_profile(topic=topic, objective=objective, summary=summary)
-            if profile["quantitative"] or profile["comparative"]:
-                consensus = _augment_quantitative_consensus(consensus, topic=topic, objective=objective)
-                dissent = _augment_quantitative_dissent(dissent, topic=topic, objective=objective)
-                next_actions = _augment_quantitative_next_actions(next_actions, topic=topic, objective=objective)
-            return MeetingSynthesisDraft(
-                strategy=_legacy_synthesis_strategy_text(topic=topic, objective=objective, summary=summary),
-                consensus_points=consensus,
-                dissent_points=dissent,
-                next_actions=next_actions or ["Define rollout gates", "Define rollback criteria"],
-            )
         messages = [
             {
                 "role": "system",
@@ -213,15 +222,47 @@ class _LegacyMeetingTransport:
             preferred_tier="tier3_paid",
             model_name="claude-sonnet-4-6",
         )
-        if not result.get("success"):
-            return MeetingSynthesisDraft(strategy=summary or "No synthesis available.")
+        if result.get("success"):
+            raw = _extract_json_payload(str(result.get("content", "")).strip())
+            if raw:
+                try:
+                    parsed = MeetingSynthesisDraft.model_validate(json.loads(raw))
+                    if fallback_context:
+                        parsed.strategy = _append_fallback_context(parsed.strategy, fallback_context)
+                    return parsed
+                except Exception:
+                    pass
+            content = str(result.get("content", "")).strip()
+            if content:
+                return MeetingSynthesisDraft(
+                    strategy=_append_fallback_context(content, fallback_context),
+                    consensus_points=[],
+                    dissent_points=[],
+                    next_actions=[],
+                )
 
-        raw = str(result.get("content", "")).strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        try:
-            parsed = json.loads(raw)
-            return MeetingSynthesisDraft.model_validate(parsed)
-        except Exception:
-            return MeetingSynthesisDraft(strategy=str(result.get("content", "")).strip())
+        consensus = [turn.thesis for turn in turns[:3]]
+        dissent = [item for turn in turns for item in turn.disagreements][:5]
+        next_actions = []
+        for turn in turns:
+            next_actions.extend(turn.recommended_actions)
+        next_actions = list(dict.fromkeys(next_actions))[:5]
+        profile = _meeting_intent_profile(topic=topic, objective=objective, summary=summary)
+        if profile["quantitative"] or profile["comparative"]:
+            consensus = _augment_quantitative_consensus(consensus, topic=topic, objective=objective)
+            dissent = _augment_quantitative_dissent(dissent, topic=topic, objective=objective)
+            next_actions = _augment_quantitative_next_actions(next_actions, topic=topic, objective=objective)
+        return MeetingSynthesisDraft(
+            strategy=_legacy_synthesis_strategy_text(
+                topic=topic,
+                objective=objective,
+                summary=summary,
+                fallback_context=fallback_context,
+            ),
+            consensus_points=consensus,
+            dissent_points=dissent,
+            next_actions=next_actions or ["Define rollout gates", "Define rollback criteria"],
+        )
 
 
 class PydanticAIStrategyMeetingRuntime:
@@ -238,6 +279,7 @@ class PydanticAIStrategyMeetingRuntime:
         self._config = load_runtime_model_config(config_path=config_path, model_name=model_name)
         self._legacy = _LegacyMeetingTransport(config_path=config_path, client=legacy_client)
         self.max_structured_attempts = 2
+        self.max_structured_attempts_critical = 3
         self.base_backoff_seconds = 0.15
         self.max_backoff_seconds = 0.75
         self.last_runtime_used = RuntimeBackend.pydanticai
@@ -253,6 +295,8 @@ class PydanticAIStrategyMeetingRuntime:
         self.last_backoff_total_seconds: float = 0.0
         self.last_retry_budget_exhausted: bool = False
         self.last_immediate_fallback: bool = False
+        self.last_agent_name: str | None = None
+        self.last_output_type: str | None = None
 
     @property
     def runtime_used(self) -> RuntimeBackend:
@@ -300,6 +344,7 @@ class PydanticAIStrategyMeetingRuntime:
                 participants=participants,
                 prior_summary=prior_summary,
                 critique_focus=critique_focus,
+                fallback_context=self._fallback_context(),
             ),
         )
 
@@ -335,6 +380,7 @@ class PydanticAIStrategyMeetingRuntime:
                 phase=phase,
                 turns=turns,
                 prior_summary=prior_summary,
+                fallback_context=self._fallback_context(),
             ),
         )
 
@@ -370,6 +416,7 @@ class PydanticAIStrategyMeetingRuntime:
                 phase=phase,
                 turns=turns,
                 summary=summary,
+                fallback_context=self._fallback_context(),
             ),
         )
 
@@ -383,6 +430,8 @@ class PydanticAIStrategyMeetingRuntime:
         self.last_immediate_fallback = False
         self.last_fallback_mode = None
         self.last_error_retryable = None
+        self.last_agent_name = agent_name
+        self.last_output_type = getattr(output_type, "__name__", str(output_type))
         if self.fallback_policy == RuntimeFallbackPolicy.always:
             self.last_runtime_used = RuntimeBackend.legacy
             self.last_fallback_used = True
@@ -394,7 +443,7 @@ class PydanticAIStrategyMeetingRuntime:
             self.last_immediate_fallback = True
             return fallback()
 
-        max_attempts = max(1, int(self.max_structured_attempts))
+        max_attempts = self._structured_attempt_budget(output_type=output_type)
         for attempt_index in range(1, max_attempts + 1):
             self.last_attempt_count = attempt_index
             try:
@@ -410,7 +459,7 @@ class PydanticAIStrategyMeetingRuntime:
                 self.last_error = None
                 self.last_error_category = None
                 self.last_error_retryable = None
-                self.last_fallback_mode = "structured_success"
+                self.last_fallback_mode = "structured_success_after_retry" if self.last_retry_count else "structured_success"
                 return result.output
             except Exception as exc:
                 error_category = _classify_runtime_error(exc)
@@ -452,6 +501,26 @@ class PydanticAIStrategyMeetingRuntime:
         self.last_fallback_mode = "retry_budget_exhausted"
         self.last_retry_budget_exhausted = True
         return fallback()
+
+    def _structured_attempt_budget(self, *, output_type: Any) -> int:
+        base_attempts = max(1, int(self.max_structured_attempts))
+        critical_attempts = max(base_attempts, int(self.max_structured_attempts_critical))
+        if output_type in {MeetingRoundSummary, MeetingSynthesisDraft}:
+            return critical_attempts
+        return base_attempts
+
+    def _fallback_context(self) -> dict[str, Any]:
+        return {
+            "agent_name": self.last_agent_name,
+            "output_type": self.last_output_type,
+            "error": self.last_error,
+            "error_category": self.last_error_category,
+            "retryable": self.last_error_retryable,
+            "attempt_count": self.last_attempt_count,
+            "retry_count": self.last_retry_count,
+            "fallback_mode": self.last_fallback_mode,
+            "retry_budget_exhausted": self.last_retry_budget_exhausted,
+        }
 
 
 def _classify_runtime_error(exc: Exception) -> str:
@@ -496,9 +565,17 @@ def _build_participant_prompt(
     prior_summary: str,
     critique_focus: str | None = None,
 ) -> str:
-    summary_block = prior_summary or "No prior summary yet. Give an independent first-pass strategy."
+    summary_block = _compact_context_block(prior_summary) or "No prior summary yet. Give an independent first-pass strategy."
     phase_block = _phase_guidance(phase)
     critique_focus_block = f"Critique focus: {critique_focus}\n" if critique_focus and phase.strip().lower() == "critique" else ""
+    role_grounding_block = _participant_role_grounding(
+        participant=participant,
+        topic=topic,
+        objective=objective,
+        phase=phase,
+        critique_focus=critique_focus,
+    )
+    memory_discipline_block = _memory_discipline_guidance(prior_summary)
     quantitative_block = _quantitative_guidance_block(
         topic=topic,
         objective=objective,
@@ -513,13 +590,16 @@ def _build_participant_prompt(
         f"Participants: {', '.join(participants)}\n"
         f"Round: {round_index}\n"
         f"Phase: {phase}\n"
+        f"Role grounding: {role_grounding_block}\n"
         f"{critique_focus_block}"
-        f"Current discussion summary:\n{summary_block}\n\n"
+        f"Current meeting memory:\n{summary_block}\n\n"
+        f"Memory discipline: {memory_discipline_block}\n"
         f"{phase_block}\n"
         f"{quantitative_block}"
         "Respond with concise, concrete analysis.\n"
         "If the topic is a gain, probability, arbitrage, or comparison question, separate no-trade,"
-        " forecast alpha, arbitrage alpha, and execution alpha."
+        " forecast alpha, arbitrage alpha, and execution alpha.\n"
+        "Do not erase earlier named risks or disagreements unless you explicitly resolve them."
     )
 
 
@@ -532,7 +612,7 @@ def _build_summary_prompt(
     turns: list[MeetingTurnDraft],
     prior_summary: str,
 ) -> str:
-    transcript_block = _format_turns(turns)
+    transcript_block = _compact_context_block(_format_turns(turns))
     phase_block = _phase_guidance(phase)
     quantitative_block = _quantitative_guidance_block(
         topic=topic,
@@ -546,7 +626,7 @@ def _build_summary_prompt(
         f"Objective: {objective}\n"
         f"Round: {round_index}\n"
         f"Phase: {phase}\n"
-        f"Prior summary:\n{prior_summary or 'None'}\n\n"
+        f"Prior summary:\n{_compact_context_block(prior_summary) or 'None'}\n\n"
         f"Round transcript:\n{transcript_block}\n\n"
         f"{phase_block}\n"
         f"{quantitative_block}"
@@ -564,7 +644,7 @@ def _build_synthesis_prompt(
     turns: list[MeetingTurnDraft],
     summary: str,
 ) -> str:
-    transcript_block = _format_turns(turns)
+    transcript_block = _compact_context_block(_format_turns(turns))
     phase_block = _phase_guidance(phase)
     quantitative_block = _quantitative_guidance_block(
         topic=topic,
@@ -578,11 +658,13 @@ def _build_synthesis_prompt(
         f"Objective: {objective}\n"
         f"Participants: {', '.join(participants)}\n"
         f"Phase: {phase}\n"
-        f"Final round summary:\n{summary}\n\n"
+        f"Final round summary:\n{_compact_context_block(summary)}\n\n"
         f"Full transcript:\n{transcript_block}\n\n"
         f"{phase_block}\n"
         f"{quantitative_block}"
-        "Return only JSON."
+        "Return only JSON.\n"
+        "Make the JSON decision-ready: keep `strategy` explicit, keep at least two concrete consensus points when supported,"
+        " preserve the strongest dissent point, and keep next actions specific enough for a rerun or promotion gate."
     )
 
 
@@ -666,6 +748,48 @@ def _meeting_intent_profile(
     }
 
 
+def _participant_role_grounding(
+    *,
+    participant: str,
+    topic: str,
+    objective: str,
+    phase: str,
+    critique_focus: str | None = None,
+) -> str:
+    role = participant.strip().lower()
+    if any(token in role for token in ("architect", "strategy")):
+        return "Own coherence, sequencing, and decision gates. Prefer explicit structure over generic synthesis."
+    if any(token in role for token in ("product", "business", "growth", "pm")):
+        return "Own actionable tradeoffs, rollout pressure, and what would make the decision operationally useful."
+    if any(token in role for token in ("risk", "safety", "governance", "compliance", "resolution")):
+        return "Own failure containment, kill criteria, and unresolved safety constraints."
+    if any(token in role for token in ("market", "microstructure", "latency")):
+        return "Own execution realism, freshness budgets, fill risk, and edge decay."
+    if any(token in role for token in ("portfolio", "capital", "allocator", "treasury")):
+        return "Own sizing, capital lock, inventory exposure, and portfolio survivability."
+    if any(token in role for token in ("research", "prediction", "forecast")):
+        return "Own evidence quality, calibration, and out-of-sample plausibility."
+    if any(token in role for token in ("ops", "orchestrator", "infra", "qa")):
+        return "Own observability, rollback readiness, and operator-facing clarity."
+    if "red" in role:
+        return f"Attack weak assumptions and keep the falsification test visible. Focus on {critique_focus or 'the sharpest unresolved risk'}."
+    return f"Stay grounded in {topic} and {objective}. Make the decision more explicit, testable, and reversible."
+
+
+def _memory_discipline_guidance(prior_summary: str) -> str:
+    points = _extract_memory_points(prior_summary)
+    lines: list[str] = []
+    if points["options"]:
+        lines.append(f"keep the strongest options visible: {'; '.join(points['options'][:2])}")
+    if points["risks"]:
+        lines.append(f"carry forward the sharpest risks: {'; '.join(points['risks'][:2])}")
+    if points["disagreements"]:
+        lines.append(f"do not erase these disagreements: {'; '.join(points['disagreements'][:2])}")
+    if not lines:
+        return "Establish named options, risks, and disagreements so the next round can reuse them explicitly."
+    return " | ".join(lines)
+
+
 def _quantitative_guidance_block(
     *,
     topic: str,
@@ -703,7 +827,61 @@ def _quantitative_guidance_block(
         lines.append(f"Detected focus terms: {', '.join(profile['keywords'])}.")
     if critique_focus:
         lines.append(f"Critique focus: {critique_focus}.")
+    optimization_cues = " ".join(
+        part for part in (topic, objective, prior_summary, summary, transcript) if part
+    ).lower()
+    if any(token in optimization_cues for token in ("optimiz", "improv", "live", "durable", "uplift", "target range")):
+        lines.append("If optimizing a strategy stack, make the main bottleneck explicit and name the smallest fix that raises durable live performance the most.")
+        lines.append("Prefer current-vs-target ranges and explicit blockers over generic recommendations.")
     return "\n".join(lines) + "\n"
+
+
+def _compact_context_block(text: str | None, *, max_chars: int = PROMPT_COMPACTION_MAX_CHARS) -> str:
+    if not text:
+        return ""
+    normalized_lines: list[str] = []
+    seen: set[str] = set()
+    for raw_line in str(text).splitlines():
+        line = " ".join(raw_line.strip().split())
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized_lines.append(line)
+    compacted = "\n".join(normalized_lines).strip()
+    if len(compacted) <= max_chars:
+        return compacted
+    head = compacted[: max(0, max_chars - 12)].rstrip()
+    return f"{head}\n[...trimmed]"
+
+
+def _extract_memory_points(memory_snapshot: str) -> dict[str, list[str]]:
+    sections = {
+        "top options": "options",
+        "key risks": "risks",
+        "open disagreements": "disagreements",
+    }
+    extracted: dict[str, list[str]] = {"options": [], "risks": [], "disagreements": []}
+    current: str | None = None
+    for raw_line in (memory_snapshot or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower().removesuffix(":")
+        if lower in sections:
+            current = sections[lower]
+            continue
+        if current is None:
+            continue
+        if not line.startswith("- "):
+            current = None
+            continue
+        candidate = line[2:].strip()
+        if candidate and candidate not in {"none", "none yet"} and candidate not in extracted[current]:
+            extracted[current].append(candidate)
+    return extracted
 
 
 def _fallback_turn_draft(
@@ -714,12 +892,15 @@ def _fallback_turn_draft(
     objective: str,
     prior_summary: str,
     critique_focus: str | None = None,
+    fallback_context: dict[str, Any] | None = None,
 ) -> MeetingTurnDraft:
     phase_key = phase.strip().lower()
     closing_note = (
         f"Objective reminder: {objective}. "
         f"Prior context: {prior_summary or 'first pass, no prior summary'}."
     )
+    if fallback_context:
+        closing_note = f"{closing_note} {_fallback_note(fallback_context)}"
     profile = _meeting_intent_profile(
         topic=topic,
         objective=objective,
@@ -863,6 +1044,7 @@ def _legacy_round_summary_text(
     risks: list[str],
     disagreements: list[str],
     transcript_block: str,
+    fallback_context: dict[str, Any] | None = None,
 ) -> str:
     profile = _meeting_intent_profile(topic=topic, objective=objective, prior_summary=prior_summary, transcript=transcript_block)
     if profile["quantitative"] or profile["comparative"]:
@@ -885,17 +1067,66 @@ def _legacy_round_summary_text(
     if disagreements:
         summary_lines.append("Open disagreements:")
         summary_lines.extend(f"- {item}" for item in disagreements[:3])
+    if fallback_context:
+        summary_lines.append(f"Runtime note: {_fallback_note(fallback_context)}")
     return "\n".join(summary_lines).strip() or transcript_block[:4000]
 
 
-def _legacy_synthesis_strategy_text(*, topic: str, objective: str, summary: str) -> str:
+def _legacy_synthesis_strategy_text(
+    *,
+    topic: str,
+    objective: str,
+    summary: str,
+    fallback_context: dict[str, Any] | None = None,
+) -> str:
     profile = _meeting_intent_profile(topic=topic, objective=objective, summary=summary)
     if profile["quantitative"] or profile["comparative"]:
-        return (
+        strategy = (
             f"Choose the path with the best validated gain probability for '{topic}', and default to no-trade "
             "until the edge is executable after costs, slippage, and calibration checks."
         )
-    return summary or "Adopt a staged, observable strategy with explicit rollback gates."
+        return _append_fallback_context(strategy, fallback_context)
+    return _append_fallback_context(summary or "Adopt a staged, observable strategy with explicit rollback gates.", fallback_context)
+
+
+def _fallback_note(fallback_context: dict[str, Any] | None) -> str:
+    if not fallback_context:
+        return ""
+    error_category = str(fallback_context.get("error_category") or "runtime_error").strip()
+    attempt_count = int(fallback_context.get("attempt_count", 0) or 0)
+    retry_count = int(fallback_context.get("retry_count", 0) or 0)
+    fallback_mode = str(fallback_context.get("fallback_mode") or "legacy_fallback").strip()
+    output_type = str(fallback_context.get("output_type") or "structured_output").strip()
+    return (
+        f"Structured runtime degraded to legacy for {output_type}"
+        f" after {attempt_count} attempt(s), {retry_count} retr(ies),"
+        f" mode={fallback_mode}, error_category={error_category}."
+    )
+
+
+def _append_fallback_context(text: str, fallback_context: dict[str, Any] | None) -> str:
+    stripped = text.strip()
+    note = _fallback_note(fallback_context)
+    if not note:
+        return stripped
+    if note in stripped:
+        return stripped
+    if not stripped:
+        return note
+    return f"{stripped}\n\nRuntime note: {note}"
+
+
+def _extract_json_payload(content: str) -> str | None:
+    raw = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    if not raw:
+        return None
+    if raw.startswith("{") and raw.endswith("}"):
+        return raw
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return raw[start : end + 1]
 
 
 def _augment_quantitative_next_actions(next_actions: list[str], *, topic: str, objective: str) -> list[str]:

@@ -63,6 +63,54 @@ class EmptyMeetingClient:
         }
 
 
+class RecordingMeetingClient:
+    def __init__(self, *args, **kwargs):
+        self.calls: list[tuple[str, str]] = []
+
+    def chat_with_agent(self, worker_name, agent_id, messages):
+        self.calls.append(("agent", worker_name))
+        return {
+            "worker_name": worker_name,
+            "content": "",
+            "success": True,
+            "error": None,
+            "tokens_used": 0,
+        }
+
+    def chat_with_escalation(self, worker_name, messages, preferred_tier="tier3_paid", model_name="claude-sonnet-4-6"):
+        self.calls.append(("escalation", worker_name))
+        if worker_name == "meeting_facilitator":
+            return {
+                "success": True,
+                "content": "Summary from escalation with explicit probability ranges.",
+                "tokens_used": 11,
+            }
+        if worker_name == "meeting_chair":
+            return {
+                "success": True,
+                "content": (
+                    '{"strategy":"Pick the validated path and keep no-trade as the default gate.",'
+                    '"consensus_points":["Protect reliability"],'
+                    '"dissent_points":["Some prefer speed"],'
+                    '"next_actions":["Define the canary gates"]}'
+                ),
+                "tokens_used": 12,
+            }
+        return {
+            "success": True,
+            "content": (
+                "Thesis: Use the richer legacy escalation path.\n"
+                "Recommended actions:\n"
+                "- Quantify the gain probability.\n"
+                "Key risks:\n"
+                "- Fees may erase the edge.\n"
+                "Disagreements:\n"
+                "- Need a sharper no-trade comparison."
+            ),
+            "tokens_used": 9,
+        }
+
+
 def test_quantitative_strategy_meeting_prompts_emphasize_probability_arbitrage_and_no_trade() -> None:
     participant_prompt = _build_participant_prompt(
         participant="architect",
@@ -109,12 +157,18 @@ def test_quantitative_strategy_meeting_prompts_emphasize_probability_arbitrage_a
     assert "no-trade" in participant_prompt.lower()
     assert "arbitrage alpha" in participant_prompt.lower()
     assert "expected-value" in participant_prompt.lower()
+    assert "role grounding:" in participant_prompt.lower()
+    assert "current meeting memory" in participant_prompt.lower()
+    assert "memory discipline:" in participant_prompt.lower()
+    assert "coherence, sequencing, and decision gates" in participant_prompt.lower()
     assert "quantitative guidance" in summary_prompt.lower()
     assert "invalidat" in summary_prompt.lower()
     assert "expected-value" in summary_prompt.lower()
     assert "forecast alpha" in synthesis_prompt.lower()
     assert "validation gate" in synthesis_prompt.lower()
     assert "no-trade" in synthesis_prompt.lower()
+    assert "return only json" in synthesis_prompt.lower()
+    assert "preserve the strongest dissent point" in synthesis_prompt.lower()
 
 
 def test_quantitative_strategy_meeting_runtime_uses_specific_legacy_fallbacks_when_structured_runtime_is_unavailable(monkeypatch) -> None:
@@ -167,9 +221,63 @@ def test_quantitative_strategy_meeting_runtime_uses_specific_legacy_fallbacks_wh
     assert "forecast alpha" in summary.summary.lower()
     assert "probability ranges" in summary.summary.lower()
     assert "no-trade" in summary.summary.lower()
+    assert "structured runtime degraded to legacy" in summary.summary.lower()
     assert "best validated gain probability" in synthesis.strategy.lower()
+    assert "structured runtime degraded to legacy" in synthesis.strategy.lower()
     assert any("validation" in action.lower() or "shadow" in action.lower() for action in synthesis.next_actions)
     assert any("prediction, arbitrage, or abstention" in item.lower() or "no-trade" in item.lower() for item in synthesis.dissent_points)
+
+
+def test_legacy_transport_uses_escalation_for_summary_and_synthesis_even_without_injected_test_client(monkeypatch) -> None:
+    recording_client = RecordingMeetingClient()
+    monkeypatch.setattr(
+        "runtime_pydanticai.strategy_meeting.OpenClawClient",
+        lambda config_path="config.yaml": recording_client,
+    )
+    monkeypatch.setattr(
+        "runtime_pydanticai.strategy_meeting.load_runtime_model_config",
+        lambda **kwargs: SimpleNamespace(base_url="http://example.test"),
+    )
+    monkeypatch.setattr(
+        "runtime_pydanticai.strategy_meeting.run_structured_agent",
+        lambda **kwargs: (_ for _ in ()).throw(ConnectionError("temporary connection issue")),
+    )
+    monkeypatch.setattr("runtime_pydanticai.strategy_meeting.time.sleep", lambda delay: None)
+
+    runtime = PydanticAIStrategyMeetingRuntime()
+    draft = runtime.generate_turn(
+        participant="architect",
+        round_index=1,
+        phase="independent",
+        topic="Estimate the probability of gain for prediction markets arbitrage",
+        objective="Compare forecast alpha, arbitrage alpha, and no-trade",
+        participants=["architect"],
+        prior_summary="",
+    )
+    summary = runtime.summarize_round(
+        topic="Estimate the probability of gain for prediction markets arbitrage",
+        objective="Compare forecast alpha, arbitrage alpha, and no-trade",
+        round_index=1,
+        phase="critique",
+        turns=[draft],
+        prior_summary="",
+    )
+    synthesis = runtime.synthesize_meeting(
+        topic="Estimate the probability of gain for prediction markets arbitrage",
+        objective="Compare forecast alpha, arbitrage alpha, and no-trade",
+        participants=["architect"],
+        phase="synthesis",
+        turns=[draft],
+        summary=summary.summary,
+    )
+
+    assert ("escalation", "strategy_meeting_architect") in recording_client.calls
+    assert ("escalation", "meeting_facilitator") in recording_client.calls
+    assert ("escalation", "meeting_chair") in recording_client.calls
+    assert "probability ranges" in summary.summary.lower()
+    assert "structured runtime degraded to legacy" in summary.summary.lower()
+    assert "validated path" in synthesis.strategy.lower()
+    assert "structured runtime degraded to legacy" in synthesis.strategy.lower()
 
 
 def test_strategy_meeting_runtime_uses_pydanticai_and_persists_artifact(monkeypatch, tmp_path: Path) -> None:
@@ -315,7 +423,7 @@ def test_structured_runtime_retries_retryable_errors_before_succeeding(monkeypat
     ]
     assert runtime.last_backoff_total_seconds == 0.15
     assert sleeps == [0.15]
-    assert runtime.last_fallback_mode == "structured_success"
+    assert runtime.last_fallback_mode == "structured_success_after_retry"
     assert runtime.last_retry_budget_exhausted is False
     assert runtime.last_immediate_fallback is False
     assert runtime.last_error_retryable is None
@@ -372,6 +480,52 @@ def test_structured_runtime_falls_back_after_retry_budget_is_exhausted(monkeypat
     assert runtime.last_retry_budget_exhausted is True
     assert runtime.last_immediate_fallback is False
     assert runtime.last_error_retryable is True
+
+
+def test_structured_runtime_uses_extra_retry_budget_for_round_and_synthesis_outputs(monkeypatch) -> None:
+    sleeps: list[float] = []
+    calls = {"count": 0}
+
+    monkeypatch.setattr(
+        "runtime_pydanticai.strategy_meeting.load_runtime_model_config",
+        lambda **kwargs: SimpleNamespace(base_url="http://example.test"),
+    )
+
+    def fake_run_structured_agent(**kwargs):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise ConnectionError("temporary connection issue")
+        return SimpleNamespace(
+            runtime_used=StructuredRuntimeBackend.pydanticai,
+            fallback_used=False,
+            output=SimpleNamespace(
+                summary="Recovered summary",
+                top_options=[],
+                risks=[],
+                unresolved_disagreements=[],
+            ),
+        )
+
+    monkeypatch.setattr("runtime_pydanticai.strategy_meeting.run_structured_agent", fake_run_structured_agent)
+    monkeypatch.setattr("runtime_pydanticai.strategy_meeting.time.sleep", lambda delay: sleeps.append(delay))
+
+    runtime = PydanticAIStrategyMeetingRuntime(legacy_client=FakeMeetingClient())
+    summary = runtime.summarize_round(
+        topic="retry the meeting runtime",
+        objective="verify retry handling",
+        round_index=1,
+        phase="critique",
+        turns=[MeetingTurnDraft(thesis="Candidate edge", recommended_actions=[], key_risks=[], disagreements=[])],
+        prior_summary="",
+    )
+
+    assert summary.summary == "Recovered summary"
+    assert calls["count"] == 3
+    assert runtime.last_fallback_used is False
+    assert runtime.last_attempt_count == 3
+    assert runtime.last_retry_count == 2
+    assert runtime.last_retry_reasons == ["connection_error", "connection_error"]
+    assert sleeps == [0.15, 0.3]
 
 
 def test_structured_runtime_uses_immediate_fallback_for_non_retryable_error(monkeypatch) -> None:

@@ -5,11 +5,40 @@ Ce repo regroupe :
 - le coeur `swarm` au root
 - un sous-projet `prediction`
 
+## Memoire canonique
+
+La memoire durable du repo vit maintenant dans le repo lui-meme :
+
+- `docs/swarm-memory.md` : index memoire global de `swarm`, cartographie, doctrine et pointeurs
+- `subprojects/prediction/docs/prediction-memory.md` : memoire canonique du sous-projet `prediction`
+- `subprojects/prediction/docs/prediction-integration-plan.md` : plan canonique d'integration des patterns externes pour `prediction`
+
+Le fichier de travail `/home/jul/plan-prediction-markets.md` reste utile comme input d'import et de normalisation, mais il n'est plus considere comme l'emplacement canonique de cette memoire.
+
 ## Structure
 
 - `prediction_markets/` : moteur prediction markets Python
 - `swarm_core/`, `simulation_adapter/`, `engines/` : coeur de deliberation et runtimes
+- `dashboard/swarm-ui/` et `dashboard/swarm-ui-alt/` : dashboards UI racine presents dans le repo comme surfaces front distinctes, avec leurs propres entrypoints Vite
 - `subprojects/prediction/` : surfaces TypeScript/API/tests liees a prediction markets
+
+## Dashboards presents dans le repo
+
+Le repo contient plusieurs surfaces dashboard. Elles n'ont pas toutes le meme statut runtime :
+
+- `dashboard/swarm-ui/` et `dashboard/swarm-ui-alt/` sont des frontends racine presents dans le repo avec leurs propres assets et entrypoints (`index.html`, `src/main.js`, `package.json`)
+- `subprojects/prediction/dashboard/` est le template HTML servi par la surface operator dashboard du sous-projet prediction
+- `subprojects/prediction/dashboard-ui/` est une UI prediction plus large presente dans le repo avec son propre build Vite
+- `subprojects/prediction/dashboard-vendor/` contient des references dashboard vendorees (`clonehorse`, `firehorse`, `askelira-trader`, `kalshi-ai-trading-bot`)
+
+Important :
+
+- les surfaces canoniques branchees aujourd'hui pour l'operateur prediction restent `/prediction-markets/dashboard` et `node subprojects/prediction/scripts/prediction-dashboard.cjs --upstream ...`
+- `dashboard-vendor/` doit etre lu comme un corpus de references et d'entrypoints statiques presents dans le repo; ce n'est pas, a lui seul, un runtime Swarm branche end to end
+- la presence d'une UI vendoree dans le repo ne signifie pas qu'elle est integree au flux canonique `dispatch/paper/shadow/live`
+- les frontends Vite `dashboard/swarm-ui/` et `subprojects/prediction/dashboard-ui/` exposent maintenant `npm run run` comme alias de `npm run dev`, plus `npm run help` pour afficher l'aide Vite sans casser `dev/build/preview`
+- `node scripts/swarm-dashboard.cjs` expose maintenant une petite surface dashboard HTTP pour `swarm`, branchee sur `main.py --json`
+- `node subprojects/prediction/scripts/prediction-dashboard-ui-adapter.cjs` expose une couche d'adaptation `/api/polymarket/*` pour `subprojects/prediction/dashboard-ui/`
 
 ## Bootstrap rapide
 
@@ -17,7 +46,14 @@ Ce repo regroupe :
 - `source venv/bin/activate`
 - `python -m pip install -r requirements.txt`
 
-Le runtime `pydanticai` a besoin de `pydantic-ai` et d'un backend OpenAI-compatible configure via `OPENAI_BASE_URL` ou `LLM_PROXY_URL` plus une cle API. Si la dependance manque, le health check renvoie un statut `unavailable` avec un `bootstrap_hint` dans `details`.
+Le runtime `pydanticai` a besoin de `pydantic-ai` et d'un backend OpenAI-compatible. Il peut maintenant :
+
+- utiliser directement un override explicite via `OPENAI_BASE_URL` ou `LLM_PROXY_URL` plus une cle API
+- ou resoudre automatiquement un provider et un modele depuis `openclaw.json`
+
+La selection OpenClaw suit d'abord le provider explicite `OPENCLAW_PYDANTICAI_PROVIDER` s'il est defini, puis un ordre de priorite configurable via `OPENCLAW_PYDANTICAI_PROVIDER_PRIORITY`, puis les providers/modeles declares dans OpenClaw. `OPENCLAW_PYDANTICAI_MODEL` permet aussi de forcer un modele ou d'inferer automatiquement le bon provider quand ce modele existe dans OpenClaw.
+
+Si la dependance manque, le health check renvoie un statut `unavailable` avec un `bootstrap_hint` dans `details`.
 
 Pour obtenir une charge JSON-ready du health check, utiliser `check_pydanticai_runtime_health_payload()` depuis `runtime_pydanticai.factory`.
 

@@ -44,6 +44,7 @@ export type PredictionDashboardArbitrageCandidate = {
   net_spread_bps: number
   executable_edge_bps: number | null
   confidence_score: number
+  executable: boolean
   manual_review_required: boolean
   shadow_ready: boolean
   shadow_edge_bps: number | null
@@ -51,6 +52,11 @@ export type PredictionDashboardArbitrageCandidate = {
   hedge_success_probability: number | null
   estimated_net_pnl_bps: number | null
   estimated_net_pnl_usd: number | null
+  quality_score: number
+  actionability_score: number
+  ranking_score: number
+  quality_signals: string[]
+  actionability_signals: string[]
   freshness_ms: number | null
   blocking_reasons: string[]
   notes: string[]
@@ -66,6 +72,9 @@ export type PredictionDashboardArbitrageOverview = {
   best_shadow_edge_bps: number | null
   best_net_spread_bps: number | null
   best_executable_edge_bps: number | null
+  best_quality_score: number | null
+  best_actionability_score: number | null
+  actionable_candidate_count: number
   best_candidate_id: string | null
   summary: string
   errors: string[]
@@ -82,14 +91,19 @@ export type PredictionDashboardArbitrageSnapshot = {
     limit_per_venue: number
     max_pairs: number
     min_arbitrage_spread_bps: number
+    min_quality_score: number
+    actionable_only: boolean
     shadow_candidates: number
   }
   compared_pairs: number
   candidate_count: number
   manual_review_count: number
   shadow_ready_count: number
+  actionable_candidate_count: number
   best_shadow_edge_bps: number | null
   best_net_spread_bps: number | null
+  best_quality_score: number | null
+  best_actionability_score: number | null
   summary: string
   overview: PredictionDashboardArbitrageOverview
   candidates: PredictionDashboardArbitrageCandidate[]
@@ -100,6 +114,8 @@ export type PredictionDashboardArbitrageSnapshotInput = {
   limitPerVenue?: number
   maxPairs?: number
   minArbitrageSpreadBps?: number
+  minQualityScore?: number
+  actionableOnly?: boolean
   shadowCandidateLimit?: number
   pollIntervalMs?: number
   forceRefresh?: boolean
@@ -119,6 +135,8 @@ const DEFAULT_OPTIONS: ArbitrageScannerState['options'] = {
   limitPerVenue: 16,
   maxPairs: 40,
   minArbitrageSpreadBps: 25,
+  minQualityScore: 0,
+  actionableOnly: false,
   shadowCandidateLimit: 8,
   pollIntervalMs: 60_000,
 }
@@ -151,6 +169,13 @@ function clamp(value: number, min: number, max: number): number {
 
 function round(value: number): number {
   return Math.round(value)
+}
+
+function freshnessLabel(ageMs: number | null): string {
+  if (ageMs == null) return 'unknown'
+  if (ageMs <= 30_000) return 'fresh'
+  if (ageMs <= 300_000) return 'warm'
+  return 'stale'
 }
 
 function toDescriptorKey(venue: PredictionMarketVenue, marketId: string) {
@@ -227,8 +252,83 @@ function candidateSignature(candidate: PredictionDashboardArbitrageCandidate): s
     shadow_edge_bps: candidate.shadow_edge_bps,
     shadow_ready: candidate.shadow_ready,
     manual_review_required: candidate.manual_review_required,
+    quality_score: candidate.quality_score,
+    actionability_score: candidate.actionability_score,
+    ranking_score: candidate.ranking_score,
     blocking_reasons: candidate.blocking_reasons,
   })
+}
+
+function clampScore(value: number): number {
+  return Number(clamp(value, 0, 1).toFixed(4))
+}
+
+function buildCandidateScoring(input: {
+  candidate: PredictionDashboardArbitrageCandidate
+  microstructureExecutionQuality: number | null
+}): {
+  quality_score: number
+  actionability_score: number
+  ranking_score: number
+  quality_signals: string[]
+  actionability_signals: string[]
+} {
+  const freshnessScore = input.candidate.freshness_ms == null
+    ? 0.35
+    : clamp(1 - (input.candidate.freshness_ms / 120_000), 0, 1)
+  const edgeScore = clamp((input.candidate.executable_edge_bps ?? 0) / 120, 0, 1)
+  const spreadScore = clamp(input.candidate.gross_spread_bps / 1_000, 0, 1)
+  const shadowScore = clamp((input.candidate.shadow_edge_bps ?? 0) / 100, 0, 1)
+  const hedgeScore = clamp(input.candidate.hedge_success_probability ?? 0, 0, 1)
+  const executionQualityScore = clamp(input.microstructureExecutionQuality ?? 0.35, 0, 1)
+  const manualReviewPenalty = input.candidate.manual_review_required ? 0.14 : 0
+  const blockingPenalty = clamp(input.candidate.blocking_reasons.length * 0.025, 0, 0.25)
+
+  const quality_score = clampScore(
+    0.08 +
+    (0.24 * edgeScore) +
+    (0.16 * spreadScore) +
+    (0.18 * shadowScore) +
+    (0.2 * executionQualityScore) +
+    (0.1 * hedgeScore) +
+    (0.1 * freshnessScore) -
+    manualReviewPenalty -
+    blockingPenalty,
+  )
+
+  const actionability_score = clampScore(
+    (input.candidate.executable ? 0.28 : 0) +
+    (input.candidate.shadow_ready ? 0.24 : 0) +
+    (input.candidate.manual_review_required ? 0 : 0.12) +
+    (0.12 * hedgeScore) +
+    (0.12 * freshnessScore) +
+    (0.12 * shadowScore) +
+    (0.08 * executionQualityScore) -
+    blockingPenalty,
+  )
+
+  const ranking_score = clampScore((quality_score * 0.65) + (actionability_score * 0.35))
+
+  return {
+    quality_score,
+    actionability_score,
+    ranking_score,
+    quality_signals: [
+      `executable_edge_bps:${input.candidate.executable_edge_bps ?? 0}`,
+      `shadow_edge_bps:${input.candidate.shadow_edge_bps ?? 0}`,
+      `gross_spread_bps:${input.candidate.gross_spread_bps}`,
+      `execution_quality_score:${Number((input.microstructureExecutionQuality ?? 0).toFixed(4))}`,
+      `freshness:${freshnessLabel(input.candidate.freshness_ms)}`,
+    ],
+    actionability_signals: [
+      input.candidate.executable ? 'executable' : 'not_executable',
+      input.candidate.shadow_ready ? 'shadow_ready' : 'shadow_blocked',
+      input.candidate.manual_review_required ? 'manual_review_required' : 'manual_review_clear',
+      `freshness:${freshnessLabel(input.candidate.freshness_ms)}`,
+      `hedge_success_probability:${input.candidate.hedge_success_probability ?? 0}`,
+      ...(input.candidate.blocking_reasons.length > 0 ? [`blocking_reasons:${input.candidate.blocking_reasons.slice(0, 4).join('|')}`] : []),
+    ],
+  }
 }
 
 function publishArbitrageDiff(
@@ -319,6 +419,8 @@ function getState(workspaceId: number, options?: Partial<ArbitrageScannerState['
       limitPerVenue: options.limitPerVenue ?? state.options.limitPerVenue,
       maxPairs: options.maxPairs ?? state.options.maxPairs,
       minArbitrageSpreadBps: options.minArbitrageSpreadBps ?? state.options.minArbitrageSpreadBps,
+      minQualityScore: options.minQualityScore ?? state.options.minQualityScore,
+      actionableOnly: options.actionableOnly ?? state.options.actionableOnly,
       shadowCandidateLimit: options.shadowCandidateLimit ?? state.options.shadowCandidateLimit,
       pollIntervalMs: options.pollIntervalMs ?? state.options.pollIntervalMs,
     }
@@ -377,6 +479,7 @@ async function buildShadowCandidate(
       net_spread_bps: candidate?.net_spread_bps ?? 0,
       executable_edge_bps: candidate?.executable_edge.executable_edge_bps ?? null,
       confidence_score: evaluation.confidence_score,
+      executable: false,
       manual_review_required: true,
       shadow_ready: false,
       shadow_edge_bps: null,
@@ -384,6 +487,11 @@ async function buildShadowCandidate(
       hedge_success_probability: null,
       estimated_net_pnl_bps: null,
       estimated_net_pnl_usd: null,
+      quality_score: 0.12,
+      actionability_score: 0.08,
+      ranking_score: 0.1,
+      quality_signals: ['cross_venue_snapshot_unavailable', 'shadow_unavailable'],
+      actionability_signals: ['not_executable', 'shadow_blocked', 'manual_review_required', 'cross_venue_snapshot_unavailable'],
       freshness_ms: null,
       blocking_reasons: ['cross_venue_snapshot_unavailable'],
       notes: ['Unable to materialize a shadow candidate because one or both venue snapshots are missing.'],
@@ -440,8 +548,7 @@ async function buildShadowCandidate(
     ...(shadow.summary.shadow_edge_bps > 0 ? [] : ['shadow_edge_non_positive']),
     ...(shadow.summary.hedge_success_expected ? [] : ['shadow_not_robust']),
   ]
-
-  return {
+  const scoredCandidate: PredictionDashboardArbitrageCandidate = {
     candidate_id: refinedCandidate.arb_plan.arb_plan_id,
     canonical_event_id: refinedCandidate.canonical_event_id,
     canonical_event_key: refinedCandidate.canonical_event_key,
@@ -458,6 +565,7 @@ async function buildShadowCandidate(
     net_spread_bps: refinedCandidate.net_spread_bps,
     executable_edge_bps: refinedCandidate.executable_edge.executable_edge_bps,
     confidence_score: refinedCandidate.confidence_score,
+    executable: refinedCandidate.executable,
     manual_review_required:
       refinedCandidate.market_equivalence_proof.manual_review_required ||
       !refinedCandidate.executable ||
@@ -471,6 +579,11 @@ async function buildShadowCandidate(
     hedge_success_probability: shadow.summary.hedge_success_probability,
     estimated_net_pnl_bps: shadow.summary.estimated_net_pnl_bps,
     estimated_net_pnl_usd: shadow.summary.estimated_net_pnl_usd,
+    quality_score: 0,
+    actionability_score: 0,
+    ranking_score: 0,
+    quality_signals: [],
+    actionability_signals: [],
     freshness_ms: freshnessMs,
     blocking_reasons: Array.from(new Set(blockingReasons)),
     notes: [
@@ -478,6 +591,15 @@ async function buildShadowCandidate(
       ...refinedCandidate.executable_edge.notes,
       ...shadow.summary.notes,
     ],
+  }
+  const scoring = buildCandidateScoring({
+    candidate: scoredCandidate,
+    microstructureExecutionQuality: microstructure.summary.execution_quality_score,
+  })
+
+  return {
+    ...scoredCandidate,
+    ...scoring,
   }
 }
 
@@ -506,7 +628,7 @@ async function refreshArbitrageSnapshot(
     } catch (error) {
       errors.push(`shadow refresh failed for ${evaluation.canonical_event_key}: ${error instanceof Error ? error.message : String(error)}`)
       const candidate = evaluation.arbitrage_candidate
-      return {
+      const fallbackCandidate: PredictionDashboardArbitrageCandidate = {
         candidate_id: candidate?.arb_plan.arb_plan_id ?? `arb:${evaluation.canonical_event_id}:${randomUUID()}`,
         canonical_event_id: evaluation.canonical_event_id,
         canonical_event_key: evaluation.canonical_event_key,
@@ -523,6 +645,7 @@ async function refreshArbitrageSnapshot(
         net_spread_bps: candidate?.net_spread_bps ?? 0,
         executable_edge_bps: candidate?.executable_edge.executable_edge_bps ?? null,
         confidence_score: evaluation.confidence_score,
+        executable: candidate?.executable ?? false,
         manual_review_required: true,
         shadow_ready: false,
         shadow_edge_bps: null,
@@ -530,15 +653,37 @@ async function refreshArbitrageSnapshot(
         hedge_success_probability: null,
         estimated_net_pnl_bps: null,
         estimated_net_pnl_usd: null,
+        quality_score: 0.12,
+        actionability_score: 0.08,
+        ranking_score: 0.1,
+        quality_signals: ['shadow_refresh_error'],
+        actionability_signals: ['not_executable', 'shadow_blocked', 'manual_review_required', 'shadow_refresh_error'],
         freshness_ms: null,
         blocking_reasons: ['shadow_refresh_error'],
         notes: [error instanceof Error ? error.message : String(error)],
       }
+      return fallbackCandidate
     }
   }))
 
-  const bestCandidate = builtCandidates[0] ?? null
-  const shadowReadyCount = builtCandidates.filter((candidate) => candidate.shadow_ready).length
+  const filteredCandidates = builtCandidates
+    .filter((candidate) => candidate.quality_score >= options.minQualityScore)
+    .filter((candidate) => candidate.ranking_score >= options.minQualityScore)
+  const rankedCandidates = filteredCandidates.sort((left, right) => {
+    if (right.ranking_score !== left.ranking_score) return right.ranking_score - left.ranking_score
+    if (right.quality_score !== left.quality_score) return right.quality_score - left.quality_score
+    if (right.actionability_score !== left.actionability_score) return right.actionability_score - left.actionability_score
+    if ((right.shadow_edge_bps ?? -1) !== (left.shadow_edge_bps ?? -1)) {
+      return (right.shadow_edge_bps ?? -1) - (left.shadow_edge_bps ?? -1)
+    }
+    if (right.net_spread_bps !== left.net_spread_bps) {
+      return right.net_spread_bps - left.net_spread_bps
+    }
+    return right.confidence_score - left.confidence_score
+  })
+  const bestCandidate = rankedCandidates[0] ?? null
+  const shadowReadyCount = rankedCandidates.filter((candidate) => candidate.shadow_ready).length
+  const actionableCandidateCount = rankedCandidates.filter((candidate) => candidate.actionability_score >= 0.65).length
   const bestShadowEdgeBps = builtCandidates.reduce<number | null>((best, candidate) => {
     if (candidate.shadow_edge_bps == null) return best
     if (best == null) return candidate.shadow_edge_bps
@@ -565,42 +710,42 @@ async function refreshArbitrageSnapshot(
       limit_per_venue: options.limitPerVenue,
       max_pairs: options.maxPairs,
       min_arbitrage_spread_bps: options.minArbitrageSpreadBps,
+      min_quality_score: options.minQualityScore,
+      actionable_only: options.actionableOnly,
       shadow_candidates: options.shadowCandidateLimit,
     },
     compared_pairs: summary.total_pairs,
-    candidate_count: builtCandidates.length,
-    manual_review_count: summary.manual_review.length,
+    candidate_count: rankedCandidates.length,
+    manual_review_count: rankedCandidates.filter((candidate) => candidate.manual_review_required).length,
     shadow_ready_count: shadowReadyCount,
+    actionable_candidate_count: actionableCandidateCount,
     best_shadow_edge_bps: bestShadowEdgeBps,
     best_net_spread_bps: bestNetSpreadBps,
-    summary: builtCandidates.length > 0
-      ? `Found ${builtCandidates.length} cross-venue candidates across ${summary.total_pairs} compared pairs.`
+    best_quality_score: rankedCandidates[0]?.quality_score ?? null,
+    best_actionability_score: rankedCandidates[0]?.actionability_score ?? null,
+    summary: rankedCandidates.length > 0
+      ? `Found ${rankedCandidates.length} cross-venue candidates across ${summary.total_pairs} compared pairs.`
       : `No cross-venue candidates found across ${summary.total_pairs} compared pairs.`,
     overview: {
       compared_pairs: summary.total_pairs,
       compatible_pairs: summary.compatible.length,
-      candidate_count: builtCandidates.length,
-      manual_review_count: summary.manual_review.length,
+      candidate_count: rankedCandidates.length,
+      manual_review_count: rankedCandidates.filter((candidate) => candidate.manual_review_required).length,
       comparison_only_count: summary.comparison_only.length,
       shadow_ready_count: shadowReadyCount,
+      actionable_candidate_count: actionableCandidateCount,
       best_shadow_edge_bps: bestShadowEdgeBps,
       best_net_spread_bps: bestNetSpreadBps,
       best_executable_edge_bps: bestExecutableEdgeBps,
+      best_quality_score: rankedCandidates[0]?.quality_score ?? null,
+      best_actionability_score: rankedCandidates[0]?.actionability_score ?? null,
       best_candidate_id: bestCandidate?.candidate_id ?? null,
-      summary: builtCandidates.length > 0
-        ? `Found ${builtCandidates.length} cross-venue candidates across ${summary.total_pairs} compared pairs.`
+      summary: rankedCandidates.length > 0
+        ? `Found ${rankedCandidates.length} cross-venue candidates across ${summary.total_pairs} compared pairs.`
         : `No cross-venue candidates found across ${summary.total_pairs} compared pairs.`,
       errors,
     },
-    candidates: builtCandidates.sort((left, right) => {
-      if ((right.shadow_edge_bps ?? -1) !== (left.shadow_edge_bps ?? -1)) {
-        return (right.shadow_edge_bps ?? -1) - (left.shadow_edge_bps ?? -1)
-      }
-      if (right.net_spread_bps !== left.net_spread_bps) {
-        return right.net_spread_bps - left.net_spread_bps
-      }
-      return right.confidence_score - left.confidence_score
-    }),
+    candidates: rankedCandidates,
   }
 
   return snapshot
@@ -611,6 +756,8 @@ function getStateWithOptions(workspaceId: number, options?: Partial<PredictionDa
     limitPerVenue: options?.limitPerVenue,
     maxPairs: options?.maxPairs,
     minArbitrageSpreadBps: options?.minArbitrageSpreadBps,
+    minQualityScore: options?.minQualityScore,
+    actionableOnly: options?.actionableOnly,
     shadowCandidateLimit: options?.shadowCandidateLimit,
     pollIntervalMs: options?.pollIntervalMs,
   })

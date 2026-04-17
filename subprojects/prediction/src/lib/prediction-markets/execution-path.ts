@@ -23,10 +23,16 @@ import {
 } from '@/lib/prediction-markets/shadow-arbitrage'
 import {
   buildPredictionMarketExecutionSizingSummary,
+  buildPredictionMarketNoTradeBaselineSummary,
   buildPredictionMarketStrategyNotes,
   buildPredictionMarketStrategySummary,
   type PredictionMarketExecutionSizingSummary,
 } from '@/lib/prediction-markets/execution-preview'
+import {
+  buildPredictionMarketPreTradeGate,
+  type PredictionMarketPreTradeEdgeBucket as PredictionMarketExecutionProjectionEdgeBucket,
+  type PredictionMarketPreTradeGate as PredictionMarketExecutionProjectionPreTradeGate,
+} from '@/lib/prediction-markets/pre-trade-gate'
 
 export type PredictionMarketExecutionProjectionPath = 'paper' | 'shadow' | 'live'
 export type PredictionMarketExecutionProjectionStatus = 'inactive' | 'ready' | 'degraded' | 'blocked'
@@ -99,6 +105,9 @@ export type PredictionMarketExecutionProjectionPathReport = {
   market_regime_summary?: string | null
   primary_strategy_summary?: string | null
   strategy_summary?: string | null
+  no_trade_baseline_summary?: string | null
+  edge_bucket?: PredictionMarketExecutionProjectionEdgeBucket | null
+  pre_trade_gate?: PredictionMarketExecutionProjectionPreTradeGate | null
 }
 
 export type PredictionMarketExecutionProjection = {
@@ -118,6 +127,9 @@ export type PredictionMarketExecutionProjection = {
   market_regime_summary?: string | null
   primary_strategy_summary?: string | null
   strategy_summary?: string | null
+  no_trade_baseline_summary?: string | null
+  selected_edge_bucket?: PredictionMarketExecutionProjectionEdgeBucket | null
+  selected_pre_trade_gate?: PredictionMarketExecutionProjectionPreTradeGate | null
   summary: string
 }
 
@@ -127,6 +139,7 @@ type ExecutionProjectionReadinessInput = PredictionMarketExecutionReadinessRepor
   market_regime_summary?: string | null
   primary_strategy_summary?: string | null
   strategy_summary?: string | null
+  no_trade_baseline_summary?: string | null
   strategy_name?: string | null
   strategy_trade_intent_preview?: TradeIntent | null
   strategy_canonical_trade_intent_preview?: TradeIntent | null
@@ -192,6 +205,17 @@ function buildStrategyNotes(input: {
   return buildPredictionMarketStrategyNotes(input)
 }
 
+function buildNoTradeBaselineSummary(input: {
+  recommendation_action: MarketRecommendationPacket['action']
+  strategy_name?: string | null
+  market_regime_summary?: string | null
+  primary_strategy_summary?: string | null
+  strategy_summary?: string | null
+  blocking_reasons?: Array<string | null | undefined>
+}): string | null {
+  return buildPredictionMarketNoTradeBaselineSummary(input)
+}
+
 function rankPath(path: PredictionMarketExecutionProjectionPath | null): number {
   switch (path) {
     case 'paper':
@@ -255,6 +279,79 @@ function staleQuoteRiskFromAge(
   if (ratio >= 1.5) return 'high'
   if (ratio >= 0.5) return 'medium'
   return 'low'
+}
+
+function makerExecutionFreshnessBudgetMs(snapshotFreshnessBudgetMs: number): number {
+  if (snapshotFreshnessBudgetMs > 0) {
+    return Math.max(1_000, Math.min(15_000, Math.round(snapshotFreshnessBudgetMs)))
+  }
+
+  return 15_000
+}
+
+function parseMakerQuoteState(
+  summary: string | null | undefined,
+): 'viable' | 'guarded' | 'blocked' | null {
+  const normalized = String(summary ?? '').toLowerCase()
+  if (normalized.includes('maker_quote=blocked') || normalized.includes('maker_quote_state:blocked')) return 'blocked'
+  if (normalized.includes('maker_quote=guarded') || normalized.includes('maker_quote_state:guarded')) return 'guarded'
+  if (normalized.includes('maker_quote=viable') || normalized.includes('maker_quote_state:viable')) return 'viable'
+  return null
+}
+
+function buildStrategyExecutionGuardSignals(input: {
+  mode: PredictionMarketExecutionProjectionPath
+  strategyName?: string | null
+  marketRegimeSummary?: string | null
+  readiness: ExecutionProjectionReadinessInput
+}): { blockers: string[]; warnings: string[] } {
+  if (input.strategyName !== 'maker_spread_capture') {
+    return { blockers: [], warnings: [] }
+  }
+
+  const makerQuoteState = parseMakerQuoteState(input.marketRegimeSummary)
+  const quoteAgeMs = nonNegativeInt(input.readiness.health.staleness_ms)
+  const freshnessBudgetMs = makerExecutionFreshnessBudgetMs(
+    nonNegativeInt(input.readiness.budgets.snapshot_freshness_budget_ms),
+  )
+  const warnings = [
+    `maker_quote_freshness_budget_ms:${freshnessBudgetMs}`,
+  ]
+  if (makerQuoteState) {
+    warnings.push(`maker_quote_state:${makerQuoteState}`)
+  }
+
+  if (input.mode === 'paper') {
+    if (quoteAgeMs > freshnessBudgetMs) {
+      warnings.push('maker_quote_stale_for_shadow_live')
+    }
+
+    return {
+      blockers: [],
+      warnings,
+    }
+  }
+
+  const blockers: string[] = []
+  if (makerQuoteState === 'blocked') {
+    blockers.push('maker_quote_regime_blocked')
+  }
+  if (makerQuoteState === 'guarded' && input.mode === 'live') {
+    blockers.push('maker_quote_guarded_live_only_shadow')
+  }
+  if (input.readiness.capabilities.supports_websocket !== true) {
+    blockers.push('maker_streaming_unavailable')
+  }
+  if (quoteAgeMs > freshnessBudgetMs) {
+    blockers.push('maker_quote_stale_for_execution')
+  } else if (quoteAgeMs >= Math.round(freshnessBudgetMs * 0.5)) {
+    warnings.push('maker_quote_age_near_budget')
+  }
+
+  return {
+    blockers,
+    warnings,
+  }
 }
 
 function buildPathSimulation(input: {
@@ -627,6 +724,14 @@ function projectPath(input: {
     primary_strategy_summary: input.primary_strategy_summary ?? null,
     strategy_summary: input.strategy_summary ?? null,
   })
+  const noTradeBaselineSummary = buildNoTradeBaselineSummary({
+    recommendation_action: input.recommendation.action,
+    strategy_name: input.strategy_name ?? null,
+    market_regime_summary: input.market_regime_summary ?? null,
+    primary_strategy_summary: input.primary_strategy_summary ?? null,
+    strategy_summary: input.strategy_summary ?? null,
+    blocking_reasons: [],
+  })
   const simulation = buildPathSimulation({
     mode: input.mode,
     recommendation: input.recommendation,
@@ -637,6 +742,16 @@ function projectPath(input: {
     tradeIntentPreview: null,
     strategySummary,
     strategyShadowArbitrage: input.strategy_shadow_arbitrage ?? null,
+  })
+  const simulationPreTradeGate = buildPredictionMarketPreTradeGate({
+    mode: input.mode,
+    recommendation: input.recommendation,
+    readiness: input.readiness,
+    simulation,
+    strategyName: input.strategy_name ?? null,
+    marketRegimeSummary: input.market_regime_summary ?? null,
+    strategySummary,
+    shadowArbitrage: simulation.shadow_arbitrage ?? input.strategy_shadow_arbitrage ?? null,
   })
 
   if (input.recommendation.action !== 'bet') {
@@ -651,6 +766,8 @@ function projectPath(input: {
         warnings: unique(warnings),
         reason_summary: unique([
           readiness?.summary ?? 'Paper projection is ready.',
+          noTradeBaselineSummary,
+          simulationPreTradeGate.summary,
           ...strategyNotes,
         ]).join(' '),
         simulation,
@@ -665,6 +782,9 @@ function projectPath(input: {
         market_regime_summary: input.market_regime_summary ?? null,
         primary_strategy_summary: input.primary_strategy_summary ?? null,
         strategy_summary: strategySummary,
+        no_trade_baseline_summary: noTradeBaselineSummary,
+        edge_bucket: simulationPreTradeGate.edge_bucket,
+        pre_trade_gate: simulationPreTradeGate,
       }
     }
 
@@ -710,10 +830,18 @@ function projectPath(input: {
   })
   blockers.push(...microstructureSignals.blockers)
   warnings.push(...microstructureSignals.warnings)
+  const strategyExecutionGuards = buildStrategyExecutionGuardSignals({
+    mode: input.mode,
+    strategyName: input.strategy_name ?? null,
+    marketRegimeSummary: input.market_regime_summary ?? null,
+    readiness: input.readiness,
+  })
+  blockers.push(...strategyExecutionGuards.blockers)
+  warnings.push(...strategyExecutionGuards.warnings)
 
   const normalizedBlockers = unique(blockers)
   const normalizedWarnings = unique(warnings)
-  const allowed = normalizedBlockers.length === 0 && readiness?.verdict !== 'blocked'
+  const preTradeAllowed = normalizedBlockers.length === 0 && readiness?.verdict !== 'blocked'
   const strategyTradeIntentPreview = input.strategy_trade_intent_preview ?? null
   const sizingSummary = input.snapshot && input.forecast && input.recommendation.side
     ? buildPredictionMarketExecutionSizingSummary({
@@ -724,7 +852,7 @@ function projectPath(input: {
       readiness: input.readiness,
     })
     : null
-  const tradeIntentPreview = allowed && input.recommendation.action === 'bet'
+  const tradeIntentPreview = preTradeAllowed && input.recommendation.action === 'bet'
     ? buildTradeIntentPreview({
       mode: input.mode,
       runId: input.runId,
@@ -733,19 +861,54 @@ function projectPath(input: {
     })
     : null
   const selectedTradeIntentPreview = tradeIntentPreview ?? strategyTradeIntentPreview
+  const preTradeSimulation = buildPathSimulation({
+    mode: input.mode,
+    recommendation: input.recommendation,
+    readiness: input.readiness,
+    allowed: preTradeAllowed,
+    blockers: normalizedBlockers,
+    warnings: normalizedWarnings,
+    tradeIntentPreview: selectedTradeIntentPreview,
+  })
+  const preliminaryPreTradeGate = buildPredictionMarketPreTradeGate({
+    mode: input.mode,
+    recommendation: input.recommendation,
+    readiness: input.readiness,
+    simulation: preTradeSimulation,
+    strategyName: input.strategy_name ?? null,
+    marketRegimeSummary: input.market_regime_summary ?? null,
+    strategySummary,
+    shadowArbitrage: preTradeSimulation.shadow_arbitrage ?? input.strategy_shadow_arbitrage ?? null,
+  })
+  if (preliminaryPreTradeGate.verdict === 'fail') {
+    normalizedBlockers.push('pre_trade_gate:net_edge_below_conservative_threshold')
+  }
+  const finalBlockers = unique(normalizedBlockers)
+  const finalWarnings = unique(normalizedWarnings)
+  const allowed = finalBlockers.length === 0 && readiness?.verdict !== 'blocked'
   const guardedSimulation = buildPathSimulation({
     mode: input.mode,
     recommendation: input.recommendation,
     readiness: input.readiness,
     allowed,
-    blockers: normalizedBlockers,
-    warnings: normalizedWarnings,
+    blockers: finalBlockers,
+    warnings: finalWarnings,
     tradeIntentPreview: selectedTradeIntentPreview,
   })
   const shadowArbitrageSignal = buildShadowArbitrageSignal(guardedSimulation.shadow_arbitrage)
   const strategyShadowArbitrage = input.strategy_shadow_arbitrage ?? null
   const strategyShadowSignal = input.strategy_shadow_signal ?? buildShadowArbitrageSignal(strategyShadowArbitrage)
   const strategyShadowSummary = buildStrategyShadowSummary(strategyShadowArbitrage, input.strategy_shadow_summary)
+  const preTradeGate = buildPredictionMarketPreTradeGate({
+    mode: input.mode,
+    recommendation: input.recommendation,
+    readiness: input.readiness,
+    simulation: guardedSimulation,
+    strategyName: input.strategy_name ?? null,
+    marketRegimeSummary: input.market_regime_summary ?? null,
+    strategySummary,
+    shadowArbitrage: guardedSimulation.shadow_arbitrage ?? strategyShadowArbitrage,
+  })
   const sizingSignal = buildSizingSignal({
     sizingSummary,
     tradeIntentPreview: selectedTradeIntentPreview,
@@ -757,6 +920,7 @@ function projectPath(input: {
       ...tradeIntentPreview,
       notes: unique([
         tradeIntentPreview.notes,
+        preTradeGate.summary,
         ...strategyNotes,
         ...microstructureSignals.notes,
       ]).join(' '),
@@ -767,6 +931,7 @@ function projectPath(input: {
       ...strategyTradeIntentPreview,
       notes: unique([
         strategyTradeIntentPreview.notes,
+        preTradeGate.summary,
         ...strategyNotes,
         ...microstructureSignals.notes,
       ]).join(' '),
@@ -783,29 +948,42 @@ function projectPath(input: {
     path: input.mode,
     requested_mode: input.mode,
     effective_mode: effectiveMode,
-    status: projectedStatus(readiness?.verdict ?? 'blocked', allowed, normalizedBlockers),
+    status: projectedStatus(readiness?.verdict ?? 'blocked', allowed, finalBlockers),
     allowed,
-    blockers: normalizedBlockers,
-    warnings: normalizedWarnings,
+    blockers: finalBlockers,
+    warnings: finalWarnings,
     reason_summary: allowed
       ? unique([
         readiness?.summary ?? `${input.mode} projection is ready.`,
+        preTradeGate.summary,
         ...strategyNotes,
         ...microstructureSignals.warnings,
       ]).join(' ')
-      : normalizedBlockers[0] ?? `${input.mode} projection is blocked.`,
+      : unique([
+        preTradeGate.verdict === 'fail' ? preTradeGate.summary : null,
+        finalBlockers[0] ?? `${input.mode} projection is blocked.`,
+      ]).join(' '),
     simulation: guardedSimulation,
-    trade_intent_preview: normalizedTradeIntentPreview ?? normalizedStrategyTradeIntentPreview,
-    canonical_trade_intent_preview: canonicalTradeIntentPreview,
+    trade_intent_preview:
+      preTradeGate.verdict === 'fail'
+        ? null
+        : normalizedTradeIntentPreview ?? normalizedStrategyTradeIntentPreview,
+    canonical_trade_intent_preview:
+      preTradeGate.verdict === 'fail'
+        ? null
+        : canonicalTradeIntentPreview,
     strategy_trade_intent_preview: normalizedStrategyTradeIntentPreview,
     strategy_canonical_trade_intent_preview: canonicalStrategyTradeIntentPreview,
-    sizing_signal: sizingSignal,
+    sizing_signal: preTradeGate.verdict === 'fail' ? null : sizingSignal,
     shadow_arbitrage_signal: shadowArbitrageSignal,
     strategy_shadow_summary: strategyShadowSummary,
     strategy_shadow_signal: strategyShadowSignal,
     market_regime_summary: input.market_regime_summary ?? null,
     primary_strategy_summary: input.primary_strategy_summary ?? null,
     strategy_summary: strategySummary,
+    no_trade_baseline_summary: noTradeBaselineSummary,
+    edge_bucket: preTradeGate.edge_bucket,
+    pre_trade_gate: preTradeGate,
   }
 }
 
@@ -879,6 +1057,19 @@ export function projectPredictionMarketExecutionPath(input: {
     primary_strategy_summary: input.primary_strategy_summary ?? null,
     strategy_summary: input.strategy_summary ?? null,
   })
+  const projectionNoTradeBaselineSummary = requestedPathReport.no_trade_baseline_summary ?? buildNoTradeBaselineSummary({
+    recommendation_action: input.recommendation.action,
+    strategy_name: input.strategy_name ?? null,
+    market_regime_summary: input.market_regime_summary ?? null,
+    primary_strategy_summary: input.primary_strategy_summary ?? null,
+    strategy_summary: input.strategy_summary ?? null,
+    blocking_reasons: blockingReasons,
+  })
+  const canonicalProjectionPath = selectedPath == null
+    ? projectedPaths[requestedPath] ?? null
+    : projectedPaths[selectedPath] ?? null
+  const selectedEdgeBucket = canonicalProjectionPath?.edge_bucket ?? null
+  const selectedPreTradeGate = canonicalProjectionPath?.pre_trade_gate ?? null
 
   return {
     gate_name: 'execution_projection',
@@ -897,15 +1088,21 @@ export function projectPredictionMarketExecutionPath(input: {
     market_regime_summary: input.market_regime_summary ?? null,
     primary_strategy_summary: input.primary_strategy_summary ?? null,
     strategy_summary: projectionStrategySummary,
+    no_trade_baseline_summary: projectionNoTradeBaselineSummary,
+    selected_edge_bucket: selectedEdgeBucket,
+    selected_pre_trade_gate: selectedPreTradeGate,
     summary: selectedPath
       ? unique([
         `Requested ${requestedPath}; selected ${selectedPath}; gate execution_projection; preflight only.`,
         projectionStrategySummary ? `Strategy context: ${projectionStrategySummary}.` : null,
+        selectedPreTradeGate?.summary ?? null,
         projectedPaths[selectedPath].reason_summary,
       ]).join(' ')
       : unique([
         `Requested ${requestedPath}; gate execution_projection; preflight only; no execution path is currently safe.`,
+        projectionNoTradeBaselineSummary ? `Baseline: ${projectionNoTradeBaselineSummary}` : null,
         projectionStrategySummary ? `Strategy context: ${projectionStrategySummary}.` : null,
+        selectedPreTradeGate?.summary ?? null,
       ]).join(' '),
   }
 }

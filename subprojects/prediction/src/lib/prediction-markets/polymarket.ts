@@ -7,6 +7,7 @@ import {
   marketSnapshotSchema,
   PREDICTION_MARKETS_SCHEMA_VERSION,
 } from '@/lib/prediction-markets/schemas'
+import { getPredictionMarketP0ARuntimeSummary } from '@/lib/prediction-markets/external-runtime'
 
 type RawJson = Record<string, unknown>
 
@@ -31,6 +32,9 @@ const DEFAULT_CLOB_URL = 'https://clob.polymarket.com'
 const DEFAULT_TIMEOUT_MS = 8_000
 const DEFAULT_HISTORY_LIMIT = 120
 const POLYMARKET_VENUE = 'polymarket'
+const POLYMARKET_MARKET_WEBSOCKET_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market'
+const POLYMARKET_USER_WEBSOCKET_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/user'
+const POLYMARKET_RTDS_URL = 'wss://ws-live-data.polymarket.com'
 const POLYMARKET_DEFAULT_BUDGETS = {
   venue: POLYMARKET_VENUE,
   default_list_limit: 20,
@@ -201,7 +205,162 @@ function isValidUrl(value: string): boolean {
   }
 }
 
+function readEnvText(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name]
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim()
+    }
+  }
+  return null
+}
+
+function readEnvBoolean(...names: string[]): boolean {
+  for (const name of names) {
+    const value = process.env[name]
+    if (typeof value !== 'string') continue
+    const normalized = value.trim().toLowerCase()
+    if (['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)) return true
+    if (['0', 'false', 'no', 'off', 'disabled'].includes(normalized)) return false
+  }
+  return false
+}
+
+function resolveOperatorEndpoint(...names: string[]): string | null {
+  const candidate = readEnvText(...names)
+  if (!candidate) return null
+
+  try {
+    const endpoint = new URL(candidate)
+    if (endpoint.protocol === 'http:' || endpoint.protocol === 'https:' || endpoint.protocol === 'ws:' || endpoint.protocol === 'wss:') {
+      return endpoint.toString()
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+export type PredictionMarketVenueP0ALineageStatus = {
+  adapter_lineage: {
+    venue_adapter_family: 'polymarket_clob'
+    typescript_reference: string
+    python_reference: string
+    official_client_urls: string[]
+    canonical_gate: 'execution_projection'
+    adapter_ready: boolean
+    readback_parity_target: 'orderbook_and_order_readback'
+  }
+  sidecars: {
+    tremor: {
+      configured: boolean
+      runtime_mode: 'read_only_sidecar'
+      endpoint: string | null
+      event_source: 'dashboard_events'
+      read_models: string[]
+    }
+    polymarket_mcp: {
+      configured: boolean
+      runtime_mode: 'operator_wrapper'
+      endpoint: string | null
+      scope: 'operator_read_only'
+    }
+    polymarket_mcp_analytics: {
+      configured: boolean
+      runtime_mode: 'operator_wrapper'
+      endpoint: string | null
+      scope: 'operator_read_only'
+    }
+  }
+  transport: {
+    gamma_url: string
+    clob_url: string
+    market_websocket_url: string
+    user_websocket_url: string
+    rtds_url: string
+    websocket_operator_bound: boolean
+    rtds_operator_bound: boolean
+  }
+  runtime_summary: {
+    active_profile_ids: string[]
+    configured_profile_ids: string[]
+    catalog_profile_ids: string[]
+    summary: string
+  }
+  summary: string
+}
+
+export function getPolymarketVenueP0ALineageStatus(): PredictionMarketVenueP0ALineageStatus {
+  const { gammaUrl, clobUrl } = getConfig()
+  const runtimeSummary = getPredictionMarketP0ARuntimeSummary()
+  const tremorEndpoint = resolveOperatorEndpoint('PREDICTION_MARKETS_POLYMARKET_TREMOR_URL', 'PREDICTION_MARKETS_TREMOR_URL')
+  const mcpEndpoint = resolveOperatorEndpoint('PREDICTION_MARKETS_POLYMARKET_MCP_URL')
+  const mcpAnalyticsEndpoint = resolveOperatorEndpoint('PREDICTION_MARKETS_POLYMARKET_MCP_ANALYTICS_URL')
+  const tremorEnabled = tremorEndpoint != null || readEnvBoolean('PREDICTION_MARKETS_POLYMARKET_TREMOR_ENABLED')
+  const mcpEnabled = mcpEndpoint != null || readEnvBoolean('PREDICTION_MARKETS_POLYMARKET_MCP_ENABLED')
+  const mcpAnalyticsEnabled = mcpAnalyticsEndpoint != null || readEnvBoolean('PREDICTION_MARKETS_POLYMARKET_MCP_ANALYTICS_ENABLED')
+
+  return {
+    adapter_lineage: {
+      venue_adapter_family: 'polymarket_clob',
+      typescript_reference: 'Polymarket/clob-client',
+      python_reference: 'Polymarket/py-clob-client',
+      official_client_urls: [
+        'https://github.com/Polymarket/clob-client',
+        'https://github.com/Polymarket/py-clob-client',
+      ],
+      canonical_gate: 'execution_projection',
+      adapter_ready: true,
+      readback_parity_target: 'orderbook_and_order_readback',
+    },
+    sidecars: {
+      tremor: {
+        configured: tremorEnabled,
+        runtime_mode: 'read_only_sidecar',
+        endpoint: tremorEndpoint,
+        event_source: 'dashboard_events',
+        read_models: ['dashboard-read-models', 'source-audit'],
+      },
+      polymarket_mcp: {
+        configured: mcpEnabled,
+        runtime_mode: 'operator_wrapper',
+        endpoint: mcpEndpoint,
+        scope: 'operator_read_only',
+      },
+      polymarket_mcp_analytics: {
+        configured: mcpAnalyticsEnabled,
+        runtime_mode: 'operator_wrapper',
+        endpoint: mcpAnalyticsEndpoint,
+        scope: 'operator_read_only',
+      },
+    },
+    transport: {
+      gamma_url: gammaUrl,
+      clob_url: clobUrl,
+      market_websocket_url: POLYMARKET_MARKET_WEBSOCKET_URL,
+      user_websocket_url: POLYMARKET_USER_WEBSOCKET_URL,
+      rtds_url: POLYMARKET_RTDS_URL,
+      websocket_operator_bound: true,
+      rtds_operator_bound: true,
+    },
+    runtime_summary: {
+      active_profile_ids: runtimeSummary.active_profile_ids,
+      configured_profile_ids: runtimeSummary.configured_profile_ids,
+      catalog_profile_ids: runtimeSummary.catalog_profile_ids,
+      summary: runtimeSummary.summary,
+    },
+    summary: [
+      'P0-A lineage is exposed as additive runtime metadata.',
+      'Official Polymarket TypeScript and Python clients remain adapter references only.',
+      'Tremor and MCP wrappers stay optional read-only/operator-bound sidecars.',
+      'execution_projection remains the canonical gate for dispatch/paper/shadow/live.',
+    ].join(' '),
+  }
+}
+
 export function getPolymarketVenueCapabilities() {
+  const p0a = getPolymarketVenueP0ALineageStatus()
   return {
     venue: 'polymarket' as const,
     label: 'Polymarket',
@@ -224,7 +383,13 @@ export function getPolymarketVenueCapabilities() {
     notes: [
       'Gamma metadata plus CLOB book/history are available through the adapter.',
       'Snapshot generation is read-only and conservative.',
+      'Adapter lineage tracks Polymarket/clob-client and Polymarket/py-clob-client.',
+      'Read-only monitoring sidecars include sculptdotfun/tremor and Polymarket MCP wrappers.',
+      'execution_projection remains the canonical gate for dispatch/paper/shadow/live.',
     ],
+    metadata: {
+      p0_a_lineage: p0a,
+    },
   }
 }
 
@@ -232,6 +397,7 @@ export function getPolymarketVenueHealthSnapshot() {
   const { gammaUrl, clobUrl } = getConfig()
   const configuredEndpoints = [gammaUrl, clobUrl]
   const invalidEndpoints = configuredEndpoints.filter((endpoint) => !isValidUrl(endpoint))
+  const p0a = getPolymarketVenueP0ALineageStatus()
 
   return {
     venue: 'polymarket' as const,
@@ -243,6 +409,17 @@ export function getPolymarketVenueHealthSnapshot() {
     reasons: invalidEndpoints.length === 0
       ? []
       : ['one or more configured endpoints failed URL validation'],
+    metadata: {
+      p0_a_lineage: {
+        sidecars_configured: {
+          tremor: p0a.sidecars.tremor.configured,
+          polymarket_mcp: p0a.sidecars.polymarket_mcp.configured,
+          polymarket_mcp_analytics: p0a.sidecars.polymarket_mcp_analytics.configured,
+        },
+        transport: p0a.transport,
+        canonical_gate: p0a.adapter_lineage.canonical_gate,
+      },
+    },
   }
 }
 

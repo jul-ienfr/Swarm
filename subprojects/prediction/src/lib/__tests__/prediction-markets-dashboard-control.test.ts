@@ -13,6 +13,7 @@ vi.mock('@/lib/prediction-markets/service', () => ({
 import {
   approveDashboardLiveIntent,
   createDashboardLiveIntent,
+  getDashboardEvents,
   getDashboardLiveIntent,
   rejectDashboardLiveIntent,
 } from '@/lib/prediction-markets/dashboard-control'
@@ -168,6 +169,15 @@ describe('prediction markets dashboard live intent control', () => {
         approvers: ['approver-b'],
       },
     })
+
+    expect(getDashboardEvents()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event_type: 'live_intent_created',
+      }),
+      expect.objectContaining({
+        event_type: 'live_intent_approved',
+      }),
+    ]))
   })
 
   it('rejects a live intent and keeps it rejected', () => {

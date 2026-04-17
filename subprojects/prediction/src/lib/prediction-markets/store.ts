@@ -97,7 +97,21 @@ type PersistExecutionInput = {
   evidencePackets: EvidencePacket[]
   forecast: ForecastPacket
   recommendation: MarketRecommendationPacket
+  sourceAudit?: PredictionMarketJsonArtifact
+  rulesLineage?: PredictionMarketJsonArtifact
+  catalystTimeline?: PredictionMarketJsonArtifact
+  worldState?: PredictionMarketJsonArtifact
+  ticketPayload?: PredictionMarketJsonArtifact
+  quantSignalBundle?: PredictionMarketJsonArtifact
+  decisionLedger?: PredictionMarketJsonArtifact
+  calibrationReport?: PredictionMarketJsonArtifact
+  resolvedHistory?: PredictionMarketJsonArtifact
+  costModelReport?: PredictionMarketJsonArtifact
+  walkForwardReport?: PredictionMarketJsonArtifact
+  autopilotCycleSummary?: PredictionMarketJsonArtifact
+  researchMemorySummary?: PredictionMarketJsonArtifact
   researchSidecar?: PredictionMarketJsonArtifact
+  timesfmSidecar?: PredictionMarketJsonArtifact
   microstructureLab?: PredictionMarketJsonArtifact
   crossVenueIntelligence?: PredictionMarketJsonArtifact
   strategyCandidatePacket?: StrategyCandidatePacket
@@ -173,6 +187,20 @@ function parseArtifactPayload(artifactType: PredictionMarketArtifactType, payloa
       return forecastPacketSchema.parse(parsed)
     case 'recommendation_packet':
       return marketRecommendationPacketSchema.parse(parsed)
+    case 'source_audit':
+    case 'rules_lineage':
+    case 'catalyst_timeline':
+    case 'world_state':
+    case 'ticket_payload':
+    case 'quant_signal_bundle':
+    case 'decision_ledger':
+    case 'calibration_report':
+    case 'resolved_history':
+    case 'cost_model_report':
+    case 'walk_forward_report':
+    case 'autopilot_cycle_summary':
+    case 'research_memory_summary':
+      return predictionMarketJsonArtifactSchema.parse(parsed)
     case 'strategy_candidate_packet':
       return strategyCandidatePacketSchema.parse(parsed)
     case 'strategy_decision_packet':
@@ -194,6 +222,7 @@ function parseArtifactPayload(artifactType: PredictionMarketArtifactType, payloa
     case 'autonomous_agent_report':
       return autonomousAgentReportSchema.parse(parsed)
     case 'research_sidecar':
+    case 'timesfm_sidecar':
     case 'microstructure_lab':
     case 'cross_venue_intelligence':
     case 'market_events':
@@ -450,6 +479,136 @@ export function persistPredictionMarketExecution(input: PersistExecutionInput) {
       }),
     ]
     const optionalArtifacts: Array<ReturnType<typeof persistPredictionMarketArtifact> | null> = [
+      input.sourceAudit
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'source_audit',
+          payload: input.sourceAudit,
+        })
+        : null,
+      input.rulesLineage
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'rules_lineage',
+          payload: input.rulesLineage,
+        })
+        : null,
+      input.catalystTimeline
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'catalyst_timeline',
+          payload: input.catalystTimeline,
+        })
+        : null,
+      input.worldState
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'world_state',
+          payload: input.worldState,
+        })
+        : null,
+      input.ticketPayload
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'ticket_payload',
+          payload: input.ticketPayload,
+        })
+        : null,
+      input.quantSignalBundle
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'quant_signal_bundle',
+          payload: input.quantSignalBundle,
+        })
+        : null,
+      input.decisionLedger
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'decision_ledger',
+          payload: input.decisionLedger,
+        })
+        : null,
+      input.calibrationReport
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'calibration_report',
+          payload: input.calibrationReport,
+        })
+        : null,
+      input.resolvedHistory
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'resolved_history',
+          payload: input.resolvedHistory,
+        })
+        : null,
+      input.costModelReport
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'cost_model_report',
+          payload: input.costModelReport,
+        })
+        : null,
+      input.walkForwardReport
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'walk_forward_report',
+          payload: input.walkForwardReport,
+        })
+        : null,
+      input.autopilotCycleSummary
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'autopilot_cycle_summary',
+          payload: input.autopilotCycleSummary,
+        })
+        : null,
+      input.researchMemorySummary
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'research_memory_summary',
+          payload: input.researchMemorySummary,
+        })
+        : null,
       input.researchSidecar
       ? persistPredictionMarketArtifact({
           workspaceId: input.workspaceId,
@@ -458,6 +617,16 @@ export function persistPredictionMarketExecution(input: PersistExecutionInput) {
           marketId: input.snapshot.market.market_id,
           artifactType: 'research_sidecar',
           payload: input.researchSidecar,
+        })
+        : null,
+      input.timesfmSidecar
+        ? persistPredictionMarketArtifact({
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          venue: input.venue,
+          marketId: input.snapshot.market.market_id,
+          artifactType: 'timesfm_sidecar',
+          payload: input.timesfmSidecar,
         })
         : null,
       input.microstructureLab

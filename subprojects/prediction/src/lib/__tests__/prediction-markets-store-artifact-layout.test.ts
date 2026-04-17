@@ -498,6 +498,109 @@ describe('prediction markets store artifact layout alignment', () => {
     })
   })
 
+  it('persists resolved history, cost model, and walk-forward artifacts', () => {
+    const snapshot = makeMarketSnapshot()
+    const resolutionPolicy = resolutionPolicySchema.parse({
+      market_id: snapshot.market.market_id,
+      venue: snapshot.venue,
+      status: 'eligible',
+      evaluated_at: '2026-04-08T00:00:00.000Z',
+      resolution_text: 'Resolves to yes if BTC closes above 100k during Apr 2026.',
+      reasons: ['Uses market close data from the official exchange feed.'],
+      primary_sources: ['https://example.com/resolution/btc-apr-2026'],
+      manual_review_required: false,
+    })
+    const evidencePackets = [makeEvidencePacket(snapshot, 'evidence-history')]
+    const forecast = forecastPacketSchema.parse({
+      market_id: snapshot.market.market_id,
+      venue: snapshot.venue,
+      probability_yes: 0.64,
+      confidence: 0.71,
+      basis: 'manual_thesis',
+      rationale: 'Historical stack says the market is underpricing yes.',
+      reasons: ['Calibration and walk-forward agree on the long side.'],
+      evidence_refs: ['evidence-history'],
+      produced_at: '2026-04-08T00:00:10.000Z',
+    })
+    const recommendation = marketRecommendationPacketSchema.parse({
+      market_id: snapshot.market.market_id,
+      venue: snapshot.venue,
+      action: 'bet',
+      side: 'yes',
+      confidence: 0.71,
+      market_price_yes: 0.49,
+      market_bid_yes: 0.48,
+      market_ask_yes: 0.5,
+      fair_value_yes: 0.64,
+      edge_bps: 1500,
+      spread_bps: 200,
+      rationale: 'Validation stack clears the edge after costs.',
+      reasons: ['resolved history present', 'walk forward positive'],
+      risk_flags: [],
+      produced_at: '2026-04-08T00:00:11.000Z',
+      next_review_at: '2026-04-08T02:00:00.000Z',
+    })
+    const manifest = runManifestSchema.parse({
+      run_id: 'pm-run-batch1',
+      mode: 'advise',
+      venue: snapshot.venue,
+      market_id: snapshot.market.market_id,
+      market_slug: snapshot.market.slug,
+      actor: 'operator',
+      started_at: '2026-04-08T00:00:00.000Z',
+      completed_at: '2026-04-08T00:00:20.000Z',
+      status: 'completed',
+      config_hash: 'cfg-store-layout-batch1',
+    })
+
+    const execution = persistPredictionMarketExecution({
+      workspaceId: 7,
+      runId: manifest.run_id,
+      venue: manifest.venue,
+      mode: manifest.mode,
+      snapshot,
+      resolutionPolicy,
+      evidencePackets,
+      forecast,
+      recommendation,
+      resolvedHistory: {
+        artifact_kind: 'resolved_history',
+        run_id: manifest.run_id,
+        resolved_records: 4,
+        points: [],
+        summary: 'resolved history ready',
+      },
+      costModelReport: {
+        artifact_kind: 'cost_model_report',
+        run_id: manifest.run_id,
+        total_points: 4,
+        average_net_edge_bps: 125,
+        summary: 'cost model ready',
+      },
+      walkForwardReport: {
+        artifact_kind: 'walk_forward_report',
+        run_id: manifest.run_id,
+        total_windows: 2,
+        promotion_ready: true,
+        summary: 'walk forward ready',
+      },
+      manifest,
+    })
+
+    expect(execution.summary.manifest.artifact_refs.map((ref) => ref.artifact_type)).toEqual(expect.arrayContaining([
+      'resolved_history',
+      'cost_model_report',
+      'walk_forward_report',
+    ]))
+
+    const details = getPredictionMarketRunDetails('pm-run-batch1', 7)
+    expect(details?.artifacts.map((artifact) => artifact.artifact_type)).toEqual(expect.arrayContaining([
+      'resolved_history',
+      'cost_model_report',
+      'walk_forward_report',
+    ]))
+  })
+
   it('persists shadow_arbitrage as a canonical run-scoped json artifact', () => {
     const snapshot = makeMarketSnapshot()
     const manifest = runManifestSchema.parse({

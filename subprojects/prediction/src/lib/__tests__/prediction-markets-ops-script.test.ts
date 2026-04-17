@@ -88,6 +88,7 @@ describe('prediction-ops script', () => {
         '--execution-pathways-summary',
         '--research-summary',
         '--benchmark-summary',
+        '--validation-summary',
       ]),
     )
     expect(payload.args).toEqual(
@@ -115,6 +116,7 @@ describe('prediction-ops script', () => {
         '--execution-pathways-summary',
         '--research-summary',
         '--benchmark-summary',
+        '--validation-summary',
         '--json',
         '--limit',
         '5',
@@ -154,13 +156,13 @@ describe('prediction-ops script', () => {
       surface_kind: 'operator_surface',
       preflight_only: true,
       benchmark_gated: true,
-      readiness_semantics: 'blocked_until_live_path_and_benchmark_ready',
+      readiness_semantics: 'blocked_until_live_path_benchmark_and_transport_ready',
       execution_projection_path: 'live',
-      promotion_semantics: 'benchmark_gated_preview_only',
+      promotion_semantics: 'benchmark_gated_governed_live_materialization',
     })
     expect(payload.request_preview).toBe('POST /api/v1/prediction-markets/runs/run-live-456/live')
     expect(payload.surface_summary).toBe(
-      'Live stays preflight-only, benchmark-gated, and read-only; it threads execution_readiness plus multi_venue_execution through the canonical execution_projection preview.',
+      'Live remains the canonical preflight surface for governed routing; it stays benchmark-gated by default, and real venue execution can be materialized with execution_mode=live after an approved live intent.',
     )
     expect(payload.request).toEqual({
       method: 'POST',
@@ -206,13 +208,13 @@ describe('prediction-ops script', () => {
       'prediction_surface: surface=live kind=operator_surface method=POST path=/api/v1/prediction-markets/runs/run-live-789/live preflight=yes benchmark=yes default_venue=no projection=live runtime=execution_projection_first',
     )
     expect(result.stdout).toContain(
-      'prediction_surface_semantics: readiness=blocked_until_live_path_and_benchmark_ready promotion=benchmark_gated_preview_only transport=none',
+      'prediction_surface_semantics: readiness=blocked_until_live_path_benchmark_and_transport_ready promotion=benchmark_gated_governed_live_materialization transport=none',
     )
     expect(result.stdout).toContain(
       'prediction_request_preview: POST /api/v1/prediction-markets/runs/run-live-789/live',
     )
     expect(result.stdout).toContain(
-      'prediction_surface_summary: Live stays preflight-only, benchmark-gated, and read-only; it threads execution_readiness plus multi_venue_execution through the canonical execution_projection preview.',
+      'prediction_surface_summary: Live remains the canonical preflight surface for governed routing; it stays benchmark-gated by default, and real venue execution can be materialized with execution_mode=live after an approved live intent.',
     )
   })
 

@@ -123,6 +123,21 @@ describe('prediction markets artifact layout', () => {
       basename: 'market_positions',
       extension: 'json',
     })
+    expect(getPredictionMarketArtifactDescriptor('resolved_history')).toEqual({
+      bucket: 'runs',
+      basename: 'resolved_history',
+      extension: 'json',
+    })
+    expect(getPredictionMarketArtifactDescriptor('cost_model_report')).toEqual({
+      bucket: 'runs',
+      basename: 'cost_model_report',
+      extension: 'json',
+    })
+    expect(getPredictionMarketArtifactDescriptor('walk_forward_report')).toEqual({
+      bucket: 'runs',
+      basename: 'walk_forward_report',
+      extension: 'json',
+    })
     expect(getPredictionMarketArtifactDescriptor('run_manifest')).toEqual({
       bucket: 'runs',
       basename: 'run_manifest',

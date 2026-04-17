@@ -75,6 +75,19 @@ function compactCountsValue(value) {
   return compactValue(value, 48)
 }
 
+function formatPercentValue(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return 'n/a'
+  return `${(number * 100).toFixed(1)}%`
+}
+
+function formatBpsValue(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return 'n/a'
+  const sign = number > 0 ? '+' : ''
+  return `${sign}${Math.round(number)} bps`
+}
+
 function parseMaybeJson(value) {
   if (typeof value !== 'string') return value
   try {
@@ -97,6 +110,11 @@ function parseArgs(argv) {
     researchSignalsSummary: false,
     researchSummary: false,
     benchmarkSummary: false,
+    validationSummary: false,
+    approvalTicketSummary: false,
+    operatorThesisSummary: false,
+    researchPipelineTraceSummary: false,
+    liveDashboardSummary: false,
     executionReadinessSummary: false,
     executionPathwaysSummary: false,
     artifactAuditSummary: false,
@@ -129,6 +147,21 @@ function parseArgs(argv) {
         break
       case 'benchmark-summary':
         flags.benchmarkSummary = true
+        break
+      case 'validation-summary':
+        flags.validationSummary = true
+        break
+      case 'approval-ticket-summary':
+        flags.approvalTicketSummary = true
+        break
+      case 'operator-thesis-summary':
+        flags.operatorThesisSummary = true
+        break
+      case 'research-pipeline-trace-summary':
+        flags.researchPipelineTraceSummary = true
+        break
+      case 'live-dashboard-summary':
+        flags.liveDashboardSummary = true
         break
       case 'execution-readiness-summary':
         flags.executionReadinessSummary = true
@@ -291,6 +324,259 @@ function formatResearchOriginLine(source) {
     `origin=${research.mode}`,
     research.recommendation ? `recommendation=${research.recommendation}` : null,
     `abstention_effect=${research.abstentionEffect}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function formatTimesFMLine(source) {
+  if (!source) return null
+  const requestedMode = firstDefined(source.timesfm_requested_mode, source.request_contract?.timesfm_mode, null)
+  const effectiveMode = firstDefined(source.timesfm_effective_mode, null)
+  const selectedLane = firstDefined(source.timesfm_selected_lane, null)
+  const health = firstDefined(source.timesfm_health, null)
+  const summary = firstDefined(source.timesfm_summary, source.timesfm_sidecar?.summary, null)
+  if (requestedMode == null && effectiveMode == null && selectedLane == null && health == null && summary == null) {
+    return null
+  }
+
+  return [
+    'timesfm:',
+    requestedMode != null ? `requested=${compactValue(requestedMode, 32)}` : null,
+    effectiveMode != null ? `effective=${compactValue(effectiveMode, 32)}` : null,
+    selectedLane != null ? `lane=${compactValue(selectedLane, 32)}` : null,
+    health != null ? `health=${compactValue(health, 32)}` : null,
+    summary != null ? `summary="${compactValue(summary, 120)}"` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function formatApprovalTicketLine(source) {
+  const ticket = asRecord(firstDefined(
+    source.approval_ticket,
+    source.approval_trade_ticket,
+    source.trade_approval_ticket,
+    source.live_approval_ticket,
+  ))
+  if (!ticket && !source.approval_ticket_status && !source.approval_ticket_summary) return null
+
+  const approvalState = asRecord(firstDefined(ticket?.approval_state, source.approval_state))
+  const approvers = asArray(firstDefined(ticket?.approved_by, approvalState?.approvers, source.approval_ticket_approvers))
+  const rejectedBy = asArray(firstDefined(ticket?.rejected_by, approvalState?.rejections, source.approval_ticket_rejections))
+  const preview = asRecord(firstDefined(ticket?.trade_intent_preview, source.approval_ticket_trade_intent_preview, source.live_trade_intent_preview))
+  const summary = firstDefined(ticket?.summary, source.approval_ticket_summary, source.approval_ticket_note)
+  const ticketId = firstDefined(ticket?.ticket_id, source.approval_ticket_id)
+  const marketId = firstDefined(ticket?.market_id, source.approval_ticket_market_id)
+  const venueName = firstDefined(ticket?.venue, source.approval_ticket_venue)
+  const recommendation = firstDefined(ticket?.recommendation, source.approval_ticket_recommendation)
+  const side = firstDefined(ticket?.side, source.approval_ticket_side)
+  const sizeUsd = firstDefined(ticket?.size_usd, source.approval_ticket_size_usd)
+  const limitPrice = firstDefined(ticket?.limit_price, source.approval_ticket_limit_price)
+
+  return [
+    'approval_ticket:',
+    `status=${approvalState?.status ?? source.approval_ticket_status ?? 'unknown'}`,
+    ticket?.workflow_stage ? `workflow=${ticket.workflow_stage}` : null,
+    ticketId ? `ticket=${ticketId}` : null,
+    marketId ? `market=${marketId}` : null,
+    venueName ? `venue=${venueName}` : null,
+    recommendation ? `recommendation=${recommendation}` : null,
+    side ? `side=${side}` : null,
+    sizeUsd !== undefined ? `size=${sizeUsd}` : null,
+    limitPrice !== undefined ? `limit=${limitPrice}` : null,
+    approvers.length > 0 ? `approvers=${approvers.length}` : null,
+    rejectedBy.length > 0 ? `rejections=${rejectedBy.length}` : null,
+    preview?.size_usd !== undefined ? `preview_size=${preview.size_usd}` : null,
+    summary ? `summary="${compactText(summary, 96)}"` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function formatOperatorThesisLine(source) {
+  const thesis = asRecord(firstDefined(
+    source.operator_thesis,
+    source.research_operator_thesis,
+    source.thesis_packet,
+    source.thesis,
+  ))
+  if (!thesis && !source.operator_thesis_probability_yes && !source.operator_thesis_summary) return null
+
+  const probability = firstDefined(thesis?.probability_yes, source.operator_thesis_probability_yes, source.operator_thesis_probability)
+  const confidence = firstDefined(thesis?.confidence, source.operator_thesis_confidence)
+  const rationale = firstDefined(thesis?.rationale, source.operator_thesis_rationale)
+  const summary = firstDefined(thesis?.summary, source.operator_thesis_summary, source.research_thesis_summary)
+  const sourceLabel = firstDefined(thesis?.source, source.operator_thesis_source, source.research_thesis_source)
+
+  return [
+    'operator_thesis:',
+    probability !== undefined ? `probability=${probability}` : null,
+    confidence !== undefined ? `confidence=${confidence}` : null,
+    sourceLabel ? `source=${compactValue(sourceLabel, 48)}` : null,
+    rationale ? `rationale="${compactText(rationale, 96)}"` : null,
+    summary ? `summary="${compactText(summary, 96)}"` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function formatResearchPipelineTraceLine(source) {
+  const trace = asRecord(firstDefined(
+    source.research_pipeline_trace,
+    source.research_trace,
+    source.pipeline_trace,
+  ))
+  if (!trace && !source.research_pipeline_trace_id && !source.research_pipeline_trace_summary) return null
+
+  const stages = asArray(firstDefined(trace?.stages, source.research_pipeline_trace_stages))
+  const stageKinds = stages
+    .map((stage) => asRecord(stage))
+    .map((stage) => firstDefined(stage?.stage_kind, stage?.kind, stage?.name))
+    .filter(Boolean)
+  const summary = firstDefined(trace?.summary, source.research_pipeline_trace_summary)
+  const pipelineId = firstDefined(trace?.pipeline_id, source.research_pipeline_id)
+  const pipelineVersion = firstDefined(trace?.pipeline_version, source.research_pipeline_version)
+  const modelFamily = firstDefined(trace?.model_family, source.research_pipeline_model_family)
+  const traceId = firstDefined(trace?.trace_id, source.research_pipeline_trace_id)
+  const stageCount = firstDefined(trace?.stage_count, source.research_pipeline_trace_stage_count, stages.length)
+
+  return [
+    'research_pipeline_trace:',
+    traceId ? `trace=${traceId}` : null,
+    pipelineId ? `pipeline=${pipelineId}` : null,
+    pipelineVersion ? `v=${pipelineVersion}` : null,
+    modelFamily ? `model=${compactValue(modelFamily, 48)}` : null,
+    stageCount !== undefined ? `stages=${stageCount}` : null,
+    stageKinds.length > 0 ? `kinds=${joinList(stageKinds, '|')}` : null,
+    summary ? `summary="${compactText(summary, 96)}"` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function formatValidationSeriesPart(label, value) {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const summary = firstDefined(record.summary, record.note, record.description)
+  const sampleCount = firstDefined(record.sample_count, record.samples, record.observations)
+  const windowCount = firstDefined(record.window_count, record.windows, record.folds)
+  const trialCount = firstDefined(record.trial_count, record.trials, record.simulations, record.iterations)
+  const winRate = firstDefined(record.win_rate, record.hit_rate, record.success_rate, record.positive_rate)
+  const brierScore = firstDefined(record.brier_score, record.brier)
+  const logLoss = firstDefined(record.log_loss, record.logloss)
+  const upliftBps = firstDefined(record.uplift_bps, record.delta_bps, record.edge_bps, record.excess_bps)
+
+  const parts = []
+  if (
+    summary == null &&
+    sampleCount == null &&
+    windowCount == null &&
+    trialCount == null &&
+    winRate == null &&
+    brierScore == null &&
+    logLoss == null &&
+    upliftBps == null
+  ) {
+    return null
+  }
+
+  if (sampleCount != null) parts.push(`samples=${sampleCount}`)
+  if (windowCount != null) parts.push(`windows=${windowCount}`)
+  if (trialCount != null) parts.push(`trials=${trialCount}`)
+  if (winRate != null) parts.push(`win_rate=${formatPercentValue(Number(winRate))}`)
+  if (brierScore != null) parts.push(`brier=${Number(brierScore).toFixed(3)}`)
+  if (logLoss != null) parts.push(`log_loss=${Number(logLoss).toFixed(3)}`)
+  if (upliftBps != null) parts.push(`uplift=${formatBpsValue(Number(upliftBps))}`)
+  if (summary != null) parts.push(`summary="${compactText(summary, 72)}"`)
+
+  return `${label}=${parts.join('|')}`
+}
+
+function formatValidationLine(source, fallbackSource = null) {
+  const validationSources = [
+    source,
+    fallbackSource,
+    asRecord(source?.data),
+    asRecord(fallbackSource?.data),
+    asRecord(source?.prediction_run),
+    asRecord(fallbackSource?.prediction_run),
+    asRecord(source?.preflight_surface),
+    asRecord(fallbackSource?.preflight_surface),
+    asRecord(source?.execution_projection),
+    asRecord(fallbackSource?.execution_projection),
+    asRecord(source?.paper_surface),
+    asRecord(fallbackSource?.paper_surface),
+    asRecord(source?.paperSurface),
+    asRecord(fallbackSource?.paperSurface),
+    asRecord(source?.replay_surface),
+    asRecord(fallbackSource?.replay_surface),
+    asRecord(source?.replaySurface),
+    asRecord(fallbackSource?.replaySurface),
+  ].filter(Boolean)
+
+  const validation = asRecord(firstDefined(
+    ...validationSources.flatMap((candidate) => [
+      candidate?.validation,
+      candidate?.validation_summary,
+    ]),
+  ))
+  const paperSurface = asRecord(firstDefined(source.paper_surface, source.paperSurface))
+  const replaySurface = asRecord(firstDefined(source.replay_surface, source.replaySurface))
+  const seriesSource = (keys) => asRecord(firstDefined(
+    ...validationSources.map((candidate) => {
+      for (const key of keys) {
+        if (candidate?.[key] !== undefined && candidate?.[key] !== null) return candidate[key]
+      }
+      return undefined
+    }),
+  ))
+  const parts = [
+    formatValidationSeriesPart('backtest', firstDefined(
+      validation?.backtest,
+      seriesSource(['backtest_summary', 'backtest_stats']),
+      paperSurface ? asRecord(firstDefined(paperSurface.backtest_summary, paperSurface.backtest_stats)) : null,
+      replaySurface ? asRecord(firstDefined(replaySurface.backtest_summary, replaySurface.backtest_stats)) : null,
+    )),
+    formatValidationSeriesPart('walk_forward', firstDefined(
+      validation?.walk_forward,
+      seriesSource(['walk_forward_summary', 'walk_forward_stats']),
+      paperSurface ? asRecord(firstDefined(paperSurface.walk_forward_summary, paperSurface.walk_forward_stats)) : null,
+      replaySurface ? asRecord(firstDefined(replaySurface.walk_forward_summary, replaySurface.walk_forward_stats)) : null,
+    )),
+    formatValidationSeriesPart('monte_carlo', firstDefined(
+      validation?.monte_carlo,
+      seriesSource(['monte_carlo_summary', 'monte_carlo_stats']),
+      paperSurface ? asRecord(firstDefined(paperSurface.monte_carlo_summary, paperSurface.monte_carlo_stats)) : null,
+      replaySurface ? asRecord(firstDefined(replaySurface.monte_carlo_summary, replaySurface.monte_carlo_stats)) : null,
+    )),
+    formatValidationSeriesPart('paper', firstDefined(
+      validation?.paper,
+      seriesSource(['paper_validation_summary']),
+      paperSurface ? asRecord(firstDefined(paperSurface.validation_summary, paperSurface.validation)) : null,
+    )),
+    formatValidationSeriesPart('replay', firstDefined(
+      validation?.replay,
+      seriesSource(['replay_validation_summary']),
+      replaySurface ? asRecord(firstDefined(replaySurface.validation_summary, replaySurface.validation)) : null,
+    )),
+  ].filter(Boolean)
+
+  if (parts.length === 0) return null
+
+  return ['validation:', ...parts].join(' ')
+}
+
+function formatLiveDashboardSummaryLine(source) {
+  const liveSummary = firstDefined(source.live_summary, source.live_dashboard_summary, source.dashboard_summary, source.summary)
+  const dashboardSummary = firstDefined(source.dashboard_summary, source.live_dashboard_summary, source.live_summary, source.summary)
+  if (!liveSummary && !dashboardSummary) return null
+
+  return [
+    'live_dashboard_summary:',
+    liveSummary ? `live="${compactText(liveSummary, 96)}"` : null,
+    dashboardSummary ? `dashboard="${compactText(dashboardSummary, 96)}"` : null,
   ]
     .filter(Boolean)
     .join(' ')
@@ -534,6 +820,40 @@ function extractProjection(source) {
   const sourceRefs = asArray(firstDefined(preflight?.source_refs, projection.preflight_summary?.source_refs, []))
   const blockers = asArray(firstDefined(preflight?.blockers, projection.preflight_summary?.blockers, source.execution_projection_blocking_reasons, []))
   const downgrades = asArray(firstDefined(preflight?.downgrade_reasons, projection.preflight_summary?.downgrade_reasons, source.execution_projection_downgrade_reasons, []))
+  const selectedEdgeBucket = firstDefined(
+    source.execution_projection_selected_edge_bucket,
+    projection.selected_edge_bucket,
+    preflight?.selected_edge_bucket,
+    selectedPathData?.edge_bucket,
+    null,
+  )
+  const selectedPreTradeGate = asRecord(firstDefined(
+    source.execution_projection_selected_pre_trade_gate,
+    projection.selected_pre_trade_gate,
+    preflight?.selected_pre_trade_gate,
+    selectedPathData?.pre_trade_gate,
+    null,
+  ))
+  const selectedPreTradeGateVerdict = firstDefined(
+    source.execution_projection_selected_pre_trade_gate_verdict,
+    selectedPreTradeGate?.verdict,
+    null,
+  )
+  const selectedPreTradeGateSummary = firstDefined(
+    source.execution_projection_selected_pre_trade_gate_summary,
+    selectedPreTradeGate?.summary,
+    null,
+  )
+  const selectedPathNetEdgeBps = firstDefined(
+    source.execution_projection_selected_path_net_edge_bps,
+    selectedPreTradeGate?.net_edge_bps,
+    null,
+  )
+  const selectedPathMinimumNetEdgeBps = firstDefined(
+    source.execution_projection_selected_path_minimum_net_edge_bps,
+    selectedPreTradeGate?.minimum_net_edge_bps,
+    null,
+  )
 
   const basisParts = []
   if (basis.uses_execution_readiness) basisParts.push('readiness')
@@ -562,6 +882,12 @@ function extractProjection(source) {
     sourceRefs,
     blockers,
     downgrades,
+    selectedEdgeBucket,
+    selectedPreTradeGate,
+    selectedPreTradeGateVerdict,
+    selectedPreTradeGateSummary,
+    selectedPathNetEdgeBps,
+    selectedPathMinimumNetEdgeBps,
   }
 }
 
@@ -665,6 +991,27 @@ function formatProjectionDetailsLine(extracted) {
   ].join(' ')
 }
 
+function formatSelectedPreTradeGateLine(extracted) {
+  if (
+    extracted.selectedEdgeBucket == null &&
+    extracted.selectedPreTradeGateVerdict == null &&
+    extracted.selectedPreTradeGateSummary == null
+  ) {
+    return null
+  }
+
+  return [
+    'execution_projection pre_trade:',
+    extracted.selectedEdgeBucket != null ? `edge_bucket=${extracted.selectedEdgeBucket}` : null,
+    extracted.selectedPreTradeGateVerdict != null ? `verdict=${extracted.selectedPreTradeGateVerdict}` : null,
+    extracted.selectedPathNetEdgeBps != null ? `net=${extracted.selectedPathNetEdgeBps}bps` : null,
+    extracted.selectedPathMinimumNetEdgeBps != null ? `minimum=${extracted.selectedPathMinimumNetEdgeBps}bps` : null,
+    extracted.selectedPreTradeGateSummary != null ? `summary="${extracted.selectedPreTradeGateSummary}"` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
 function formatSelectedPreviewLine(extracted) {
   const preview = extracted.selectedPreview
   if (!preview) return null
@@ -673,9 +1020,9 @@ function formatSelectedPreviewLine(extracted) {
   return [
     'execution_projection selected preview:',
     previewKind != null ? `kind=${previewKind}` : null,
-    `source=${previewSource}`,
     `size=${preview.size_usd ?? preview.canonical_size_usd ?? 'unknown'}`,
     `via=runtime_hint`,
+    `source=${previewSource}`,
     preview.limit_price !== undefined ? `limit=${preview.limit_price}` : null,
     preview.time_in_force ? `tif=${preview.time_in_force}` : null,
     preview.max_slippage_bps !== undefined ? `slip=${preview.max_slippage_bps}bps` : null,
@@ -756,6 +1103,22 @@ function formatStrategyLayerLine(source, extracted = null) {
     source.execution_projection_resolution_anomalies,
     source.execution_pathways_resolution_anomalies,
   )
+  const requestMode = firstDefined(
+    strategyRoot?.request_mode,
+    source.request_mode,
+    source.request_contract?.request_mode,
+  )
+  const responseVariant = firstDefined(
+    strategyRoot?.response_variant,
+    source.response_variant,
+    source.request_contract?.response_variant,
+  )
+  const variantTags = firstDefined(
+    strategyRoot?.variant_tags,
+    source.request_variant_tags,
+    source.variant_tags,
+    source.request_contract?.variant_tags,
+  )
 
   const preview = asRecord(firstDefined(
     extracted?.selectedPreview,
@@ -793,6 +1156,9 @@ function formatStrategyLayerLine(source, extracted = null) {
     && strategyCounts == null
     && strategyShadowSummary == null
     && resolutionAnomalies == null
+    && requestMode == null
+    && responseVariant == null
+    && variantTags == null
     && previewKind == null
     && previewSource == null
   ) {
@@ -806,8 +1172,31 @@ function formatStrategyLayerLine(source, extracted = null) {
     strategyCounts != null ? `counts=${compactCountsValue(strategyCounts)}` : null,
     strategyShadowSummary != null ? `shadow=${compactValue(strategyShadowSummary, 96)}` : null,
     resolutionAnomalies != null ? `anomalies=${compactValue(resolutionAnomalies, 96)}` : null,
+    requestMode != null ? `request_mode=${compactValue(requestMode, 32)}` : null,
+    responseVariant != null ? `response_variant=${compactValue(responseVariant, 32)}` : null,
+    variantTags != null ? `variant_tags=${compactValue(variantTags, 48)}` : null,
     previewKind != null ? `preview_kind=${compactValue(previewKind, 48)}` : null,
     previewSource != null ? `preview_source=${compactValue(previewSource, 48)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function formatAdviceRequestContractLine(source) {
+  if (!source) return null
+  const requestMode = firstDefined(source.request_mode, source.request_contract?.request_mode, null)
+  const responseVariant = firstDefined(source.response_variant, source.request_contract?.response_variant, null)
+  const variantTags = firstDefined(source.request_variant_tags, source.request_contract?.variant_tags, source.variant_tags, null)
+  const timesfmMode = firstDefined(source.timesfm_requested_mode, source.request_contract?.timesfm_mode, null)
+  const timesfmLanes = firstDefined(source.timesfm_requested_lanes, source.request_contract?.timesfm_lanes, null)
+  if (requestMode == null && responseVariant == null && variantTags == null && timesfmMode == null && timesfmLanes == null) return null
+  return [
+    'request_contract:',
+    requestMode != null ? `request_mode=${compactValue(requestMode, 32)}` : null,
+    responseVariant != null ? `response_variant=${compactValue(responseVariant, 32)}` : null,
+    variantTags != null ? `variant_tags=${compactValue(variantTags, 48)}` : null,
+    timesfmMode != null ? `timesfm_mode=${compactValue(timesfmMode, 32)}` : null,
+    timesfmLanes != null ? `timesfm_lanes=${compactValue(timesfmLanes, 48)}` : null,
   ]
     .filter(Boolean)
     .join(' ')
@@ -902,6 +1291,21 @@ function formatShadowArbitrageLine(source) {
     .join(' ')
 }
 
+function formatLiveReceiptLine(receipt) {
+  if (!receipt || receipt.execution_mode !== 'live') return null
+
+  return [
+    'live_receipt:',
+    `source_run=${receipt.source_run_id ?? 'unknown'}`,
+    `materialized_run=${receipt.materialized_run_id ?? 'unknown'}`,
+    `intent=${receipt.approved_intent_id ?? 'none'}`,
+    `approvers=${asArray(receipt.approved_by).length}`,
+    `transport=${receipt.transport_mode ?? 'unknown'}`,
+    `performed_live=${receipt.performed_live === true ? 'yes' : 'no'}`,
+    `status=${receipt.live_execution_status ?? 'unknown'}`,
+  ].join(' ')
+}
+
 function formatPathStateLine(surface, source) {
   const surfacePath = firstDefined(source[`${surface}_path`], source[`${surface}_surface`], null)
   const preview = surfacePath?.canonical_trade_intent_preview ?? surfacePath?.trade_intent_preview ?? source[`${surface}_trade_intent_preview`] ?? null
@@ -921,7 +1325,7 @@ function formatPathStateLine(surface, source) {
   return [
     `${surface}_surface: status=${firstDefined(source[`${surface}_status`], status)}`,
     `gate=${firstDefined(source.gate_name, `execution_projection_${surface}`)}`,
-    `preflight=yes`,
+    `preflight=${source.preflight_only === false ? 'no' : 'yes'}`,
     `run_id=${source.run_id}`,
     `requested=${requested}`,
     `path_status=${status}`,
@@ -950,7 +1354,7 @@ function formatSurfaceCompactLine(surface, source) {
   return [
     `${surface}_surface_compact:`,
     `gate=${firstDefined(source.gate_name, `execution_projection_${surface}`)}`,
-    'preflight=yes',
+    `preflight=${source.preflight_only === false ? 'no' : 'yes'}`,
     `run_id=${source.run_id}`,
     `requested=${requested}`,
     `selected=${selected}`,
@@ -999,12 +1403,19 @@ function formatRunEntrySummary(entry, flags, prefix = '') {
       `${prefix}${formatProjectionDetailsLine(extracted)}`,
       `${prefix}${formatSelectedPreviewLine(extracted)}`,
       `${prefix}${formatSelectedOpsLine(extracted)}`,
+      `${prefix}${formatSelectedPreTradeGateLine(extracted)}`,
       `${prefix}${formatStrategyLayerLine(entry, extracted)}`,
       `${prefix}execution_projection source: canonical gate=execution_projection recalc=no modes=paper|shadow|live`,
     )
   }
   if ((flags.researchSummary || flags.executionPathwaysSummary) && formatResearchLine(entry)) {
     lines.push(`${prefix}${formatResearchLine(entry)}`)
+  }
+  if (flags.validationSummary || flags.executionPathwaysSummary) {
+    const validationLine = formatValidationLine(entry, payload)
+    if (validationLine) {
+      lines.push(`${prefix}${validationLine}`)
+    }
   }
   if ((flags.benchmarkSummary || flags.executionPathwaysSummary) && formatBenchmarkLine(entry)) {
     lines.push(`${prefix}${formatBenchmarkLine(entry)}`)
@@ -1017,15 +1428,33 @@ function formatRunEntrySummary(entry, flags, prefix = '') {
       lines.push(`${prefix}${benchmarkStateLine}`)
     }
   }
+  if (flags.approvalTicketSummary || flags.operatorThesisSummary || flags.researchPipelineTraceSummary || flags.liveDashboardSummary) {
+    const approvalTicketLine = formatApprovalTicketLine(entry)
+    if (approvalTicketLine) lines.push(`${prefix}${approvalTicketLine}`)
+    const operatorThesisLine = formatOperatorThesisLine(entry)
+    if (operatorThesisLine) lines.push(`${prefix}${operatorThesisLine}`)
+    const researchPipelineTraceLine = formatResearchPipelineTraceLine(entry)
+    if (researchPipelineTraceLine) lines.push(`${prefix}${researchPipelineTraceLine}`)
+    const liveDashboardSummaryLine = formatLiveDashboardSummaryLine(entry)
+    if (liveDashboardSummaryLine) lines.push(`${prefix}${liveDashboardSummaryLine}`)
+  }
   return lines.filter(Boolean)
 }
 
 function formatCommandResponse(command, responseData, flags, requestBody) {
   const payload = responseData?.data ?? {}
-  const source = payload?.prediction_run ?? payload ?? {}
+  const source = payload?.prediction_run ?? payload?.preflight_surface ?? payload ?? {}
   const lines = []
   const method = SURFACES.includes(command) ? 'POST' : command === 'runs' || command === 'run' || command === 'markets' || command === 'capabilities' || command === 'health' ? 'GET' : 'POST'
   lines.push(`OK ${responseData?.status ?? 200} ${method}`)
+
+  const liveReceiptLine = command === 'live' ? formatLiveReceiptLine(payload) : null
+  if (liveReceiptLine) {
+    lines.push(liveReceiptLine)
+    if (payload.receipt_summary) {
+      lines.push(`live_receipt_summary: summary="${payload.receipt_summary}"`)
+    }
+  }
 
   if ((command === 'advise' || command === 'replay') && flags.researchSignalsSummary) {
     const injectedSignals = asArray(requestBody?.research_signals)
@@ -1037,6 +1466,8 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
     if (researchLine) lines.push(researchLine)
     const researchOriginLine = formatResearchOriginLine(source)
     if (researchOriginLine) lines.push(researchOriginLine)
+    const timesfmLine = formatTimesFMLine(source)
+    if (timesfmLine) lines.push(timesfmLine)
   }
 
   if ((command === 'advise' || command === 'replay') && (flags.researchSummary || flags.benchmarkSummary)) {
@@ -1046,6 +1477,14 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
     if (benchmarkEvidenceLine) lines.push(benchmarkEvidenceLine)
     const benchmarkStateLine = formatBenchmarkStateLine(source)
     if (benchmarkStateLine) lines.push(benchmarkStateLine)
+  }
+  if (command === 'advise' || command === 'replay') {
+    const requestContractLine = formatAdviceRequestContractLine(source)
+    if (requestContractLine) lines.push(requestContractLine)
+  }
+  if (flags.validationSummary || flags.executionPathwaysSummary) {
+    const validationLine = formatValidationLine(source, payload)
+    if (validationLine) lines.push(validationLine)
   }
 
   if (SURFACES.includes(command)) {
@@ -1072,6 +1511,7 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
         lines.push(formatSelectedPathStateLine(extracted))
         lines.push(formatSelectedPreviewLine(extracted))
         lines.push(formatSelectedOpsLine(extracted))
+        lines.push(formatSelectedPreTradeGateLine(extracted))
         lines.push(formatExecutionProjectionSourceLine())
         lines.push(formatMicrostructureLabLine(source))
         lines.push(formatShadowArbitrageLine(source))
@@ -1087,6 +1527,8 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
       if (researchLine) lines.push(researchLine)
       const researchOriginLine = formatResearchOriginLine(source)
       if (researchOriginLine) lines.push(researchOriginLine)
+      const timesfmLine = formatTimesFMLine(source)
+      if (timesfmLine) lines.push(timesfmLine)
     }
     if (flags.researchSummary || flags.benchmarkSummary || flags.executionPathwaysSummary) {
       const benchmarkLine = formatBenchmarkLine(source)
@@ -1095,6 +1537,20 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
       if (benchmarkEvidenceLine) lines.push(benchmarkEvidenceLine)
       const benchmarkStateLine = formatBenchmarkStateLine(source)
       if (benchmarkStateLine) lines.push(benchmarkStateLine)
+    }
+    if (flags.validationSummary || flags.executionPathwaysSummary) {
+      const validationLine = formatValidationLine(source, payload)
+      if (validationLine) lines.push(validationLine)
+    }
+    if (flags.approvalTicketSummary || flags.operatorThesisSummary || flags.researchPipelineTraceSummary || flags.liveDashboardSummary) {
+      const approvalTicketLine = formatApprovalTicketLine(source)
+      if (approvalTicketLine) lines.push(approvalTicketLine)
+      const operatorThesisLine = formatOperatorThesisLine(source)
+      if (operatorThesisLine) lines.push(operatorThesisLine)
+      const researchPipelineTraceLine = formatResearchPipelineTraceLine(source)
+      if (researchPipelineTraceLine) lines.push(researchPipelineTraceLine)
+      const liveDashboardSummaryLine = formatLiveDashboardSummaryLine(source)
+      if (liveDashboardSummaryLine) lines.push(liveDashboardSummaryLine)
     }
   }
 
@@ -1116,6 +1572,7 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
         lines.push(formatSelectedPathStateLine(extracted))
         lines.push(formatSelectedPreviewLine(extracted))
         lines.push(formatSelectedOpsLine(extracted))
+        lines.push(formatSelectedPreTradeGateLine(extracted))
         lines.push(formatStrategyLayerLine(source, extracted))
         lines.push(formatExecutionProjectionSourceLine())
         lines.push(formatMicrostructureLabLine(source))
@@ -1127,6 +1584,8 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
       if (researchLine) lines.push(researchLine)
       const researchOriginLine = formatResearchOriginLine(source)
       if (researchOriginLine) lines.push(researchOriginLine)
+      const timesfmLine = formatTimesFMLine(source)
+      if (timesfmLine) lines.push(timesfmLine)
     }
     if (flags.researchSummary || flags.benchmarkSummary || flags.executionPathwaysSummary) {
       const benchmarkLine = formatBenchmarkLine(source)
@@ -1135,6 +1594,20 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
       if (benchmarkEvidenceLine) lines.push(benchmarkEvidenceLine)
       const benchmarkStateLine = formatBenchmarkStateLine(source)
       if (benchmarkStateLine) lines.push(benchmarkStateLine)
+    }
+    if (flags.validationSummary || flags.executionPathwaysSummary) {
+      const validationLine = formatValidationLine(source, payload)
+      if (validationLine) lines.push(validationLine)
+    }
+    if (flags.approvalTicketSummary || flags.operatorThesisSummary || flags.researchPipelineTraceSummary || flags.liveDashboardSummary) {
+      const approvalTicketLine = formatApprovalTicketLine(source)
+      if (approvalTicketLine) lines.push(approvalTicketLine)
+      const operatorThesisLine = formatOperatorThesisLine(source)
+      if (operatorThesisLine) lines.push(operatorThesisLine)
+      const researchPipelineTraceLine = formatResearchPipelineTraceLine(source)
+      if (researchPipelineTraceLine) lines.push(researchPipelineTraceLine)
+      const liveDashboardSummaryLine = formatLiveDashboardSummaryLine(source)
+      if (liveDashboardSummaryLine) lines.push(liveDashboardSummaryLine)
     }
     if (flags.executionReadinessSummary && source.execution_readiness) {
       lines.push(`execution_readiness: status=${source.execution_readiness.status ?? 'unknown'}`)
@@ -1167,6 +1640,8 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
           if (selectedPreview) lines.push(`  ${selectedPreview}`)
           const selectedOps = formatSelectedOpsLine(extracted)
           if (selectedOps) lines.push(`  ${selectedOps}`)
+          const selectedPreTrade = formatSelectedPreTradeGateLine(extracted)
+          if (selectedPreTrade) lines.push(`  ${selectedPreTrade}`)
           lines.push(`  ${formatExecutionProjectionSourceLine()}`)
           const microstructureLab = formatMicrostructureLabLine(entry)
           if (microstructureLab) lines.push(`  ${microstructureLab}`)
@@ -1181,6 +1656,8 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
       if (researchLine) lines.push(researchLine)
       const researchOriginLine = formatResearchOriginLine(entry)
       if (researchOriginLine) lines.push(researchOriginLine)
+      const timesfmLine = formatTimesFMLine(entry)
+      if (timesfmLine) lines.push(timesfmLine)
     }
     if (flags.researchSummary || flags.benchmarkSummary || flags.executionPathwaysSummary) {
       const benchmarkLine = formatBenchmarkLine(entry)
@@ -1189,6 +1666,20 @@ function formatCommandResponse(command, responseData, flags, requestBody) {
       if (benchmarkEvidenceLine) lines.push(benchmarkEvidenceLine)
       const benchmarkStateLine = formatBenchmarkStateLine(entry)
       if (benchmarkStateLine) lines.push(benchmarkStateLine)
+    }
+    if (flags.validationSummary || flags.executionPathwaysSummary) {
+      const validationLine = formatValidationLine(entry, payload)
+      if (validationLine) lines.push(validationLine)
+    }
+    if (flags.approvalTicketSummary || flags.operatorThesisSummary || flags.researchPipelineTraceSummary || flags.liveDashboardSummary) {
+      const approvalTicketLine = formatApprovalTicketLine(entry)
+      if (approvalTicketLine) lines.push(approvalTicketLine)
+      const operatorThesisLine = formatOperatorThesisLine(entry)
+      if (operatorThesisLine) lines.push(operatorThesisLine)
+      const researchPipelineTraceLine = formatResearchPipelineTraceLine(entry)
+      if (researchPipelineTraceLine) lines.push(researchPipelineTraceLine)
+      const liveDashboardSummaryLine = formatLiveDashboardSummaryLine(entry)
+      if (liveDashboardSummaryLine) lines.push(liveDashboardSummaryLine)
     }
   }
   }
@@ -1244,10 +1735,26 @@ async function makeRequest(baseUrl, method, pathname, body) {
 function buildRequestBody(command, flags) {
   if (command === 'advise') {
     const researchSignals = [...asArray(flags.researchSignals), ...asArray(flags.researchSignal)]
+    const variantTags = [
+      ...asArray(parseMaybeJson(flags.variantTags)),
+      ...asArray(parseMaybeJson(flags.variantTag)),
+    ]
+    const timesfmLanes = [
+      ...asArray(parseMaybeJson(flags.timesfmLanes)),
+      ...asArray(parseMaybeJson(flags.timesfmLane)),
+    ]
+      .flatMap((value) => typeof value === 'string'
+        ? value.split(',').map((entry) => entry.trim()).filter(Boolean)
+        : [value])
     const body = {}
     if (flags.marketId) body.market_id = flags.marketId
     if (flags.venue) body.venue = flags.venue
+    if (flags.requestMode) body.request_mode = flags.requestMode
+    if (flags.responseVariant) body.response_variant = flags.responseVariant
+    if (variantTags.length > 0) body.variant_tags = variantTags
     if (researchSignals.length > 0) body.research_signals = researchSignals
+    if (flags.timesfmMode) body.timesfm_mode = flags.timesfmMode
+    if (timesfmLanes.length > 0) body.timesfm_lanes = timesfmLanes
     return body
   }
 

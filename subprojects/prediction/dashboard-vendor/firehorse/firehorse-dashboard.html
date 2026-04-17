@@ -1,0 +1,2741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIREHORSE â Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e8e6e1;
+    --text-muted: #6b6b7b;
+    --green: #00e676;
+    --green-dim: #00e67622;
+    --red: #ff3d5a;
+    --red-dim: #ff3d5a22;
+    --amber: #ffab00;
+    --amber-dim: #ffab0022;
+    --cyan: #18ffff;
+    --brand: #ff6b2b;
+    --brand-dim: #ff6b2b15;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    overflow-x: hidden;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 100;
+    backdrop-filter: blur(20px);
+  }
+
+  .logo {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .logo h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 4px;
+    color: var(--brand);
+    line-height: 1;
+  }
+
+  .logo .tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .sync-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .sync-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .time-selector {
+    display: flex;
+    gap: 2px;
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 2px;
+    border: 1px solid var(--border);
+  }
+
+  .time-btn {
+    padding: 5px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .time-btn.active {
+    background: var(--brand);
+    color: #fff;
+  }
+
+  .time-btn:hover:not(.active) {
+    color: var(--text);
+  }
+
+  /* Top Summary Strip */
+  .summary-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .summary-cell {
+    background: var(--bg);
+    padding: 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .summary-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .summary-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+  }
+
+  .summary-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .neutral { color: var(--amber); }
+
+  /* Main Layout */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    min-height: calc(100vh - 140px);
+  }
+
+  .content {
+    padding: 24px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .sidebar {
+    border-left: 1px solid var(--border);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* Section Headers */
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+  }
+
+  .section-action {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--brand);
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border: none;
+    background: none;
+  }
+
+  /* Chart Area */
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .chart-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--brand), transparent);
+    opacity: 0.5;
+  }
+
+  .chart-header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .chart-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+  }
+
+  .chart-value-big {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 32px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .chart-change {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+
+  /* SVG Chart */
+  .equity-chart {
+    width: 100%;
+    height: 200px;
+  }
+
+  /* Positions Table */
+  .positions-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .positions-table thead th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+  }
+
+  .positions-table thead th:last-child,
+  .positions-table thead th:nth-child(4),
+  .positions-table thead th:nth-child(5) {
+    text-align: right;
+  }
+
+  .positions-table tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+
+  .positions-table tbody tr:hover {
+    background: var(--surface-2);
+  }
+
+  .positions-table td {
+    padding: 12px;
+    vertical-align: middle;
+  }
+
+  .positions-table td:last-child,
+  .positions-table td:nth-child(4),
+  .positions-table td:nth-child(5) {
+    text-align: right;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+
+  .pos-market {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .pos-side {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+
+  .pos-side.yes {
+    color: var(--green);
+    background: var(--green-dim);
+  }
+
+  .pos-side.no {
+    color: var(--red);
+    background: var(--red-dim);
+  }
+
+  .cat-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .pnl-positive { color: var(--green); }
+  .pnl-negative { color: var(--red); }
+
+  /* Probability bar */
+  .prob-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .prob-bar {
+    width: 60px;
+    height: 4px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .prob-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  .prob-text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 32px;
+    text-align: right;
+  }
+
+  /* Category Breakdown - Sidebar */
+  .cat-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cat-row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .cat-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .cat-pnl {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  .cat-bar-bg {
+    height: 24px;
+    background: var(--surface-2);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .cat-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+  }
+
+  .cat-bar-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.8);
+    white-space: nowrap;
+  }
+
+  .cat-stats {
+    display: flex;
+    gap: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* Donut chart */
+  .donut-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 0;
+  }
+
+  .donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .legend-pct {
+    font-family: 'IBM Plex Mono', monospace;
+    margin-left: auto;
+    color: var(--text);
+    font-size: 11px;
+  }
+
+  /* Recent Activity */
+  .activity-item {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+  }
+
+  .activity-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .activity-icon.buy { background: var(--green-dim); color: var(--green); }
+  .activity-icon.sell { background: var(--red-dim); color: var(--red); }
+  .activity-icon.resolve { background: var(--amber-dim); color: var(--amber); }
+
+  .activity-text {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  .activity-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  /* Positions container */
+  .positions-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  .positions-scroll {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  /* Animations */
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-in {
+    animation: slideUp 0.4s ease forwards;
+  }
+
+  .delay-1 { animation-delay: 0.05s; opacity: 0; }
+  .delay-2 { animation-delay: 0.1s; opacity: 0; }
+  .delay-3 { animation-delay: 0.15s; opacity: 0; }
+  .delay-4 { animation-delay: 0.2s; opacity: 0; }
+
+  /* Pipeline Strip */
+  .pipeline-strip {
+    display: flex;
+    align-items: center;
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .pipeline-label {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    padding: 8px 16px;
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+    background: var(--surface);
+  }
+
+  .pipeline-stages {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    padding: 0 12px;
+    gap: 0;
+    overflow-x: auto;
+  }
+
+  .pipe-stage {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    white-space: nowrap;
+    position: relative;
+    cursor: default;
+    transition: background 0.15s;
+  }
+
+  .pipe-stage:hover {
+    background: var(--surface);
+  }
+
+  .pipe-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .pipe-dot.active {
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .pipe-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    color: var(--text);
+    text-transform: uppercase;
+  }
+
+  .pipe-latency {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    color: var(--text-muted);
+  }
+
+  .pipe-arrow {
+    color: var(--border);
+    font-size: 10px;
+    padding: 0 2px;
+    flex-shrink: 0;
+  }
+
+  .pipe-stage.human-gate {
+    background: #ffab0008;
+    border: 1px solid #ffab0022;
+    border-radius: 4px;
+    margin: 0 4px;
+  }
+
+  .pipe-stage.human-gate .pipe-name {
+    color: var(--amber);
+  }
+
+  /* Wallet Section */
+  .wallet-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .wallet-section::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--green), transparent);
+    opacity: 0.3;
+  }
+
+  .wallet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wallet-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 13px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+  }
+
+  .wallet-mode {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #ffab0012;
+    color: var(--amber);
+    border: 1px solid #ffab0025;
+  }
+
+  .wallet-total-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 8px 14px 6px;
+  }
+
+  .wallet-total {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .wallet-total-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+  }
+
+  .wallet-bars {
+    display: flex;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    gap: 2px;
+    margin: 0 14px 4px;
+  }
+
+  .wallet-bar-seg {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  .wallet-breakdown {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 0 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wallet-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+  }
+
+  .wallet-item-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .wallet-item strong {
+    color: var(--text);
+  }
+
+  /* Wallet cards list */
+  .wallet-cards {
+    padding: 6px 0;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .wallet-card-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-bottom: 1px solid #ffffff05;
+    transition: background 0.15s;
+    cursor: default;
+  }
+
+  .wallet-card-row:hover {
+    background: var(--surface-2);
+  }
+
+  .wallet-card-row.active-card {
+    background: #00e67608;
+  }
+
+  .wallet-card-icon {
+    width: 28px;
+    height: 18px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 7px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    border: 1px solid;
+  }
+
+  .wallet-card-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .wallet-card-number {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text);
+    letter-spacing: 1px;
+  }
+
+  .wallet-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    color: var(--text-muted);
+  }
+
+  .wallet-card-agent {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .wallet-card-agent-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .wallet-card-balance {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+
+  .wallet-card-status {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Add card form */
+  .wallet-add-section {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+  }
+
+  .wallet-add-btn {
+    width: 100%;
+    padding: 6px;
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .wallet-add-btn:hover {
+    border-color: var(--brand);
+    color: var(--brand);
+    background: var(--brand-dim);
+  }
+
+  .wallet-add-form {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .wallet-add-form.visible {
+    display: flex;
+  }
+
+  .wallet-input-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .wallet-input {
+    flex: 1;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .wallet-input:focus {
+    border-color: var(--brand);
+  }
+
+  .wallet-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+
+  .wallet-input-sm {
+    width: 52px;
+    flex: none;
+  }
+
+  .wallet-select {
+    padding: 5px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    outline: none;
+    cursor: pointer;
+    flex: 1;
+  }
+
+  .wallet-select option {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .wallet-form-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .wallet-btn-save {
+    flex: 1;
+    padding: 5px 8px;
+    border: none;
+    border-radius: 4px;
+    background: var(--brand);
+    color: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+
+  .wallet-btn-save:hover {
+    opacity: 0.85;
+  }
+
+  .wallet-btn-cancel {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .wallet-btn-cancel:hover {
+    border-color: var(--text-muted);
+    color: var(--text);
+  }
+
+  /* Swarm Visualization */
+  .swarm-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .swarm-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    opacity: 0.5;
+    z-index: 2;
+  }
+
+  .swarm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 0 20px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .swarm-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .swarm-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+  }
+
+  .swarm-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: #18ffff15;
+    color: var(--cyan);
+    border: 1px solid #18ffff33;
+    text-transform: uppercase;
+  }
+
+  .swarm-stats-row {
+    display: flex;
+    gap: 20px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .swarm-stats-row span strong {
+    color: var(--text);
+  }
+
+  .swarm-body {
+    display: grid;
+    grid-template-columns: 140px 1fr 180px;
+    height: 360px;
+    position: relative;
+  }
+
+  .swarm-left {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 2;
+    position: relative;
+  }
+
+  .swarm-factions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .swarm-factions-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .faction-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text);
+  }
+
+  .faction-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .faction-pct {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+
+  .swarm-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .swarm-metrics-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+  }
+
+  .metric-label {
+    color: var(--text-muted);
+  }
+
+  .metric-val {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .swarm-canvas-wrap {
+    position: relative;
+    overflow: hidden;
+  }
+
+  #swarmCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .swarm-right {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 2;
+    position: relative;
+    overflow-y: auto;
+    border-left: 1px solid var(--border);
+  }
+
+  .swarm-feed-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .feed-item {
+    padding: 4px 0;
+    border-bottom: 1px solid #ffffff08;
+    animation: feedFadeIn 0.3s ease;
+  }
+
+  @keyframes feedFadeIn {
+    from { opacity: 0; transform: translateX(8px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .feed-agent {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .feed-action {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.3;
+  }
+
+  .swarm-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 20px 12px 20px;
+    border-top: 1px solid var(--border);
+    position: relative;
+    z-index: 2;
+  }
+
+  .swarm-tick {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .swarm-progress-bar {
+    flex: 1;
+    height: 3px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .swarm-progress-fill {
+    height: 100%;
+    background: var(--cyan);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s linear;
+  }
+
+  .swarm-sentiment {
+    display: flex;
+    gap: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+  }
+
+  /* Kalshi Live Feed Ticker */
+  .kalshi-feed {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .kalshi-feed::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #ffab00, transparent);
+    opacity: 0.4;
+    z-index: 2;
+  }
+
+  .kalshi-feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .kalshi-feed-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .kalshi-feed-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+  }
+
+  .kalshi-src-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 1px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #ffab0015;
+    color: var(--amber);
+    border: 1px solid #ffab0033;
+    text-transform: uppercase;
+  }
+
+  .kalshi-feed-live {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .kalshi-live-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .kalshi-feed-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    height: 180px;
+  }
+
+  .kalshi-col-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .kalshi-col-header-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+  }
+
+  /* Left: Markets col */
+  .kalshi-markets-col {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .kalshi-markets-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+
+  .kalshi-market-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 14px;
+    border-bottom: 1px solid #ffffff05;
+    animation: kalshiFadeIn 0.4s ease;
+    transition: background 0.15s;
+    cursor: default;
+    font-size: 11px;
+  }
+
+  .kalshi-market-item:hover {
+    background: var(--surface-2);
+  }
+
+  @keyframes kalshiFadeIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .kalshi-cat-dot {
+    width: 3px;
+    height: 16px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .kalshi-market-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .kalshi-market-name {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kalshi-market-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .kalshi-cat-tag {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .kalshi-price-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    flex-shrink: 0;
+  }
+
+  .kalshi-price {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .kalshi-price-change {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+  }
+
+  /* Right: Live Bets col */
+  .kalshi-bets-col {
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .kalshi-bets-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+
+  .bet-item {
+    padding: 6px 12px;
+    border-bottom: 1px solid #ffffff08;
+    animation: betSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+  }
+
+  .bet-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    border-radius: 1px;
+  }
+
+  .bet-item.bet-yes::before { background: var(--green); }
+  .bet-item.bet-no::before { background: var(--red); }
+
+  @keyframes betSlideIn {
+    from { opacity: 0; transform: translateX(12px); background: #00e67610; }
+    to { opacity: 1; transform: translateX(0); background: transparent; }
+  }
+
+  .bet-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .bet-side-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .bet-side-badge.yes {
+    background: var(--green-dim);
+    color: var(--green);
+  }
+
+  .bet-side-badge.no {
+    background: var(--red-dim);
+    color: var(--red);
+  }
+
+  .bet-amount {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.3px;
+  }
+
+  .bet-price-tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .bet-market-name {
+    font-size: 9px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+
+  .bet-bottom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    color: var(--text-muted);
+  }
+
+  .bet-agent-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .bet-status {
+    margin-left: auto;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 7px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .bet-status.pending {
+    background: #ffab0018;
+    color: var(--amber);
+  }
+
+  .bet-status.filled {
+    background: var(--green-dim);
+    color: var(--green);
+  }
+
+  .bet-status.reviewing {
+    background: #a55eea18;
+    color: #a55eea;
+  }
+
+  .kalshi-volume-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .kalshi-vol-track {
+    width: 40px;
+    height: 3px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .kalshi-vol-fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .main { grid-template-columns: 1fr; }
+    .sidebar { border-left: none; border-top: 1px solid var(--border); }
+    .summary-strip { grid-template-columns: repeat(3, 1fr); }
+    .swarm-body { grid-template-columns: 1fr; height: auto; }
+    .swarm-left, .swarm-right { display: none; }
+    .swarm-canvas-wrap { height: 300px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <h1>FIREHORSE</h1>
+    <span class="tag">Prediction Portfolio</span>
+  </div>
+  <div class="header-right">
+    <div class="sync-indicator">
+      <div class="sync-dot"></div>
+      LIVE â SHEET SYNCED
+    </div>
+    <div class="time-selector">
+      <button class="time-btn">24H</button>
+      <button class="time-btn">7D</button>
+      <button class="time-btn active">30D</button>
+      <button class="time-btn">ALL</button>
+    </div>
+  </div>
+</div>
+
+<!-- Summary Strip -->
+<div class="summary-strip">
+  <div class="summary-cell animate-in delay-1">
+    <span class="summary-label">Portfolio Value</span>
+    <span class="summary-value">$48,215</span>
+    <span class="summary-sub up">&#9650; $3,820 (8.6%)</span>
+  </div>
+  <div class="summary-cell animate-in delay-2">
+    <span class="summary-label">Open Positions</span>
+    <span class="summary-value">17</span>
+    <span class="summary-sub neutral">across 5 categories</span>
+  </div>
+  <div class="summary-cell animate-in delay-2">
+    <span class="summary-label">Win Rate</span>
+    <span class="summary-value">68%</span>
+    <span class="summary-sub up">&#9650; 4% vs last month</span>
+  </div>
+  <div class="summary-cell animate-in delay-3">
+    <span class="summary-label">Unrealized P&L</span>
+    <span class="summary-value up">+$5,430</span>
+    <span class="summary-sub" style="color:var(--text-muted)">12 green / 5 red</span>
+  </div>
+  <div class="summary-cell animate-in delay-4">
+    <span class="summary-label">Realized (30D)</span>
+    <span class="summary-value up">+$2,175</span>
+    <span class="summary-sub" style="color:var(--text-muted)">7 resolved</span>
+  </div>
+</div>
+
+<!-- Pipeline Strip -->
+<div class="pipeline-strip">
+  <div class="pipeline-label">PIPELINE</div>
+  <div class="pipeline-stages">
+    <div class="pipe-stage">
+      <div class="pipe-dot active" style="background:var(--green)"></div>
+      <span class="pipe-name">Ingest</span>
+      <span class="pipe-latency">500ms</span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage">
+      <div class="pipe-dot active" style="background:var(--cyan)"></div>
+      <span class="pipe-name">Classify</span>
+      <span class="pipe-latency">5ms</span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage">
+      <div class="pipe-dot active" style="background:var(--amber)"></div>
+      <span class="pipe-name">Trigger</span>
+      <span class="pipe-latency">30ms</span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage">
+      <div class="pipe-dot active" style="background:var(--brand)"></div>
+      <span class="pipe-name">Swarm</span>
+      <span class="pipe-latency">41s p50</span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage">
+      <div class="pipe-dot" style="background:var(--text-muted)"></div>
+      <span class="pipe-name">Decision</span>
+      <span class="pipe-latency">&lt;1s</span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage">
+      <div class="pipe-dot" style="background:#a55eea"></div>
+      <span class="pipe-name">Ticket</span>
+      <span class="pipe-latency"></span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage human-gate">
+      <div class="pipe-dot" style="background:var(--amber)"></div>
+      <span class="pipe-name">Operator Approval</span>
+      <span class="pipe-latency">HITL</span>
+    </div>
+    <span class="pipe-arrow">&#9656;</span>
+    <div class="pipe-stage">
+      <div class="pipe-dot" style="background:var(--green)"></div>
+      <span class="pipe-name">Execute</span>
+      <span class="pipe-latency">&lt;2s</span>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div class="content">
+
+    <!-- Equity Curve Chart -->
+    <div class="chart-container animate-in delay-2">
+      <div class="chart-header">
+        <span class="chart-title">EQUITY CURVE</span>
+        <span class="chart-value-big">$48,215</span>
+        <span class="chart-change up">+8.6%</span>
+      </div>
+      <svg class="equity-chart" viewBox="0 0 800 200" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ff6b2b" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="#ff6b2b" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#ff6b2b" stop-opacity="0.4"/>
+            <stop offset="30%" stop-color="#ff6b2b"/>
+            <stop offset="100%" stop-color="#ff6b2b"/>
+          </linearGradient>
+        </defs>
+        <!-- Grid lines -->
+        <line x1="0" y1="50" x2="800" y2="50" stroke="#2a2a3a" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="0" y1="100" x2="800" y2="100" stroke="#2a2a3a" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <line x1="0" y1="150" x2="800" y2="150" stroke="#2a2a3a" stroke-width="0.5" stroke-dasharray="4,4"/>
+        <!-- Area fill -->
+        <path d="M0,160 C40,155 80,150 120,140 C160,130 200,120 240,115 C280,110 320,100 360,95 C400,90 440,85 480,75 C520,65 560,70 600,60 C640,50 680,45 720,35 C760,30 780,25 800,20 L800,200 L0,200 Z"
+              fill="url(#chartGrad)"/>
+        <!-- Line -->
+        <path d="M0,160 C40,155 80,150 120,140 C160,130 200,120 240,115 C280,110 320,100 360,95 C400,90 440,85 480,75 C520,65 560,70 600,60 C640,50 680,45 720,35 C760,30 780,25 800,20"
+              fill="none" stroke="url(#lineGrad)" stroke-width="2"/>
+        <!-- Current dot -->
+        <circle cx="800" cy="20" r="4" fill="#ff6b2b"/>
+        <circle cx="800" cy="20" r="8" fill="#ff6b2b" opacity="0.2">
+          <animate attributeName="r" values="8;14;8" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.2;0;0.2" dur="2s" repeatCount="indefinite"/>
+        </circle>
+        <!-- Labels -->
+        <text x="10" y="48" fill="#6b6b7b" font-family="IBM Plex Mono" font-size="9">$50K</text>
+        <text x="10" y="98" fill="#6b6b7b" font-family="IBM Plex Mono" font-size="9">$45K</text>
+        <text x="10" y="148" fill="#6b6b7b" font-family="IBM Plex Mono" font-size="9">$40K</text>
+      </svg>
+    </div>
+
+    <!-- Agent Swarm Visualization -->
+    <div class="swarm-container animate-in delay-3">
+      <div class="swarm-header">
+        <div class="swarm-title-row">
+          <span class="swarm-title">MICRO-AGENT SWARM</span>
+          <span class="swarm-badge">AI Simulation</span>
+        </div>
+        <div class="swarm-stats-row">
+          <span>Agents: <strong id="agentCount">8</strong></span>
+          <span>Rounds: <strong id="eventCount">0</strong></span>
+          <span>Consensus: <strong id="consensusVal">--</strong></span>
+        </div>
+      </div>
+      <div class="swarm-body">
+        <div class="swarm-left" style="width:150px">
+          <div class="swarm-factions">
+            <div class="swarm-factions-title">Agent Roles</div>
+            <div class="faction-row"><div class="faction-dot" style="background:#45aaf2"></div><span style="font-size:10px">Res. Lawyer</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#ff9f43"></div><span style="font-size:10px">Procedure</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#a55eea"></div><span style="font-size:10px">Narrative</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#00e676"></div><span style="font-size:10px">Timing</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#ff3d5a"></div><span style="font-size:10px">Contrarian</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#2bcbba"></div><span style="font-size:10px">Microstructure</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#ffab00"></div><span style="font-size:10px">Risk Officer</span></div>
+            <div class="faction-row"><div class="faction-dot" style="background:#e8e6e1"></div><span style="font-size:10px">Judge</span></div>
+          </div>
+          <div class="swarm-metrics">
+            <div class="swarm-metrics-title">Output</div>
+            <div class="metric-row"><span class="metric-label">Fair Value</span><span class="metric-val up" id="mFairVal">57&cent;</span></div>
+            <div class="metric-row"><span class="metric-label">Confidence</span><span class="metric-val" id="mCons">High</span></div>
+            <div class="metric-row"><span class="metric-label">Edge</span><span class="metric-val up" id="mEdge">+14 pts</span></div>
+            <div class="metric-row"><span class="metric-label">Tradability</span><span class="metric-val" id="mTrade">Std</span></div>
+            <div class="metric-row"><span class="metric-label">Action</span><span class="metric-val" style="color:var(--amber)" id="mAction">Queue</span></div>
+          </div>
+        </div>
+        <div class="swarm-canvas-wrap">
+          <canvas id="swarmCanvas"></canvas>
+        </div>
+        <div class="swarm-right">
+          <div class="swarm-feed-title">Live Feed</div>
+          <div id="swarmFeed"></div>
+        </div>
+      </div>
+      <div class="swarm-footer">
+        <span class="swarm-tick" id="swarmTick">TICK 000000</span>
+        <div class="swarm-progress-bar"><div class="swarm-progress-fill" id="swarmProgress"></div></div>
+        <div class="swarm-sentiment">
+          <span>FV <strong class="up" id="footBull">57&cent;</strong></span>
+          <span>Edge <strong class="up" id="footBear">+14</strong></span>
+          <span>Round <strong class="neutral" id="footVol">3/3</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kalshi Live Feed -->
+    <div class="kalshi-feed animate-in delay-3">
+      <div class="kalshi-feed-header">
+        <div class="kalshi-feed-title-row">
+          <span class="kalshi-feed-title">KALSHI MARKET FEED</span>
+          <span class="kalshi-src-badge">Kalshi API</span>
+          <span style="font-family:'IBM Plex Mono';font-size:10px;color:var(--text-muted)">
+            Markets: <strong style="color:var(--text)" id="kalshiMktCount">0</strong>
+            &nbsp;|&nbsp;
+            Bets Placed: <strong style="color:var(--green)" id="kalshiBetCount">0</strong>
+            &nbsp;|&nbsp;
+            Wagered: <strong style="color:var(--text)" id="kalshiWagered">$0</strong>
+          </span>
+        </div>
+        <div class="kalshi-feed-live">
+          <div class="kalshi-live-dot"></div>
+          STREAMING
+        </div>
+      </div>
+      <div class="kalshi-feed-body">
+        <div class="kalshi-markets-col">
+          <div class="kalshi-col-header"><div class="kalshi-col-header-dot" style="background:var(--cyan)"></div>Incoming Markets</div>
+          <div class="kalshi-markets-scroll" id="kalshiMarkets"></div>
+        </div>
+        <div class="kalshi-bets-col">
+          <div class="kalshi-col-header"><div class="kalshi-col-header-dot" style="background:var(--green)"></div>Live Bets<span style="margin-left:auto;color:var(--green)">$<span id="kalshiRunTotal">0</span></span></div>
+          <div class="kalshi-bets-scroll" id="kalshiBets"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open Positions -->
+    <div class="positions-wrap animate-in delay-3">
+      <div style="padding: 16px 16px 0 16px;">
+        <div class="section-head">
+          <span class="section-title">OPEN POSITIONS</span>
+          <button class="section-action">Export CSV &#8594;</button>
+        </div>
+      </div>
+      <div class="positions-scroll">
+        <table class="positions-table">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Category</th>
+              <th>Side</th>
+              <th>Mkt Prob</th>
+              <th>Avg Cost</th>
+              <th>P&L</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><div class="pos-market">US-China tariff deal by Q3 2026</div></td>
+              <td><span class="cat-badge" style="border-color:#4a6cf7;">Geopolitics</span></td>
+              <td><span class="pos-side yes">YES</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:62%;background:var(--green)"></div></div>
+                  <span class="prob-text">62%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.41</td>
+              <td class="pnl-positive" style="font-weight:600">+$2,100</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">Fed cuts rates below 4% by Dec 2026</div></td>
+              <td><span class="cat-badge" style="border-color:#ff9f43;">Economics</span></td>
+              <td><span class="pos-side yes">YES</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:54%;background:var(--amber)"></div></div>
+                  <span class="prob-text">54%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.38</td>
+              <td class="pnl-positive" style="font-weight:600">+$1,600</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">TikTok ban upheld by Supreme Court</div></td>
+              <td><span class="cat-badge" style="border-color:#ee5a5a;">Regulatory</span></td>
+              <td><span class="pos-side no">NO</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:35%;background:var(--red)"></div></div>
+                  <span class="prob-text">35%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.72</td>
+              <td class="pnl-positive" style="font-weight:600">+$580</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">Bitcoin ETF AUM &gt; $200B by mid-2026</div></td>
+              <td><span class="cat-badge" style="border-color:#2bcbba;">Crypto</span></td>
+              <td><span class="pos-side yes">YES</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:71%;background:var(--green)"></div></div>
+                  <span class="prob-text">71%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.52</td>
+              <td class="pnl-positive" style="font-weight:600">+$950</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">OpenAI IPO in 2026</div></td>
+              <td><span class="cat-badge" style="border-color:#a55eea;">Tech</span></td>
+              <td><span class="pos-side yes">YES</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:44%;background:var(--amber)"></div></div>
+                  <span class="prob-text">44%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.30</td>
+              <td class="pnl-positive" style="font-weight:600">+$700</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">EU AI Act enforcement action by Q4</div></td>
+              <td><span class="cat-badge" style="border-color:#ee5a5a;">Regulatory</span></td>
+              <td><span class="pos-side yes">YES</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:68%;background:var(--green)"></div></div>
+                  <span class="prob-text">68%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.55</td>
+              <td class="pnl-negative" style="font-weight:600">-$320</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">Ukraine ceasefire before Sept 2026</div></td>
+              <td><span class="cat-badge" style="border-color:#4a6cf7;">Geopolitics</span></td>
+              <td><span class="pos-side no">NO</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:28%;background:var(--red)"></div></div>
+                  <span class="prob-text">28%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.80</td>
+              <td class="pnl-negative" style="font-weight:600">-$480</td>
+            </tr>
+            <tr>
+              <td><div class="pos-market">Google found guilty in DOJ ad-tech case</div></td>
+              <td><span class="cat-badge" style="border-color:#45aaf2;">Legal</span></td>
+              <td><span class="pos-side yes">YES</span></td>
+              <td>
+                <div class="prob-bar-wrap">
+                  <div class="prob-bar"><div class="prob-bar-fill" style="width:77%;background:var(--green)"></div></div>
+                  <span class="prob-text">77%</span>
+                </div>
+              </td>
+              <td style="font-family:'IBM Plex Mono';font-size:13px">$0.60</td>
+              <td class="pnl-positive" style="font-weight:600">+$340</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Category Allocation Donut -->
+    <div class="animate-in delay-2">
+      <div class="section-head">
+        <span class="section-title">CATEGORY ALLOCATION</span>
+      </div>
+      <div class="donut-wrap">
+        <svg width="160" height="160" viewBox="0 0 160 160">
+          <!-- Geopolitics 28% -->
+          <circle cx="80" cy="80" r="60" fill="none" stroke="#4a6cf7" stroke-width="20"
+                  stroke-dasharray="105.6 272.4" stroke-dashoffset="0" transform="rotate(-90 80 80)"/>
+          <!-- Economics 22% -->
+          <circle cx="80" cy="80" r="60" fill="none" stroke="#ff9f43" stroke-width="20"
+                  stroke-dasharray="83.0 294.9" stroke-dashoffset="-105.6" transform="rotate(-90 80 80)"/>
+          <!-- Regulatory 18% -->
+          <circle cx="80" cy="80" r="60" fill="none" stroke="#ee5a5a" stroke-width="20"
+                  stroke-dasharray="67.9 310" stroke-dashoffset="-188.6" transform="rotate(-90 80 80)"/>
+          <!-- Crypto 15% -->
+          <circle cx="80" cy="80" r="60" fill="none" stroke="#2bcbba" stroke-width="20"
+                  stroke-dasharray="56.5 321.5" stroke-dashoffset="-256.5" transform="rotate(-90 80 80)"/>
+          <!-- Tech 10% -->
+          <circle cx="80" cy="80" r="60" fill="none" stroke="#a55eea" stroke-width="20"
+                  stroke-dasharray="37.7 340.3" stroke-dashoffset="-313" transform="rotate(-90 80 80)"/>
+          <!-- Legal 7% -->
+          <circle cx="80" cy="80" r="60" fill="none" stroke="#45aaf2" stroke-width="20"
+                  stroke-dasharray="26.4 351.6" stroke-dashoffset="-350.7" transform="rotate(-90 80 80)"/>
+          <!-- Center text -->
+          <text x="80" y="75" text-anchor="middle" fill="#e8e6e1" font-family="IBM Plex Mono" font-size="18" font-weight="600">17</text>
+          <text x="80" y="92" text-anchor="middle" fill="#6b6b7b" font-family="IBM Plex Mono" font-size="9" letter-spacing="1">POSITIONS</text>
+        </svg>
+      </div>
+      <div class="donut-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#4a6cf7"></div>Geopolitics<span class="legend-pct">28%</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff9f43"></div>Economics<span class="legend-pct">22%</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ee5a5a"></div>Regulatory<span class="legend-pct">18%</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2bcbba"></div>Crypto<span class="legend-pct">15%</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#a55eea"></div>Tech<span class="legend-pct">10%</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#45aaf2"></div>Legal<span class="legend-pct">7%</span></div>
+      </div>
+    </div>
+
+    <!-- Category P&L Breakdown -->
+    <div class="animate-in delay-3">
+      <div class="section-head">
+        <span class="section-title">CATEGORY P&L</span>
+      </div>
+      <div class="cat-breakdown">
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name" style="color:#4a6cf7">Geopolitics</span>
+            <span class="cat-pnl pnl-positive">+$1,620</span>
+          </div>
+          <div class="cat-bar-bg">
+            <div class="cat-bar-fill" style="width:75%;background:linear-gradient(90deg,#4a6cf7,#4a6cf7aa)">
+              <span class="cat-bar-label">5 positions</span>
+            </div>
+          </div>
+          <div class="cat-stats"><span>W/L: 4/1</span><span>Avg: +$324</span></div>
+        </div>
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name" style="color:#ff9f43">Economics</span>
+            <span class="cat-pnl pnl-positive">+$1,600</span>
+          </div>
+          <div class="cat-bar-bg">
+            <div class="cat-bar-fill" style="width:65%;background:linear-gradient(90deg,#ff9f43,#ff9f43aa)">
+              <span class="cat-bar-label">4 positions</span>
+            </div>
+          </div>
+          <div class="cat-stats"><span>W/L: 3/1</span><span>Avg: +$400</span></div>
+        </div>
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name" style="color:#ee5a5a">Regulatory</span>
+            <span class="cat-pnl pnl-positive">+$260</span>
+          </div>
+          <div class="cat-bar-bg">
+            <div class="cat-bar-fill" style="width:50%;background:linear-gradient(90deg,#ee5a5a,#ee5a5aaa)">
+              <span class="cat-bar-label">3 positions</span>
+            </div>
+          </div>
+          <div class="cat-stats"><span>W/L: 2/1</span><span>Avg: +$87</span></div>
+        </div>
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name" style="color:#2bcbba">Crypto</span>
+            <span class="cat-pnl pnl-positive">+$950</span>
+          </div>
+          <div class="cat-bar-bg">
+            <div class="cat-bar-fill" style="width:40%;background:linear-gradient(90deg,#2bcbba,#2bcbbaaa)">
+              <span class="cat-bar-label">2 positions</span>
+            </div>
+          </div>
+          <div class="cat-stats"><span>W/L: 2/0</span><span>Avg: +$475</span></div>
+        </div>
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name" style="color:#a55eea">Tech</span>
+            <span class="cat-pnl pnl-positive">+$700</span>
+          </div>
+          <div class="cat-bar-bg">
+            <div class="cat-bar-fill" style="width:30%;background:linear-gradient(90deg,#a55eea,#a55eeaaa)">
+              <span class="cat-bar-label">2 positions</span>
+            </div>
+          </div>
+          <div class="cat-stats"><span>W/L: 1/1</span><span>Avg: +$350</span></div>
+        </div>
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name" style="color:#45aaf2">Legal</span>
+            <span class="cat-pnl pnl-positive">+$340</span>
+          </div>
+          <div class="cat-bar-bg">
+            <div class="cat-bar-fill" style="width:20%;background:linear-gradient(90deg,#45aaf2,#45aaf2aa)">
+              <span class="cat-bar-label">1 position</span>
+            </div>
+          </div>
+          <div class="cat-stats"><span>W/L: 1/0</span><span>Avg: +$340</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wallet / Capital Pool -->
+    <div class="wallet-section animate-in delay-3">
+      <div class="wallet-header">
+        <span class="wallet-title">WALLETS</span>
+        <span class="wallet-mode">Approval-Gated</span>
+      </div>
+      <div class="wallet-total-row">
+        <span class="wallet-total" id="walletTotalDisplay">$5,280</span>
+        <span class="wallet-total-label">Total across <span id="walletCardCount">3</span> cards</span>
+      </div>
+      <div class="wallet-bars" id="walletBars">
+        <div class="wallet-bar-seg" style="width:59%;background:var(--green)"></div>
+        <div class="wallet-bar-seg" style="width:27%;background:var(--amber)"></div>
+        <div class="wallet-bar-seg" style="width:14%;background:var(--text-muted)"></div>
+      </div>
+      <div class="wallet-breakdown">
+        <div class="wallet-item"><div class="wallet-item-dot" style="background:var(--green)"></div>Available <strong>$3,120</strong></div>
+        <div class="wallet-item"><div class="wallet-item-dot" style="background:var(--amber)"></div>Locked <strong>$1,410</strong></div>
+        <div class="wallet-item"><div class="wallet-item-dot" style="background:var(--text-muted)"></div>Reserve <strong>$750</strong></div>
+      </div>
+      <div class="wallet-cards" id="walletCards">
+        <!-- Cards populated by JS -->
+      </div>
+      <div class="wallet-add-section">
+        <button class="wallet-add-btn" id="walletAddBtn">+ ADD CARD</button>
+        <div class="wallet-add-form" id="walletAddForm">
+          <div class="wallet-input-row">
+            <input class="wallet-input" id="cardNumInput" type="text" placeholder="Card number" maxlength="19" autocomplete="off">
+          </div>
+          <div class="wallet-input-row">
+            <input class="wallet-input wallet-input-sm" id="cardExpInput" type="text" placeholder="MM/YY" maxlength="5">
+            <input class="wallet-input wallet-input-sm" id="cardCvcInput" type="password" placeholder="CVC" maxlength="4">
+            <input class="wallet-input" id="cardLabelInput" type="text" placeholder="Label (optional)">
+          </div>
+          <div class="wallet-input-row">
+            <select class="wallet-select" id="cardAgentSelect">
+              <option value="">Assign to agent...</option>
+              <option value="0" style="color:#45aaf2">Resolution Lawyer</option>
+              <option value="1" style="color:#ff9f43">Procedure Analyst</option>
+              <option value="2" style="color:#a55eea">Narrative Analyst</option>
+              <option value="3" style="color:#00e676">Timing Analyst</option>
+              <option value="4" style="color:#ff3d5a">Contrarian</option>
+              <option value="5" style="color:#2bcbba">Microstructure</option>
+              <option value="6" style="color:#ffab00">Risk Officer</option>
+              <option value="7" style="color:#e8e6e1">Judge / Extractor</option>
+            </select>
+          </div>
+          <div class="wallet-form-actions">
+            <button class="wallet-btn-save" id="walletSaveBtn">SAVE CARD</button>
+            <button class="wallet-btn-cancel" id="walletCancelBtn">CANCEL</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="animate-in delay-4">
+      <div class="section-head">
+        <span class="section-title">RECENT ACTIVITY</span>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon resolve">&#10003;</div>
+        <div>
+          <div class="activity-text">"Biden pardons before end of term" resolved <strong class="up">YES</strong> â won $800</div>
+          <div class="activity-time">2 hours ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon buy">&#8593;</div>
+        <div>
+          <div class="activity-text">Bought 500 shares YES on "Fed cuts rates below 4%"</div>
+          <div class="activity-time">5 hours ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon sell">&#8595;</div>
+        <div>
+          <div class="activity-text">Sold 200 shares NO on "TikTok ban upheld"</div>
+          <div class="activity-time">1 day ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon buy">&#8593;</div>
+        <div>
+          <div class="activity-text">Bought 1,000 shares YES on "US-China tariff deal"</div>
+          <div class="activity-time">2 days ago</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Time selector interactivity
+  document.querySelectorAll('.time-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  // Animate category bars on load
+  window.addEventListener('load', () => {
+    document.querySelectorAll('.cat-bar-fill').forEach(bar => {
+      const w = bar.style.width;
+      bar.style.width = '0%';
+      setTimeout(() => { bar.style.width = w; }, 300);
+    });
+  });
+
+  // ======== MICRO-AGENT SWARM SIMULATION ========
+  (function() {
+    const canvas = document.getElementById('swarmCanvas');
+    const ctx = canvas.getContext('2d');
+    const feed = document.getElementById('swarmFeed');
+
+    const FACTIONS = [
+      { name: 'Res. Lawyer',    color: '#45aaf2', pct: 0.125 },
+      { name: 'Procedure',      color: '#ff9f43', pct: 0.125 },
+      { name: 'Narrative',      color: '#a55eea', pct: 0.125 },
+      { name: 'Timing',         color: '#00e676', pct: 0.125 },
+      { name: 'Contrarian',     color: '#ff3d5a', pct: 0.125 },
+      { name: 'Microstructure', color: '#2bcbba', pct: 0.125 },
+      { name: 'Risk Officer',   color: '#ffab00', pct: 0.125 },
+      { name: 'Judge',          color: '#e8e6e1', pct: 0.125 },
+    ];
+
+    const AGENT_COUNT = 500;
+    const agents = [];
+    let tick = 0;
+    let eventCount = 0;
+    let W, H, dpr;
+
+    const AGENT_NAMES = [];
+    for (let i = 0; i < AGENT_COUNT; i++) {
+      AGENT_NAMES.push('Agent_' + String(i).padStart(5, '0'));
+    }
+
+    const ACTIONS = [
+      'checking settlement wording...',
+      'reviewing docket timeline',
+      'headline vs reality analysis',
+      'catalyst window: open',
+      'fading crowded consensus',
+      'scanning order book depth',
+      'exposure check â within limits',
+      'synthesizing fair value estimate',
+      'PACER filing detected â parsing',
+      'procedural acceleration flagged',
+      'narrative divergence identified',
+      'timing: 48hr catalyst window',
+      'contrarian signal â herd detected',
+      'spread widening â slippage risk',
+      'VETO â risk threshold exceeded',
+      'QUEUE TICKET â edge confirmed',
+    ];
+
+    function resize() {
+      const wrap = canvas.parentElement;
+      dpr = window.devicePixelRatio || 1;
+      W = wrap.clientWidth;
+      H = wrap.clientHeight;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function initAgents() {
+      agents.length = 0;
+      for (let i = 0; i < AGENT_COUNT; i++) {
+        let fIdx = 0, r = Math.random(), cum = 0;
+        for (let f = 0; f < FACTIONS.length; f++) {
+          cum += FACTIONS[f].pct;
+          if (r < cum) { fIdx = f; break; }
+        }
+        agents.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          vx: (Math.random() - 0.5) * 1.2,
+          vy: (Math.random() - 0.5) * 1.2,
+          faction: fIdx,
+          size: 1.5 + Math.random() * 1.5,
+          alpha: 0.5 + Math.random() * 0.5,
+          pulsePhase: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+
+    function updateAgents() {
+      for (let i = 0; i < agents.length; i++) {
+        const a = agents[i];
+        // Slight random walk
+        a.vx += (Math.random() - 0.5) * 0.15;
+        a.vy += (Math.random() - 0.5) * 0.15;
+        // Damping
+        a.vx *= 0.98;
+        a.vy *= 0.98;
+        // Mild faction clustering: attract to same-faction neighbors
+        if (tick % 3 === 0) {
+          let cx = 0, cy = 0, cnt = 0;
+          for (let j = Math.max(0, i - 20); j < Math.min(agents.length, i + 20); j++) {
+            if (agents[j].faction === a.faction) {
+              cx += agents[j].x; cy += agents[j].y; cnt++;
+            }
+          }
+          if (cnt > 0) {
+            cx /= cnt; cy /= cnt;
+            a.vx += (cx - a.x) * 0.0004;
+            a.vy += (cy - a.y) * 0.0004;
+          }
+        }
+        // Speed limit
+        const spd = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
+        if (spd > 1.5) { a.vx *= 1.5 / spd; a.vy *= 1.5 / spd; }
+
+        a.x += a.vx;
+        a.y += a.vy;
+        // Wrap edges
+        if (a.x < 0) a.x = W;
+        if (a.x > W) a.x = 0;
+        if (a.y < 0) a.y = H;
+        if (a.y > H) a.y = 0;
+
+        a.pulsePhase += 0.03;
+      }
+    }
+
+    function drawAgents() {
+      ctx.clearRect(0, 0, W, H);
+
+      // Very subtle grid
+      ctx.strokeStyle = '#ffffff06';
+      ctx.lineWidth = 0.5;
+      for (let x = 0; x < W; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      }
+      for (let y = 0; y < H; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      // Draw agents
+      for (const a of agents) {
+        const pulse = 1 + Math.sin(a.pulsePhase) * 0.15;
+        const sz = a.size * pulse;
+        const c = FACTIONS[a.faction].color;
+
+        // Glow
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, sz + 2, 0, Math.PI * 2);
+        ctx.fillStyle = c + '15';
+        ctx.fill();
+
+        // Core dot
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, sz, 0, Math.PI * 2);
+        ctx.fillStyle = c;
+        ctx.globalAlpha = a.alpha;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function addFeedItem() {
+      const aIdx = Math.floor(Math.random() * AGENT_COUNT);
+      const a = agents[aIdx];
+      const faction = FACTIONS[a.faction];
+      const action = ACTIONS[Math.floor(Math.random() * ACTIONS.length)];
+      eventCount++;
+
+      const item = document.createElement('div');
+      item.className = 'feed-item';
+      item.innerHTML = `<span class="feed-agent" style="color:${faction.color}">${AGENT_NAMES[aIdx]}</span><br><span class="feed-action">${action}</span>`;
+
+      feed.insertBefore(item, feed.firstChild);
+      // Keep max 15 items
+      while (feed.children.length > 15) {
+        feed.removeChild(feed.lastChild);
+      }
+
+      document.getElementById('eventCount').textContent = eventCount;
+    }
+
+    function updateMetrics() {
+      // Simulate evolving fair value and edge
+      const fv = 50 + Math.floor(Math.random() * 25);
+      const edge = 5 + Math.floor(Math.random() * 18);
+      const conf = edge > 12 ? 'High' : edge > 7 ? 'Med' : 'Low';
+      const round = 1 + Math.floor((tick % 180) / 60);
+
+      const fvEl = document.getElementById('mFairVal');
+      const edgeEl = document.getElementById('mEdge');
+      if (fvEl) fvEl.textContent = fv + '\u00A2';
+      if (edgeEl) edgeEl.textContent = '+' + edge + ' pts';
+      const consEl = document.getElementById('mCons');
+      if (consEl) consEl.textContent = conf;
+      const actionEl = document.getElementById('mAction');
+      if (actionEl) actionEl.textContent = edge > 10 ? 'Queue' : 'Hold';
+
+      const consensusEl = document.getElementById('consensusVal');
+      if (consensusEl) consensusEl.textContent = fv + '\u00A2 FV';
+      const footBull = document.getElementById('footBull');
+      if (footBull) footBull.textContent = fv + '\u00A2';
+      const footBear = document.getElementById('footBear');
+      if (footBear) footBear.textContent = '+' + edge;
+      const footVol = document.getElementById('footVol');
+      if (footVol) footVol.textContent = round + '/3';
+
+      // Occasionally shift some agents' roles for dynamism
+      if (tick % 90 === 0) {
+        for (let i = 0; i < 3; i++) {
+          const idx = Math.floor(Math.random() * AGENT_COUNT);
+          agents[idx].faction = Math.floor(Math.random() * FACTIONS.length);
+        }
+      }
+    }
+
+    function loop() {
+      tick++;
+      updateAgents();
+      drawAgents();
+
+      // Update tick counter
+      document.getElementById('swarmTick').textContent = 'TICK ' + String(tick).padStart(6, '0');
+      // Progress bar loops every 1000 ticks
+      document.getElementById('swarmProgress').style.width = ((tick % 1000) / 10) + '%';
+
+      // Feed events every ~40 frames
+      if (tick % 40 === 0) addFeedItem();
+      // Update metrics every ~60 frames
+      if (tick % 60 === 0) updateMetrics();
+
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('resize', () => { resize(); });
+
+    // Init after a short delay to allow layout
+    setTimeout(() => {
+      resize();
+      initAgents();
+      // Add a few initial feed items
+      for (let i = 0; i < 8; i++) addFeedItem();
+      loop();
+    }, 500);
+  })();
+
+  // ======== KALSHI LIVE FEED SIMULATION ========
+  (function() {
+    const marketsEl = document.getElementById('kalshiMarkets');
+    const betsEl = document.getElementById('kalshiBets');
+    const mktCountEl = document.getElementById('kalshiMktCount');
+    const betCountEl = document.getElementById('kalshiBetCount');
+    const wageredEl = document.getElementById('kalshiWagered');
+    const runTotalEl = document.getElementById('kalshiRunTotal');
+    let mktCount = 0;
+    let betCount = 0;
+    let totalWagered = 0;
+
+    const CATEGORIES = [
+      { name: 'Court Ruling',  color: '#45aaf2' },
+      { name: 'Agency Approval', color: '#ff9f43' },
+      { name: 'Legislative',   color: '#ee5a5a' },
+      { name: 'Political',     color: '#a55eea' },
+      { name: 'Econ / Macro',  color: '#2bcbba' },
+    ];
+
+    const KALSHI_MARKETS = [
+      { q: 'SCOTUS rules on TikTok ban by June?', cat: 0, price: 83, vol: 145000 },
+      { q: 'Google found guilty â DOJ ad-tech case?', cat: 0, price: 77, vol: 54200 },
+      { q: 'Federal court stays EPA rule?', cat: 0, price: 41, vol: 22100 },
+      { q: '5th Circuit injunction on student loans?', cat: 0, price: 62, vol: 38400 },
+      { q: 'SCOTUS social media law ruling by recess?', cat: 0, price: 76, vol: 63400 },
+      { q: 'Apple antitrust settlement by Q3?', cat: 0, price: 28, vol: 31800 },
+      { q: 'SEC approves Ethereum staking ETF?', cat: 1, price: 64, vol: 89400 },
+      { q: 'FDA approves Lilly weight-loss pill?', cat: 1, price: 72, vol: 112000 },
+      { q: 'FTC blocks Kroger-Albertsons merger?', cat: 1, price: 59, vol: 36100 },
+      { q: 'CFTC enforcement action on Tether?', cat: 1, price: 18, vol: 67300 },
+      { q: 'SEC amends crypto custody rule?', cat: 1, price: 44, vol: 52800 },
+      { q: 'Stablecoin bill passes Senate by Aug?', cat: 2, price: 52, vol: 47600 },
+      { q: 'AI regulation bill clears committee?', cat: 2, price: 34, vol: 22800 },
+      { q: 'Student loan forgiveness expansion vote?', cat: 2, price: 48, vol: 93200 },
+      { q: 'Tax reform package before recess?', cat: 2, price: 21, vol: 58700 },
+      { q: 'Deepfake political ads banned federally?', cat: 2, price: 15, vol: 19800 },
+      { q: 'Trump signs crypto executive order?', cat: 3, price: 55, vol: 67300 },
+      { q: 'Cabinet reshuffle before midterms?', cat: 3, price: 31, vol: 28600 },
+      { q: 'Iran nuclear deal revival announced?', cat: 3, price: 12, vol: 18900 },
+      { q: 'NATO adds new member before 2027?', cat: 3, price: 27, vol: 15300 },
+      { q: 'Russia-Ukraine ceasefire by Sept?', cat: 3, price: 22, vol: 201000 },
+      { q: 'Fed cuts rates in June 2026?', cat: 4, price: 62, vol: 84200 },
+      { q: 'US GDP growth above 2.5% in Q2?', cat: 4, price: 45, vol: 31400 },
+      { q: 'US inflation below 2% by year end?', cat: 4, price: 33, vol: 58700 },
+      { q: 'Oil above $100/barrel in Q3?', cat: 4, price: 21, vol: 88900 },
+      { q: 'US unemployment above 5% by Q4?', cat: 4, price: 19, vol: 41200 },
+    ];
+
+    const AGENT_ROLES = [
+      { name: 'Res. Lawyer',   color: '#45aaf2' },
+      { name: 'Procedure',     color: '#ff9f43' },
+      { name: 'Narrative',     color: '#a55eea' },
+      { name: 'Timing',        color: '#00e676' },
+      { name: 'Contrarian',    color: '#ff3d5a' },
+      { name: 'Microstructure',color: '#2bcbba' },
+      { name: 'Risk Officer',  color: '#ffab00' },
+      { name: 'Judge',         color: '#e8e6e1' },
+    ];
+
+    const BET_THESES = [
+      'procedural acceleration underpriced',
+      'settlement wording favors YES',
+      'docket filing imminent â early entry',
+      'consensus too bearish â contrarian play',
+      'catalyst window open â timing edge',
+      'market mispriced post-headline',
+      'narrative divergence from filings',
+      'recess deadline creates urgency',
+      'spread tight â clean entry',
+      'herd fading â value in NO',
+    ];
+
+    const STATUSES = [
+      { label: 'FILLED', cls: 'filled' },
+      { label: 'PENDING', cls: 'pending' },
+      { label: 'FILLED', cls: 'filled' },
+      { label: 'FILLED', cls: 'filled' },
+      { label: 'REVIEWING', cls: 'reviewing' },
+    ];
+
+    function formatVol(v) {
+      if (v >= 1000000) return (v/1000000).toFixed(1) + 'M';
+      if (v >= 1000) return (v/1000).toFixed(0) + 'K';
+      return v;
+    }
+
+    function addMarket() {
+      const mkt = KALSHI_MARKETS[Math.floor(Math.random() * KALSHI_MARKETS.length)];
+      const cat = CATEGORIES[mkt.cat];
+      const priceShift = (Math.random() - 0.5) * 8;
+      const currentPrice = Math.max(1, Math.min(99, Math.round(mkt.price + priceShift)));
+      const change = priceShift >= 0 ? '+' + Math.abs(priceShift).toFixed(1) : '-' + Math.abs(priceShift).toFixed(1);
+      const changeClass = priceShift >= 0 ? 'up' : 'down';
+      const vol = Math.round(mkt.vol * (0.8 + Math.random() * 0.4));
+      mktCount++;
+
+      const item = document.createElement('div');
+      item.className = 'kalshi-market-item';
+      item.innerHTML = `
+        <div class="kalshi-cat-dot" style="background:${cat.color}"></div>
+        <div class="kalshi-market-info">
+          <div class="kalshi-market-name">${mkt.q}</div>
+          <div class="kalshi-market-meta">
+            <span class="kalshi-cat-tag" style="color:${cat.color}">${cat.name}</span>
+            <span>Vol: ${formatVol(vol)}</span>
+          </div>
+        </div>
+        <div class="kalshi-price-col">
+          <span class="kalshi-price">${currentPrice}&cent;</span>
+          <span class="kalshi-price-change ${changeClass}">${change}</span>
+        </div>
+      `;
+
+      marketsEl.insertBefore(item, marketsEl.firstChild);
+      while (marketsEl.children.length > 15) {
+        marketsEl.removeChild(marketsEl.lastChild);
+      }
+      mktCountEl.textContent = mktCount;
+
+      // ~40% chance a market triggers a bet (after swarm analysis)
+      if (Math.random() < 0.4) {
+        const betDelay = 1500 + Math.random() * 3000; // swarm takes time
+        setTimeout(() => addBet(mkt, currentPrice, cat), betDelay);
+      }
+    }
+
+    function addBet(mkt, price, cat) {
+      betCount++;
+      const isYes = Math.random() > 0.3;
+      const side = isYes ? 'YES' : 'NO';
+      const entryLow = isYes ? Math.max(1, price - 5 - Math.floor(Math.random() * 8)) : Math.max(1, 100 - price - 5 - Math.floor(Math.random() * 8));
+      const entryHigh = entryLow + 3 + Math.floor(Math.random() * 5);
+      const maxBet = [50, 75, 100, 120, 150, 175, 200, 210, 250, 300, 350, 500][Math.floor(Math.random() * 12)];
+      const agent = AGENT_ROLES[Math.floor(Math.random() * AGENT_ROLES.length)];
+      const thesis = BET_THESES[Math.floor(Math.random() * BET_THESES.length)];
+      const status = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+      const platform = Math.random() > 0.3 ? 'Kalshi' : 'Polymarket';
+
+      totalWagered += maxBet;
+
+      const item = document.createElement('div');
+      item.className = 'bet-item bet-' + side.toLowerCase();
+      item.innerHTML = `
+        <div class="bet-top-row">
+          <span class="bet-side-badge ${side.toLowerCase()}">${side}</span>
+          <span class="bet-amount">$${maxBet}</span>
+          <span class="bet-price-tag">${entryLow}\u00A2\u2013${entryHigh}\u00A2</span>
+          <span class="bet-status ${status.cls}">${status.label}</span>
+        </div>
+        <div class="bet-market-name">${mkt.q}</div>
+        <div class="bet-bottom-row">
+          <span class="bet-agent-dot" style="background:${agent.color}"></span>
+          <span style="color:${agent.color}">${agent.name}</span>
+          <span>\u2022 ${platform}</span>
+          <span>\u2022 ${thesis}</span>
+        </div>
+      `;
+
+      betsEl.insertBefore(item, betsEl.firstChild);
+      while (betsEl.children.length > 15) {
+        betsEl.removeChild(betsEl.lastChild);
+      }
+
+      betCountEl.textContent = betCount;
+      wageredEl.textContent = '$' + totalWagered.toLocaleString();
+      runTotalEl.textContent = totalWagered.toLocaleString();
+    }
+
+    // Seed initial
+    setTimeout(() => {
+      for (let i = 0; i < 5; i++) {
+        setTimeout(() => addMarket(), i * 200);
+      }
+      // Seed a couple initial bets
+      setTimeout(() => {
+        const m1 = KALSHI_MARKETS[0]; addBet(m1, m1.price, CATEGORIES[m1.cat]);
+      }, 600);
+      setTimeout(() => {
+        const m2 = KALSHI_MARKETS[7]; addBet(m2, m2.price, CATEGORIES[m2.cat]);
+      }, 900);
+      setTimeout(() => {
+        const m3 = KALSHI_MARKETS[21]; addBet(m3, m3.price, CATEGORIES[m3.cat]);
+      }, 1100);
+    }, 800);
+
+    // Stream new markets every 3-6 seconds
+    function scheduleNext() {
+      const delay = 3000 + Math.random() * 3000;
+      setTimeout(() => { addMarket(); scheduleNext(); }, delay);
+    }
+    setTimeout(scheduleNext, 2000);
+  })();
+
+  // ======== WALLET MANAGEMENT ========
+  (function() {
+    const AGENTS = [
+      { name: 'Res. Lawyer',    color: '#45aaf2' },
+      { name: 'Procedure',      color: '#ff9f43' },
+      { name: 'Narrative',      color: '#a55eea' },
+      { name: 'Timing',         color: '#00e676' },
+      { name: 'Contrarian',     color: '#ff3d5a' },
+      { name: 'Microstructure', color: '#2bcbba' },
+      { name: 'Risk Officer',   color: '#ffab00' },
+      { name: 'Judge',          color: '#e8e6e1' },
+    ];
+
+    const CARD_TYPES = {
+      '4': { name: 'VISA', bg: '#1a1f71', border: '#1a1f71' },
+      '5': { name: 'MC', bg: '#eb001b', border: '#ff5f00' },
+      '3': { name: 'AMEX', bg: '#006fcf', border: '#006fcf' },
+      '6': { name: 'DISC', bg: '#ff6000', border: '#ff6000' },
+    };
+
+    // Initial cards
+    let cards = [
+      { last4: '4821', type: '4', label: 'Kalshi Primary', agent: 7, balance: 2680, active: true },
+      { last4: '9133', type: '5', label: 'Polymarket', agent: 5, balance: 1850, active: true },
+      { last4: '0057', type: '4', label: 'Reserve', agent: null, balance: 750, active: false },
+    ];
+
+    const cardsEl = document.getElementById('walletCards');
+    const addBtn = document.getElementById('walletAddBtn');
+    const addForm = document.getElementById('walletAddForm');
+    const saveBtn = document.getElementById('walletSaveBtn');
+    const cancelBtn = document.getElementById('walletCancelBtn');
+    const cardNumInput = document.getElementById('cardNumInput');
+    const cardExpInput = document.getElementById('cardExpInput');
+    const cardCvcInput = document.getElementById('cardCvcInput');
+    const cardLabelInput = document.getElementById('cardLabelInput');
+    const cardAgentSelect = document.getElementById('cardAgentSelect');
+
+    function detectType(num) {
+      const first = num.charAt(0);
+      return CARD_TYPES[first] || { name: 'CARD', bg: '#666', border: '#666' };
+    }
+
+    function renderCards() {
+      cardsEl.innerHTML = '';
+      cards.forEach((card, idx) => {
+        const cType = CARD_TYPES[card.type] || { name: 'CARD', bg: '#666', border: '#666' };
+        const agent = card.agent !== null ? AGENTS[card.agent] : null;
+
+        const row = document.createElement('div');
+        row.className = 'wallet-card-row' + (card.active ? ' active-card' : '');
+        row.innerHTML = `
+          <div class="wallet-card-icon" style="background:${cType.bg}22;border-color:${cType.border}55;color:${cType.border}">${cType.name}</div>
+          <div class="wallet-card-info">
+            <div class="wallet-card-number">\u2022\u2022\u2022\u2022 ${card.last4}${card.label ? ' \u2014 ' + card.label : ''}</div>
+            <div class="wallet-card-meta">
+              ${agent ? `<span class="wallet-card-agent"><span class="wallet-card-agent-dot" style="background:${agent.color}"></span>${agent.name}</span>` : '<span style="color:var(--text-muted)">Unassigned</span>'}
+              ${card.active ? '<span style="color:var(--green)">Active</span>' : '<span>Cold</span>'}
+            </div>
+          </div>
+          <span class="wallet-card-balance">$${card.balance.toLocaleString()}</span>
+          <div class="wallet-card-status" style="background:${card.active ? 'var(--green)' : 'var(--text-muted)'}"></div>
+        `;
+        cardsEl.appendChild(row);
+      });
+      document.getElementById('walletCardCount').textContent = cards.length;
+      const total = cards.reduce((s, c) => s + c.balance, 0);
+      document.getElementById('walletTotalDisplay').textContent = '$' + total.toLocaleString();
+    }
+
+    // Format card number as user types
+    cardNumInput.addEventListener('input', (e) => {
+      let v = e.target.value.replace(/\D/g, '').substring(0, 16);
+      let formatted = v.replace(/(.{4})/g, '$1 ').trim();
+      e.target.value = formatted;
+    });
+
+    // Format expiry
+    cardExpInput.addEventListener('input', (e) => {
+      let v = e.target.value.replace(/\D/g, '').substring(0, 4);
+      if (v.length > 2) v = v.substring(0, 2) + '/' + v.substring(2);
+      e.target.value = v;
+    });
+
+    addBtn.addEventListener('click', () => {
+      addBtn.style.display = 'none';
+      addForm.classList.add('visible');
+      cardNumInput.focus();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      addForm.classList.remove('visible');
+      addBtn.style.display = 'flex';
+      cardNumInput.value = '';
+      cardExpInput.value = '';
+      cardCvcInput.value = '';
+      cardLabelInput.value = '';
+      cardAgentSelect.value = '';
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const num = cardNumInput.value.replace(/\s/g, '');
+      if (num.length < 4) return;
+      const last4 = num.slice(-4);
+      const firstDigit = num.charAt(0);
+      const agentVal = cardAgentSelect.value;
+
+      cards.push({
+        last4: last4,
+        type: firstDigit,
+        label: cardLabelInput.value || '',
+        agent: agentVal !== '' ? parseInt(agentVal) : null,
+        balance: 0,
+        active: true,
+      });
+
+      renderCards();
+      cancelBtn.click();
+    });
+
+    // Initial render
+    renderCards();
+  })();
+</script>
+
+</body>
+</html>

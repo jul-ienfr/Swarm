@@ -17,6 +17,7 @@ import {
   type DecisionPacket,
   type EvidencePacket,
   type ForecastPacket,
+  type ForecastEvaluationRecord,
   type LatencyReferenceBundle,
   type MarketDescriptor,
   type MarketRegime,
@@ -38,7 +39,11 @@ import {
   type QuotePairIntentPreview,
   type ResearchBridgeBundle,
   type PredictionMarketsAdviceRequest,
+  type PredictionMarketAdviceRequestMode,
+  type PredictionMarketAdviceResponseVariant,
   type PredictionMarketHealthStatus,
+  type PredictionMarketTimesFMLane,
+  type PredictionMarketTimesFMMode,
   type ResolutionAnomalyReport,
   type PredictionMarketVenue,
   type RunManifest,
@@ -114,7 +119,10 @@ import {
 } from '@/lib/prediction-markets/execution-readiness'
 import {
   buildPredictionMarketExecutionPathways,
+  type PredictionMarketExecutionPathwaysApprovalTicket,
   type PredictionMarketExecutionPathways,
+  type PredictionMarketExecutionPathwaysOperatorThesis,
+  type PredictionMarketExecutionPathwaysResearchPipelineTrace,
 } from '@/lib/prediction-markets/execution-pathways'
 import {
   projectPredictionMarketExecutionPath,
@@ -126,9 +134,23 @@ import {
   type MarketResearchSidecar,
 } from '@/lib/prediction-markets/research'
 import {
+  resolvePredictionMarketTimesFMOptions,
+  runPredictionMarketTimesFMSidecar,
+  shouldRunPredictionMarketTimesFM,
+  summarizePredictionMarketTimesFMSidecar,
+  type PredictionMarketTimesFMSidecar,
+} from '@/lib/prediction-markets/timesfm'
+import {
   buildMicrostructureLabReport,
   type MicrostructureLabReport,
 } from '@/lib/prediction-markets/microstructure-lab'
+import { buildResolvedHistoryDataset, toCalibrationPointsFromResolvedHistory } from '@/lib/prediction-markets/resolved-history'
+import { buildPredictionMarketCostModelReport } from '@/lib/prediction-markets/cost-model'
+import { buildPredictionMarketWalkForwardReport } from '@/lib/prediction-markets/walk-forward'
+import {
+  extractForecastEvaluationHistoryFromArtifacts,
+  resolvePredictionMarketEvaluationHistory,
+} from '@/lib/prediction-markets/evaluation-history-source'
 import {
   buildStrategyDecision,
   deriveLatencyReferences,
@@ -156,11 +178,54 @@ import {
   type PredictionMarketPreflightPenaltySummary,
   type PredictionMarketStaleEdgeStatus,
 } from '@/lib/prediction-markets/preflight-ops'
-import { executePredictionMarketLiveExecutionBridge } from '@/lib/prediction-markets/live-execution-bridge'
+import {
+  executePredictionMarketLiveExecutionBridge,
+  resolvePredictionMarketLiveExecutionBridgeStatus,
+} from '@/lib/prediction-markets/live-execution-bridge'
+import { getPredictionMarketResearchMemoryRuntime } from '@/lib/prediction-markets/memory/runtime'
+import {
+  buildPredictionMarketWorldStateSpine,
+  type PredictionMarketWorldStateSpine,
+} from '@/lib/prediction-markets/world-state-spine'
+import { type PredictionMarketSourceAudit } from '@/lib/prediction-markets/source-audit'
+import { type PredictionMarketRulesLineage } from '@/lib/prediction-markets/rules-lineage'
+import { type PredictionMarketCatalystTimeline } from '@/lib/prediction-markets/catalyst-timeline'
+import { type PredictionMarketWorldStateSnapshot } from '@/lib/prediction-markets/world-state'
+import { type PredictionMarketTicketPayload } from '@/lib/prediction-markets/ticket-payload'
+import {
+  appendDecisionLedgerEntry,
+  summarizeDecisionLedgerEntries,
+  type DecisionLedgerEntry,
+  type DecisionLedgerSummary,
+} from '@/lib/prediction-markets/decision-ledger'
+import { buildCalibrationReport, type CalibrationReport } from '@/lib/prediction-markets/calibration'
+import {
+  buildAutopilotCycleRecord,
+  summarizeAutopilotCycles,
+  type AutopilotCycleSummaryReport,
+} from '@/lib/prediction-markets/autopilot-cycle'
+import {
+  assessBinaryParity,
+  assessMultiOutcomeParity,
+  assessOddsDivergence,
+  assessOrderbookImbalance,
+  assessSpreadCapture,
+  calculateKellySizing,
+} from '@/lib/prediction-markets/quant-pack'
 
 type AdviceExecutionInput = PredictionMarketsAdviceRequest & {
   workspaceId: number
   actor?: string
+}
+
+type PredictionMarketAdviceRequestContract = {
+  request_mode: PredictionMarketAdviceRequestMode
+  response_variant: PredictionMarketAdviceResponseVariant
+  strategy_profile: PredictionMarketsAdviceRequest['strategy_profile']
+  history_limit: number
+  variant_tags: string[]
+  timesfm_mode: PredictionMarketTimesFMMode
+  timesfm_lanes: PredictionMarketTimesFMLane[]
 }
 
 type ReplayExecutionInput = {
@@ -289,6 +354,9 @@ type PredictionMarketRunLivePlan = PredictionMarketRunRuntimeHints & {
   benchmark_surface_blocking_reasons: string[]
   benchmark_promotion_blockers: string[]
   benchmark_promotion_ready: boolean
+  live_transport_ready: boolean
+  live_transport_blockers: string[]
+  live_transport_summary: string
   summary: string
   source_refs: {
     run_detail: string
@@ -430,6 +498,8 @@ type PredictionMarketExecutionPreflightSummary = {
   source_refs: string[]
   blockers: string[]
   downgrade_reasons: string[]
+  selected_edge_bucket?: PredictionMarketExecutionProjection['selected_edge_bucket'] | null
+  selected_pre_trade_gate?: PredictionMarketExecutionProjection['selected_pre_trade_gate'] | null
   source_of_truth?: 'official_docs' | 'community_repos'
   execution_eligible?: boolean
   stale_edge_status?: PredictionMarketStaleEdgeStatus
@@ -473,6 +543,11 @@ type PredictionMarketStrategyRuntimeArtifacts = {
   execution_intent_preview: ExecutionIntentPreview | null
   quote_pair_intent_preview: QuotePairIntentPreview | null
   basket_intent_preview: BasketIntentPreview | null
+  maker_spread_capture_inventory_summary: string | null
+  maker_spread_capture_adverse_selection_summary: string | null
+  maker_spread_capture_quote_transport_summary: string | null
+  maker_spread_capture_blockers: string[]
+  maker_spread_capture_risk_caps: string[]
   latency_reference_bundle: LatencyReferenceBundle | null
   resolution_anomaly_report: ResolutionAnomalyReport | null
   autonomous_agent_report: AutonomousAgentReport | null
@@ -485,6 +560,31 @@ type PredictionMarketStrategyRuntimeArtifacts = {
   strategy_trade_intent_preview: TradeIntent | null
   strategy_canonical_trade_intent_preview: TradeIntent | null
 }
+type PredictionMarketCopiedPatternArtifacts = {
+  source_audit: PredictionMarketSourceAudit
+  rules_lineage: PredictionMarketRulesLineage
+  catalyst_timeline: PredictionMarketCatalystTimeline
+  world_state: PredictionMarketWorldStateSnapshot
+  ticket_payload: PredictionMarketTicketPayload
+  quant_signal_bundle: PredictionMarketJsonArtifact
+  decision_ledger: PredictionMarketJsonArtifact & {
+    entries: DecisionLedgerEntry[]
+    summary: DecisionLedgerSummary
+  }
+  calibration_report: CalibrationReport
+  resolved_history: PredictionMarketJsonArtifact
+  cost_model_report: PredictionMarketJsonArtifact
+  walk_forward_report: PredictionMarketJsonArtifact
+  autopilot_cycle_summary: AutopilotCycleSummaryReport
+  research_memory_summary: PredictionMarketJsonArtifact | null
+}
+type MakerSpreadCaptureDiagnostics = {
+  inventory_summary: string | null
+  adverse_selection_summary: string | null
+  quote_transport_summary: string | null
+  blockers: string[]
+  risk_caps: string[]
+}
 type StoredExecutionArtifacts = {
   snapshot: MarketSnapshot
   resolution_policy: ResolutionPolicy
@@ -493,10 +593,24 @@ type StoredExecutionArtifacts = {
   recommendation: EnrichedMarketRecommendationPacket
   market_events: PredictionMarketJsonArtifact | null
   market_positions: PredictionMarketJsonArtifact | null
+  source_audit: PredictionMarketJsonArtifact | null
+  rules_lineage: PredictionMarketJsonArtifact | null
+  catalyst_timeline: PredictionMarketJsonArtifact | null
+  world_state: PredictionMarketJsonArtifact | null
+  ticket_payload: PredictionMarketJsonArtifact | null
+  quant_signal_bundle: PredictionMarketJsonArtifact | null
+  decision_ledger: PredictionMarketJsonArtifact | null
+  calibration_report: PredictionMarketJsonArtifact | null
+  resolved_history: PredictionMarketJsonArtifact | null
+  cost_model_report: PredictionMarketJsonArtifact | null
+  walk_forward_report: PredictionMarketJsonArtifact | null
+  autopilot_cycle_summary: PredictionMarketJsonArtifact | null
+  research_memory_summary: PredictionMarketJsonArtifact | null
   paper_surface: PredictionMarketReplaySurface | null
   replay_surface: PredictionMarketReplaySurface | null
   research_bridge: ResearchBridgeBundle | null
   research_sidecar: MarketResearchSidecar | null
+  timesfm_sidecar: PredictionMarketTimesFMSidecar | null
   order_trace_audit: PredictionMarketOrderTraceAudit | null
   venue_coverage: PredictionMarketVenueCoverage
   cross_venue_intelligence: PredictionMarketCrossVenueIntelligence | null
@@ -514,6 +628,11 @@ type StoredExecutionArtifacts = {
   execution_intent_preview: ExecutionIntentPreview | null
   quote_pair_intent_preview: QuotePairIntentPreview | null
   basket_intent_preview: BasketIntentPreview | null
+  maker_spread_capture_inventory_summary?: string | null
+  maker_spread_capture_adverse_selection_summary?: string | null
+  maker_spread_capture_quote_transport_summary?: string | null
+  maker_spread_capture_blockers?: string[]
+  maker_spread_capture_risk_caps?: string[]
   latency_reference_bundle: LatencyReferenceBundle | null
   resolution_anomaly_report: ResolutionAnomalyReport | null
   autonomous_agent_report: AutonomousAgentReport | null
@@ -531,8 +650,22 @@ type PredictionMarketArtifactAuditSummary = {
   manifest_only_artifact_ids: string[]
   observed_only_artifact_ids: string[]
 }
+type PredictionMarketWalkForwardSurfaceSummary = {
+  summary: string | null
+  sample_count: number | null
+  window_count: number | null
+  win_rate: number | null
+  brier_score: number | null
+  log_loss: number | null
+  uplift_bps: number | null
+  promotion_ready: boolean
+  notes: string[]
+}
 type PredictionMarketRunSummaryWithArtifactAudit = StoredPredictionMarketRunSummary & {
   artifact_audit: PredictionMarketArtifactAuditSummary
+  request_mode?: PredictionMarketAdviceRequestMode | null
+  response_variant?: PredictionMarketAdviceResponseVariant | null
+  request_variant_tags?: string[]
   research_runtime_mode?: 'market_only' | 'research_driven' | null
   research_recommendation_origin?: 'market_only' | 'research_driven' | 'manual_thesis' | 'abstention' | null
   research_recommendation_origin_summary?: string | null
@@ -548,6 +681,12 @@ type PredictionMarketRunSummaryWithArtifactAudit = StoredPredictionMarketRunSumm
   research_abstention_policy_blocks_forecast?: boolean | null
   research_forecast_probability_yes_hint?: number | null
   research_runtime_summary?: string | null
+  timesfm_requested_mode?: PredictionMarketTimesFMMode | null
+  timesfm_effective_mode?: PredictionMarketTimesFMMode | null
+  timesfm_requested_lanes?: PredictionMarketTimesFMLane[]
+  timesfm_selected_lane?: PredictionMarketTimesFMLane | null
+  timesfm_health?: PredictionMarketTimesFMSidecar['health']['status'] | null
+  timesfm_summary?: string | null
   research_benchmark_gate_summary?: string | null
   research_benchmark_uplift_bps?: number | null
   research_benchmark_verdict?: PredictionMarketsBenchmarkGateSummary['verdict'] | null
@@ -589,6 +728,65 @@ type PredictionMarketRunSummaryWithArtifactAudit = StoredPredictionMarketRunSumm
   strategy_candidate_count?: number | null
   execution_intent_preview_kind?: string | null
   execution_intent_preview_source?: string | null
+  maker_spread_capture_inventory_summary?: string | null
+  maker_spread_capture_adverse_selection_summary?: string | null
+  maker_spread_capture_quote_transport_summary?: string | null
+  maker_spread_capture_blockers?: string[]
+  maker_spread_capture_risk_caps?: string[]
+  approval_ticket_id?: string | null
+  approval_ticket_required?: boolean
+  approval_ticket_status?: NonNullable<PredictionMarketExecutionPathwaysReport['approval_ticket']>['status'] | null
+  approval_ticket_summary?: string | null
+  operator_thesis_present?: boolean
+  operator_thesis_source?: NonNullable<PredictionMarketExecutionPathwaysReport['operator_thesis']>['source'] | null
+  operator_thesis_probability_yes?: number | null
+  operator_thesis_summary?: string | null
+  source_audit_average_score?: number | null
+  source_audit_coverage_score?: number | null
+  source_audit_summary?: string | null
+  world_state_recommended_action?: 'bet' | 'wait' | 'no_trade' | null
+  world_state_recommended_side?: 'yes' | 'no' | null
+  world_state_confidence_score?: number | null
+  world_state_summary?: string | null
+  world_state_risk_flags?: string[]
+  ticket_payload_action?: string | null
+  ticket_payload_size_usd?: number | null
+  ticket_payload_summary?: string | null
+  quant_signal_summary?: string | null
+  quant_signal_viable_count?: number | null
+  decision_ledger_total_entries?: number | null
+  decision_ledger_latest_entry_type?: string | null
+  calibration_error?: number | null
+  calibration_brier_score?: number | null
+  resolved_history_summary?: string | null
+  resolved_history_points?: number | null
+  resolved_history_source_summary?: string | null
+  resolved_history_first_cutoff_at?: string | null
+  resolved_history_last_cutoff_at?: string | null
+  cost_model_summary?: string | null
+  cost_model_total_points?: number | null
+  cost_model_viable_point_count?: number | null
+  cost_model_viable_point_rate?: number | null
+  cost_model_average_cost_bps?: number | null
+  cost_model_average_net_edge_bps?: number | null
+  walk_forward_summary?: PredictionMarketWalkForwardSurfaceSummary | null
+  walk_forward_total_points?: number | null
+  walk_forward_windows?: number | null
+  walk_forward_stable_window_rate?: number | null
+  walk_forward_mean_brier_improvement?: number | null
+  walk_forward_mean_log_loss_improvement?: number | null
+  walk_forward_mean_net_edge_bps?: number | null
+  walk_forward_promotion_ready?: boolean
+  autopilot_cycle_health?: 'healthy' | 'degraded' | 'blocked' | null
+  autopilot_cycle_summary?: string | null
+  research_memory_summary?: string | null
+  research_memory_memory_count?: number | null
+  research_memory_validation_score?: number | null
+  research_pipeline_trace_summary?: string | null
+  research_pipeline_trace_preferred_mode?: NonNullable<PredictionMarketExecutionPathwaysReport['research_pipeline_trace']>['preferred_mode'] | null
+  research_pipeline_trace_oracle_family?: NonNullable<PredictionMarketExecutionPathwaysReport['research_pipeline_trace']>['oracle_family'] | null
+  research_pipeline_trace_forecaster_count?: number | null
+  research_pipeline_trace_evidence_count?: number | null
   strategy_shadow_summary?: string | null
   resolution_anomalies?: string[]
   execution_pathways_highest_actionable_mode?: PredictionMarketExecutionReadinessMode | null
@@ -613,6 +811,12 @@ type PredictionMarketRunSummaryWithArtifactAudit = StoredPredictionMarketRunSumm
   execution_projection_reconciliation_status?: PredictionMarketExecutionProjectionReportBasis['basis']['reconciliation_status'] | null
   execution_projection_selected_preview?: TradeIntent | null
   execution_projection_selected_preview_source?: 'canonical_trade_intent_preview' | 'trade_intent_preview' | null
+  execution_projection_selected_edge_bucket?: PredictionMarketExecutionProjection['selected_edge_bucket'] | null
+  execution_projection_selected_pre_trade_gate?: PredictionMarketExecutionProjection['selected_pre_trade_gate'] | null
+  execution_projection_selected_pre_trade_gate_verdict?: NonNullable<PredictionMarketExecutionProjection['selected_pre_trade_gate']>['verdict'] | null
+  execution_projection_selected_pre_trade_gate_summary?: string | null
+  execution_projection_selected_path_net_edge_bps?: number | null
+  execution_projection_selected_path_minimum_net_edge_bps?: number | null
   execution_projection_selected_path_canonical_size_usd?: number | null
   execution_projection_selected_path_shadow_signal_present?: boolean
   venue_feed_surface_summary?: string | null
@@ -628,6 +832,9 @@ type PredictionMarketRunSummaryWithArtifactAudit = StoredPredictionMarketRunSumm
 }
 type PredictionMarketRunRuntimeHints = Pick<
   PredictionMarketRunSummaryWithArtifactAudit,
+  | 'request_mode'
+  | 'response_variant'
+  | 'request_variant_tags'
   | 'research_runtime_mode'
   | 'research_recommendation_origin'
   | 'research_recommendation_origin_summary'
@@ -643,6 +850,12 @@ type PredictionMarketRunRuntimeHints = Pick<
   | 'research_abstention_policy_blocks_forecast'
   | 'research_forecast_probability_yes_hint'
   | 'research_runtime_summary'
+  | 'timesfm_requested_mode'
+  | 'timesfm_effective_mode'
+  | 'timesfm_requested_lanes'
+  | 'timesfm_selected_lane'
+  | 'timesfm_health'
+  | 'timesfm_summary'
   | 'research_benchmark_gate_summary'
   | 'research_benchmark_uplift_bps'
   | 'research_benchmark_verdict'
@@ -684,6 +897,65 @@ type PredictionMarketRunRuntimeHints = Pick<
   | 'strategy_candidate_count'
   | 'execution_intent_preview_kind'
   | 'execution_intent_preview_source'
+  | 'maker_spread_capture_inventory_summary'
+  | 'maker_spread_capture_adverse_selection_summary'
+  | 'maker_spread_capture_quote_transport_summary'
+  | 'maker_spread_capture_blockers'
+  | 'maker_spread_capture_risk_caps'
+  | 'approval_ticket_id'
+  | 'approval_ticket_required'
+  | 'approval_ticket_status'
+  | 'approval_ticket_summary'
+  | 'operator_thesis_present'
+  | 'operator_thesis_source'
+  | 'operator_thesis_probability_yes'
+  | 'operator_thesis_summary'
+  | 'source_audit_average_score'
+  | 'source_audit_coverage_score'
+  | 'source_audit_summary'
+  | 'world_state_recommended_action'
+  | 'world_state_recommended_side'
+  | 'world_state_confidence_score'
+  | 'world_state_summary'
+  | 'world_state_risk_flags'
+  | 'ticket_payload_action'
+  | 'ticket_payload_size_usd'
+  | 'ticket_payload_summary'
+  | 'quant_signal_summary'
+  | 'quant_signal_viable_count'
+  | 'decision_ledger_total_entries'
+  | 'decision_ledger_latest_entry_type'
+  | 'calibration_error'
+  | 'calibration_brier_score'
+  | 'resolved_history_summary'
+  | 'resolved_history_points'
+  | 'resolved_history_source_summary'
+  | 'resolved_history_first_cutoff_at'
+  | 'resolved_history_last_cutoff_at'
+  | 'cost_model_summary'
+  | 'cost_model_total_points'
+  | 'cost_model_viable_point_count'
+  | 'cost_model_viable_point_rate'
+  | 'cost_model_average_cost_bps'
+  | 'cost_model_average_net_edge_bps'
+  | 'walk_forward_summary'
+  | 'walk_forward_total_points'
+  | 'walk_forward_windows'
+  | 'walk_forward_stable_window_rate'
+  | 'walk_forward_mean_brier_improvement'
+  | 'walk_forward_mean_log_loss_improvement'
+  | 'walk_forward_mean_net_edge_bps'
+  | 'walk_forward_promotion_ready'
+  | 'autopilot_cycle_health'
+  | 'autopilot_cycle_summary'
+  | 'research_memory_summary'
+  | 'research_memory_memory_count'
+  | 'research_memory_validation_score'
+  | 'research_pipeline_trace_summary'
+  | 'research_pipeline_trace_preferred_mode'
+  | 'research_pipeline_trace_oracle_family'
+  | 'research_pipeline_trace_forecaster_count'
+  | 'research_pipeline_trace_evidence_count'
   | 'strategy_shadow_summary'
   | 'resolution_anomalies'
   | 'execution_projection_gate_name'
@@ -708,6 +980,12 @@ type PredictionMarketRunRuntimeHints = Pick<
   | 'execution_projection_reconciliation_status'
   | 'execution_projection_selected_preview'
   | 'execution_projection_selected_preview_source'
+  | 'execution_projection_selected_edge_bucket'
+  | 'execution_projection_selected_pre_trade_gate'
+  | 'execution_projection_selected_pre_trade_gate_verdict'
+  | 'execution_projection_selected_pre_trade_gate_summary'
+  | 'execution_projection_selected_path_net_edge_bps'
+  | 'execution_projection_selected_path_minimum_net_edge_bps'
   | 'execution_projection_selected_path_canonical_size_usd'
   | 'execution_projection_selected_path_shadow_signal_present'
   | 'venue_feed_surface_summary'
@@ -720,7 +998,11 @@ type PredictionMarketRunRuntimeHints = Pick<
   | 'shadow_arbitrage_shadow_edge_bps'
   | 'shadow_arbitrage_recommended_size_usd'
   | 'shadow_arbitrage'
->
+> & {
+  approval_ticket?: PredictionMarketExecutionPathwaysApprovalTicket | null
+  operator_thesis?: PredictionMarketExecutionPathwaysOperatorThesis | null
+  research_pipeline_trace?: PredictionMarketExecutionPathwaysResearchPipelineTrace | null
+}
 type PredictionMarketRunDetailsWithArtifactAudit = StoredPredictionMarketRunDetails & PredictionMarketRunRuntimeHints & {
   manifest?: RunManifest
   artifact_refs?: PredictionMarketArtifactRef[]
@@ -738,6 +1020,7 @@ type PredictionMarketRunDetailsWithArtifactAudit = StoredPredictionMarketRunDeta
   provenance_bundle?: PredictionMarketProvenanceBundle
   research_bridge?: ResearchBridgeBundle | null
   research_sidecar?: MarketResearchSidecar | null
+  timesfm_sidecar?: PredictionMarketTimesFMSidecar | null
   order_trace_audit?: PredictionMarketOrderTraceAudit | null
   venue_coverage?: PredictionMarketVenueCoverage
   execution_readiness?: PredictionMarketExecutionReadiness
@@ -748,6 +1031,19 @@ type PredictionMarketRunDetailsWithArtifactAudit = StoredPredictionMarketRunDeta
   multi_venue_execution?: MultiVenueExecution
   market_events?: PredictionMarketJsonArtifact
   market_positions?: PredictionMarketJsonArtifact
+  source_audit_artifact?: PredictionMarketJsonArtifact | null
+  rules_lineage_artifact?: PredictionMarketJsonArtifact | null
+  catalyst_timeline_artifact?: PredictionMarketJsonArtifact | null
+  world_state_artifact?: PredictionMarketJsonArtifact | null
+  ticket_payload_artifact?: PredictionMarketJsonArtifact | null
+  quant_signal_bundle?: PredictionMarketJsonArtifact | null
+  decision_ledger_artifact?: PredictionMarketJsonArtifact | null
+  calibration_report_artifact?: PredictionMarketJsonArtifact | null
+  resolved_history_artifact?: PredictionMarketJsonArtifact | null
+  cost_model_report_artifact?: PredictionMarketJsonArtifact | null
+  walk_forward_report_artifact?: PredictionMarketJsonArtifact | null
+  autopilot_cycle_summary_artifact?: PredictionMarketJsonArtifact | null
+  research_memory_summary_artifact?: PredictionMarketJsonArtifact | null
   venue_feed_surface?: MarketFeedSurface
   microstructure_lab?: MicrostructureLabReport
   market_graph?: PredictionMarketMarketGraph | null
@@ -772,6 +1068,44 @@ const DEFAULT_FORECAST_ABSTENTION_POLICY = 'baseline-confidence-policy'
 const DEFAULT_IDEMPOTENCY_WINDOW_SEC = 60
 const DEFAULT_MIN_VENUE_HEALTH_SCORE = 0.7
 const DEFAULT_BLOCKED_VENUE_HEALTH_SCORE = 0.4
+const DEFAULT_PREDICT_HISTORY_LIMIT = 120
+const DEFAULT_PREDICT_DEEP_HISTORY_LIMIT = 240
+
+function resolvePredictionMarketAdviceRequestContract(
+  input: AdviceExecutionInput,
+  parsed: PredictionMarketsAdviceRequest,
+): PredictionMarketAdviceRequestContract {
+  const request_mode = parsed.request_mode ?? 'predict'
+  const timesfmOptions = resolvePredictionMarketTimesFMOptions({
+    requestMode: request_mode,
+    requestedMode: parsed.timesfm_mode ?? null,
+    requestedLanes: parsed.timesfm_lanes ?? null,
+  })
+  const response_variant = parsed.response_variant
+    ?? (request_mode === 'predict_deep' ? 'research_heavy' : 'standard')
+  const strategy_profile = input.strategy_profile != null
+    ? parsed.strategy_profile
+    : response_variant === 'execution_heavy'
+      ? 'execution_only'
+      : response_variant === 'research_heavy'
+        ? 'forecast_only'
+        : parsed.strategy_profile
+  const history_limit = input.history_limit != null
+    ? parsed.history_limit ?? DEFAULT_PREDICT_HISTORY_LIMIT
+    : request_mode === 'predict_deep'
+      ? DEFAULT_PREDICT_DEEP_HISTORY_LIMIT
+      : DEFAULT_PREDICT_HISTORY_LIMIT
+
+  return {
+    request_mode,
+    response_variant,
+    strategy_profile,
+    history_limit,
+    variant_tags: parsed.variant_tags ?? [],
+    timesfm_mode: timesfmOptions.mode,
+    timesfm_lanes: timesfmOptions.lanes,
+  }
+}
 
 function getSnapshotHistoryPoints(snapshot: { history?: unknown }): Array<unknown> {
   return Array.isArray(snapshot.history) ? snapshot.history : []
@@ -990,7 +1324,190 @@ function buildStrategyTradeIntentPreview(input: {
   }
 }
 
-function buildStrategyExecutionIntentArtifacts(input: {
+function snapshotObservedAgeMs(snapshot: MarketSnapshot): number | null {
+  const observedAt = snapshot.book?.fetched_at ?? snapshot.captured_at
+  const parsed = Date.parse(observedAt)
+  return Number.isFinite(parsed) ? Math.max(0, Date.now() - parsed) : null
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return uniqueStrings(value.map((entry) => asString(entry)))
+}
+
+function asJsonArtifact<T>(value: T): PredictionMarketJsonArtifact {
+  return value as unknown as PredictionMarketJsonArtifact
+}
+
+function countReadyTimesFMLanes(sidecar: PredictionMarketTimesFMSidecar | null | undefined): number {
+  if (!sidecar?.lanes) return 0
+  return Object.values(sidecar.lanes).filter((lane) => lane?.status === 'ready').length
+}
+
+function hasReadyTimesFMLanes(sidecar: PredictionMarketTimesFMSidecar | null | undefined): boolean {
+  return countReadyTimesFMLanes(sidecar) > 0
+}
+
+function buildPredictionMarketTimesFMFailureBundle(input: {
+  runId: string
+  snapshot: MarketSnapshot
+  requestContract: PredictionMarketAdviceRequestContract
+  reason: string
+}): PredictionMarketTimesFMSidecar {
+  const issue = input.reason.trim() || 'sidecar_failed'
+  return {
+    schema_version: 'v1',
+    sidecar_name: 'timesfm_sidecar',
+    run_id: input.runId,
+    market_id: input.snapshot.market.market_id,
+    venue: input.snapshot.venue,
+    question: input.snapshot.market.question,
+    requested_mode: input.requestContract.timesfm_mode,
+    effective_mode: input.requestContract.timesfm_mode,
+    requested_lanes: input.requestContract.timesfm_lanes,
+    selected_lane: null,
+    generated_at: nowIso(),
+    health: {
+      healthy: false,
+      status: input.requestContract.timesfm_mode === 'required' ? 'blocked' : 'degraded',
+      backend: 'unavailable',
+      dependency_status: 'sidecar_failed',
+      issues: [issue],
+      summary: `TimesFM sidecar failed before producing a bundle: ${issue}`,
+    },
+    vendor: {
+      source: 'master_snapshot',
+      failure_mode: 'service_sidecar_wrapper',
+    },
+    lanes: {},
+    summary: `TimesFM unavailable: ${issue}`,
+    metadata: {
+      request_mode: input.requestContract.request_mode,
+      response_variant: input.requestContract.response_variant,
+    },
+  }
+}
+
+function formatUsdAmount(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return 'n/a'
+  return `${roundStrategyNumber(value, 2).toFixed(2)} USD`
+}
+
+function buildMakerSpreadCaptureDiagnostics(input: {
+  snapshot: MarketSnapshot
+  makerSpreadCaptureEnabled: boolean
+  regime: PredictionMarketStrategyMarketRegime
+  strategyCandidate: PredictionMarketStrategyCandidate | null
+  strategySummary: string | null
+  shadowSummary: StrategyShadowSummary | null
+  sizeUsd: number
+  maxSlippageBps: number
+}): MakerSpreadCaptureDiagnostics | null {
+  if (!input.makerSpreadCaptureEnabled && input.strategyCandidate?.kind !== 'maker_spread_capture') return null
+
+  const metrics = input.strategyCandidate?.metrics ?? {}
+  const metadata = asRecord(input.strategyCandidate?.metadata)
+  const spreadBps = asNumber(metrics.spread_bps) ?? asNumber(metadata?.spread_bps) ?? input.snapshot.spread_bps ?? null
+  const quoteAgeMs = asNumber(metrics.quote_age_ms) ?? asNumber(metadata?.quote_age_ms) ?? snapshotObservedAgeMs(input.snapshot)
+  const regimeFreshnessBudgetMs = asNumber(input.regime.maker_quote_freshness_budget_ms)
+  const freshnessBudgetMs =
+    asNumber(metrics.maker_quote_freshness_budget_ms)
+    ?? asNumber(metadata?.maker_quote_freshness_budget_ms)
+    ?? (
+      input.strategyCandidate
+        ? regimeFreshnessBudgetMs
+        : regimeFreshnessBudgetMs != null
+          ? Math.min(regimeFreshnessBudgetMs, 30_000)
+          : 30_000
+    )
+    ?? null
+  const makerQuoteState =
+    asString(metrics.maker_quote_state) ??
+    asString(metadata?.maker_quote_state) ??
+    input.regime.maker_quote_state ??
+    null
+  const quoteFreshnessScore =
+    asNumber(metrics.quote_freshness_score) ??
+    asNumber(metadata?.quote_freshness_score) ??
+    null
+  const freshnessState =
+    asString(metrics.freshness_state) ??
+    asString(metadata?.freshness_state) ??
+    input.regime.freshness_state ??
+    null
+  const latencyState =
+    asString(metrics.latency_state) ??
+    asString(metadata?.latency_state) ??
+    input.regime.latency_state ??
+    null
+  const liquidityUsd = asNumber(metrics.liquidity_usd) ?? input.snapshot.market.liquidity_usd ?? input.snapshot.book?.depth_near_touch ?? null
+  const depthNearTouch = input.snapshot.book?.depth_near_touch ?? null
+  const transportMode = input.snapshot.book != null ? 'orderbook_snapshot' : 'snapshot_only'
+  const inventorySummary = uniqueStrings([
+    `inventory: preview size ${formatUsdAmount(input.sizeUsd)}`,
+    liquidityUsd != null ? `liquidity ${formatUsdAmount(liquidityUsd)}` : null,
+    depthNearTouch != null ? `depth near touch ${formatUsdAmount(depthNearTouch)}` : null,
+    makerQuoteState != null ? `quote state ${makerQuoteState}` : null,
+    input.strategySummary != null ? `strategy ${input.strategySummary}` : null,
+  ]).join('; ')
+  const adverseSelectionSummary = uniqueStrings([
+    `adverse selection: spread ${spreadBps != null ? `${Math.round(spreadBps)} bps` : 'n/a'}`,
+    `freshness score ${quoteFreshnessScore != null ? quoteFreshnessScore.toFixed(2) : 'n/a'}`,
+    `quote age ${quoteAgeMs != null ? `${Math.round(quoteAgeMs)} ms` : 'n/a'}`,
+    `freshness budget ${freshnessBudgetMs != null ? `${Math.round(freshnessBudgetMs)} ms` : 'n/a'}`,
+    freshnessState != null ? `freshness state ${freshnessState}` : null,
+    latencyState != null ? `latency state ${latencyState}` : null,
+    input.shadowSummary?.summary != null ? `shadow ${input.shadowSummary.summary}` : null,
+  ]).join('; ')
+  const quoteTransportSummary = uniqueStrings([
+    `quote transport: ${transportMode}`,
+    input.snapshot.book?.fetched_at != null
+      ? `fetched_at ${input.snapshot.book.fetched_at}`
+      : `captured_at ${input.snapshot.captured_at}`,
+    `source refs ${input.snapshot.source_urls.length}`,
+    quoteAgeMs != null ? `observed age ${Math.round(quoteAgeMs)} ms` : null,
+  ]).join('; ')
+  const blockers = uniqueStrings([
+    input.snapshot.market.active === false ? 'market_inactive' : null,
+    input.snapshot.market.accepting_orders === false ? 'market_not_accepting_orders' : null,
+    input.snapshot.market.restricted ? 'market_restricted' : null,
+    spreadBps == null ? 'maker_spread_unavailable' : null,
+    quoteAgeMs == null ? 'quote_transport_unavailable' : null,
+    freshnessBudgetMs != null && quoteAgeMs != null && quoteAgeMs > freshnessBudgetMs
+      ? 'quote_freshness_budget_exceeded'
+      : null,
+    freshnessBudgetMs != null && quoteAgeMs != null && quoteAgeMs > Math.round(freshnessBudgetMs * 0.8)
+      ? 'quote_transport_near_freshness_limit'
+      : null,
+    makerQuoteState === 'guarded' ? 'maker_quote_guard_active' : null,
+    makerQuoteState === 'blocked' ? 'maker_quote_blocked' : null,
+    quoteFreshnessScore != null && quoteFreshnessScore < 0.5 ? 'quote_freshness_score_low' : null,
+    depthNearTouch != null && input.sizeUsd > depthNearTouch * 0.06 ? 'inventory_size_exceeds_depth_guard' : null,
+    liquidityUsd != null && input.sizeUsd > liquidityUsd * 0.01 ? 'inventory_size_exceeds_liquidity_guard' : null,
+  ])
+  const riskCaps = uniqueStrings([
+    `recommended_size_usd:${input.sizeUsd.toFixed(2)}`,
+    `max_slippage_bps:${input.maxSlippageBps}`,
+    freshnessBudgetMs != null ? `quote_freshness_budget_ms:${Math.round(freshnessBudgetMs)}` : null,
+    quoteAgeMs != null ? `quote_age_ms:${Math.round(quoteAgeMs)}` : null,
+    liquidityUsd != null ? `inventory_cap_usd:${roundStrategyNumber(Math.min(input.sizeUsd, Math.max(10, liquidityUsd * 0.002)), 2).toFixed(2)}` : null,
+    depthNearTouch != null ? `depth_cap_usd:${roundStrategyNumber(Math.min(input.sizeUsd, Math.max(10, depthNearTouch * 0.05)), 2).toFixed(2)}` : null,
+  ])
+
+  return {
+    inventory_summary: inventorySummary || null,
+    adverse_selection_summary: adverseSelectionSummary || null,
+    quote_transport_summary: quoteTransportSummary || null,
+    blockers,
+    risk_caps: riskCaps,
+  }
+}
+
+export function buildStrategyExecutionIntentArtifacts(input: {
   runId: string
   snapshot: MarketSnapshot
   forecast: ForecastPacket
@@ -999,6 +1516,7 @@ function buildStrategyExecutionIntentArtifacts(input: {
   primaryCandidate: PredictionMarketStrategyCandidate | null
   strategySummary: string | null
   shadowSummary: StrategyShadowSummary | null
+  makerSpreadCaptureDiagnostics: MakerSpreadCaptureDiagnostics | null
 }): Pick<
   PredictionMarketStrategyRuntimeArtifacts,
   | 'execution_intent_preview'
@@ -1006,22 +1524,54 @@ function buildStrategyExecutionIntentArtifacts(input: {
   | 'basket_intent_preview'
   | 'strategy_trade_intent_preview'
   | 'strategy_canonical_trade_intent_preview'
+  | 'maker_spread_capture_inventory_summary'
+  | 'maker_spread_capture_adverse_selection_summary'
+  | 'maker_spread_capture_quote_transport_summary'
+  | 'maker_spread_capture_blockers'
+  | 'maker_spread_capture_risk_caps'
 > {
-  if (!input.primaryCandidate || input.strategyProfile === 'forecast_only') {
+  if (input.strategyProfile === 'forecast_only') {
     return {
       execution_intent_preview: null,
       quote_pair_intent_preview: null,
       basket_intent_preview: null,
       strategy_trade_intent_preview: null,
       strategy_canonical_trade_intent_preview: null,
+      maker_spread_capture_inventory_summary: null,
+      maker_spread_capture_adverse_selection_summary: null,
+      maker_spread_capture_quote_transport_summary: null,
+      maker_spread_capture_blockers: [],
+      maker_spread_capture_risk_caps: [],
     }
   }
 
   const sizeUsd = strategySizeUsd(input.snapshot)
-  const strategyFamily = input.primaryCandidate.kind
-  const summary = input.primaryCandidate.summary
+  const strategyFamily = input.primaryCandidate?.kind ?? (input.makerSpreadCaptureDiagnostics ? 'maker_spread_capture' : null)
+  const summary = input.primaryCandidate?.summary ?? input.strategySummary
+
+  if (!strategyFamily) {
+    return {
+      execution_intent_preview: null,
+      quote_pair_intent_preview: null,
+      basket_intent_preview: null,
+      strategy_trade_intent_preview: null,
+      strategy_canonical_trade_intent_preview: null,
+      maker_spread_capture_inventory_summary: null,
+      maker_spread_capture_adverse_selection_summary: null,
+      maker_spread_capture_quote_transport_summary: null,
+      maker_spread_capture_blockers: [],
+      maker_spread_capture_risk_caps: [],
+    }
+  }
 
   if (strategyFamily === 'maker_spread_capture') {
+    const makerDiagnostics = input.makerSpreadCaptureDiagnostics
+    const makerSummary = uniqueStrings([
+      summary,
+      makerDiagnostics?.inventory_summary ?? null,
+      makerDiagnostics?.adverse_selection_summary ?? null,
+      makerDiagnostics?.quote_transport_summary ?? null,
+    ]).join(' | ')
     const quotePairIntentPreview: QuotePairIntentPreview = {
       schema_version: input.snapshot.schema_version,
       preview_id: `${input.runId}:quote-pair-preview`,
@@ -1044,9 +1594,14 @@ function buildStrategyExecutionIntentArtifacts(input: {
         },
       ],
       max_slippage_bps: Math.max(10, Math.round(input.snapshot.spread_bps ?? input.recommendation.spread_bps ?? 25)),
-      summary,
+      summary: makerSummary,
       metadata: {
         strategy_summary: input.strategySummary,
+        maker_spread_capture_inventory_summary: makerDiagnostics?.inventory_summary ?? null,
+        maker_spread_capture_adverse_selection_summary: makerDiagnostics?.adverse_selection_summary ?? null,
+        maker_spread_capture_quote_transport_summary: makerDiagnostics?.quote_transport_summary ?? null,
+        maker_spread_capture_blockers: makerDiagnostics?.blockers ?? [],
+        maker_spread_capture_risk_caps: makerDiagnostics?.risk_caps ?? [],
       },
     }
 
@@ -1056,6 +1611,11 @@ function buildStrategyExecutionIntentArtifacts(input: {
       basket_intent_preview: null,
       strategy_trade_intent_preview: null,
       strategy_canonical_trade_intent_preview: null,
+      maker_spread_capture_inventory_summary: makerDiagnostics?.inventory_summary ?? null,
+      maker_spread_capture_adverse_selection_summary: makerDiagnostics?.adverse_selection_summary ?? null,
+      maker_spread_capture_quote_transport_summary: makerDiagnostics?.quote_transport_summary ?? null,
+      maker_spread_capture_blockers: makerDiagnostics?.blockers ?? [],
+      maker_spread_capture_risk_caps: makerDiagnostics?.risk_caps ?? [],
     }
   }
 
@@ -1107,6 +1667,11 @@ function buildStrategyExecutionIntentArtifacts(input: {
       basket_intent_preview: basketIntentPreview,
       strategy_trade_intent_preview: null,
       strategy_canonical_trade_intent_preview: null,
+      maker_spread_capture_inventory_summary: null,
+      maker_spread_capture_adverse_selection_summary: null,
+      maker_spread_capture_quote_transport_summary: null,
+      maker_spread_capture_blockers: [],
+      maker_spread_capture_risk_caps: [],
     }
   }
 
@@ -1139,6 +1704,11 @@ function buildStrategyExecutionIntentArtifacts(input: {
       basket_intent_preview: null,
       strategy_trade_intent_preview: tradeIntentPreview,
       strategy_canonical_trade_intent_preview: tradeIntentPreview,
+      maker_spread_capture_inventory_summary: null,
+      maker_spread_capture_adverse_selection_summary: null,
+      maker_spread_capture_quote_transport_summary: null,
+      maker_spread_capture_blockers: [],
+      maker_spread_capture_risk_caps: [],
     }
   }
 
@@ -1167,6 +1737,11 @@ function buildStrategyExecutionIntentArtifacts(input: {
     basket_intent_preview: null,
     strategy_trade_intent_preview: null,
     strategy_canonical_trade_intent_preview: null,
+    maker_spread_capture_inventory_summary: null,
+    maker_spread_capture_adverse_selection_summary: null,
+    maker_spread_capture_quote_transport_summary: null,
+    maker_spread_capture_blockers: [],
+    maker_spread_capture_risk_caps: [],
   }
 }
 
@@ -1302,6 +1877,16 @@ function buildPredictionMarketStrategyRuntimeArtifacts(input: {
       decision.shadow_watch_summary.summary,
     ]),
   }
+  const makerSpreadCaptureDiagnostics = buildMakerSpreadCaptureDiagnostics({
+    snapshot: input.snapshot,
+    makerSpreadCaptureEnabled: enabledStrategyFamilies.includes('maker_spread_capture'),
+    regime,
+    strategyCandidate: primaryCandidate?.kind === 'maker_spread_capture' ? primaryCandidate : null,
+    strategySummary: decision.summary,
+    shadowSummary: strategyShadowSummary,
+    sizeUsd: strategySizeUsd(input.snapshot),
+    maxSlippageBps: Math.max(10, Math.round(input.snapshot.spread_bps ?? input.recommendation.spread_bps ?? 25)),
+  })
   const executionIntentArtifacts = buildStrategyExecutionIntentArtifacts({
     runId: input.runId,
     snapshot: input.snapshot,
@@ -1311,6 +1896,7 @@ function buildPredictionMarketStrategyRuntimeArtifacts(input: {
     primaryCandidate,
     strategySummary: decision.summary,
     shadowSummary: strategyShadowSummary,
+    makerSpreadCaptureDiagnostics,
   })
   const strongestAnomaly = [...resolutionAnomalies].sort((left, right) =>
     strategySeverityRank(right.severity) - strategySeverityRank(left.severity),
@@ -1474,6 +2060,13 @@ function buildPredictionMarketStrategyRuntimeArtifacts(input: {
       enabled_strategy_families: enabledStrategyFamilies,
       resolution_anomalies: resolutionAnomalies.map((anomaly) => anomaly.summary),
       candidate_summaries: filteredCandidates.map((candidate) => candidate.summary),
+      ...(makerSpreadCaptureDiagnostics != null ? {
+        maker_spread_capture_inventory_summary: makerSpreadCaptureDiagnostics.inventory_summary,
+        maker_spread_capture_adverse_selection_summary: makerSpreadCaptureDiagnostics.adverse_selection_summary,
+        maker_spread_capture_quote_transport_summary: makerSpreadCaptureDiagnostics.quote_transport_summary,
+        maker_spread_capture_blockers: makerSpreadCaptureDiagnostics.blockers,
+        maker_spread_capture_risk_caps: makerSpreadCaptureDiagnostics.risk_caps,
+      } : {}),
     },
     decision_id: `${input.runId}:strategy-decision`,
     candidate_refs: filteredCandidates.map((candidate) => candidate.candidate_id),
@@ -1510,6 +2103,11 @@ function buildPredictionMarketStrategyRuntimeArtifacts(input: {
     resolution_anomalies: resolutionAnomalies.map((anomaly) => anomaly.summary),
     strategy_trade_intent_preview: executionIntentArtifacts.strategy_trade_intent_preview,
     strategy_canonical_trade_intent_preview: executionIntentArtifacts.strategy_canonical_trade_intent_preview,
+    maker_spread_capture_inventory_summary: executionIntentArtifacts.maker_spread_capture_inventory_summary,
+    maker_spread_capture_adverse_selection_summary: executionIntentArtifacts.maker_spread_capture_adverse_selection_summary,
+    maker_spread_capture_quote_transport_summary: executionIntentArtifacts.maker_spread_capture_quote_transport_summary,
+    maker_spread_capture_blockers: executionIntentArtifacts.maker_spread_capture_blockers,
+    maker_spread_capture_risk_caps: executionIntentArtifacts.maker_spread_capture_risk_caps,
   }
 }
 
@@ -1641,6 +2239,649 @@ function extractDecisionPacketFromEvidencePackets(evidencePackets: EvidencePacke
   }
 
   return undefined
+}
+
+type PredictionMarketResearchMemoryCapture = {
+  entry: {
+    memory_id: string
+    provider_kind: string
+    subject_id: string
+    summary: string
+  } | null
+  artifact: PredictionMarketJsonArtifact | null
+}
+
+function capturePredictionMarketResearchMemory(input: {
+  runId: string
+  workspaceId: number
+  venue: PredictionMarketVenue
+  marketId: string
+  marketSlug?: string | null
+  recommendation: MarketRecommendationPacket
+  forecast: ForecastPacket
+  researchSidecar?: MarketResearchSidecar | null
+  strategyName?: string | null
+  marketRegime?: string | null
+  requestMode?: PredictionMarketAdviceRequestMode | null
+  responseVariant?: PredictionMarketAdviceResponseVariant | null
+}): PredictionMarketResearchMemoryCapture {
+  const pipelineTrace = input.researchSidecar?.synthesis.pipeline_trace
+  const pipelineId = input.researchSidecar?.pipeline_version_metadata.pipeline_id
+  if (!pipelineTrace || !pipelineId) {
+    return {
+      entry: null,
+      artifact: null,
+    }
+  }
+
+  try {
+    const runtime = getPredictionMarketResearchMemoryRuntime()
+    runtime.adapter.registerSimulation({
+      simulation_id: input.runId,
+      created_at: input.researchSidecar?.generated_at ?? null,
+      source_ref: pipelineTrace.trace_id,
+      tags: uniqueStrings([
+        'prediction-markets',
+        input.venue,
+        input.recommendation.action,
+        input.strategyName ?? null,
+      ]),
+      metadata: {
+        workspace_id: input.workspaceId,
+        market_id: input.marketId,
+        market_slug: input.marketSlug ?? null,
+        provider_kind: runtime.provider_kind,
+      },
+    })
+    const entry = runtime.adapter.rememberResearchTrace({
+      trace_id: pipelineTrace.trace_id,
+      pipeline_id: pipelineId,
+      venue: input.venue,
+      market_id: input.marketId,
+      generated_at: input.researchSidecar?.generated_at ?? new Date().toISOString(),
+      summary:
+        input.researchSidecar?.synthesis.supercompact_context.compact_summary
+        || pipelineTrace.summary,
+      trace: pipelineTrace,
+      tags: uniqueStrings([
+        input.requestMode ?? null,
+        input.responseVariant ?? null,
+        input.recommendation.action,
+        input.strategyName ?? null,
+      ]),
+      metadata: {
+        run_id: input.runId,
+        workspace_id: input.workspaceId,
+        market_slug: input.marketSlug ?? null,
+        recommendation: input.recommendation.action,
+        primary_strategy: input.strategyName ?? null,
+        market_regime: input.marketRegime ?? null,
+        provider_kind: runtime.provider_kind,
+      },
+    })
+    runtime.adapter.rememberCrossSimulationObservation({
+      simulation_id: input.runId,
+      agent_id: 'research-pipeline',
+      topic: input.marketId,
+      content:
+        input.researchSidecar?.synthesis.supercompact_context.compact_summary
+        || pipelineTrace.summary,
+      tags: uniqueStrings([
+        'research',
+        input.venue,
+        input.recommendation.action,
+        input.strategyName ?? null,
+      ]),
+      source_ref: pipelineTrace.trace_id,
+      metadata: {
+        pipeline_id: pipelineId,
+        recommendation: input.recommendation.action,
+        probability_yes: input.forecast.probability_yes,
+      },
+      created_at: input.researchSidecar?.generated_at ?? null,
+    })
+    runtime.adapter.rememberForesightForecast({
+      forecast_id: `${input.runId}:research_forecast`,
+      simulation_id: input.runId,
+      subject_id: input.marketId,
+      expected_outcome: `${input.recommendation.action}:${input.recommendation.side ?? 'none'}`,
+      confidence: input.forecast.confidence ?? input.recommendation.confidence ?? null,
+      generated_at: input.researchSidecar?.generated_at ?? null,
+      tags: uniqueStrings([
+        input.venue,
+        input.recommendation.action,
+        input.recommendation.side ?? null,
+      ]),
+      metadata: {
+        probability_yes: input.forecast.probability_yes,
+        fair_value_yes: input.recommendation.fair_value_yes,
+      },
+    })
+    const simulationSummary = runtime.adapter.summarizeSimulation(input.runId)
+    return {
+      entry: {
+        memory_id: entry.memory_id,
+        provider_kind: runtime.provider_kind,
+        subject_id: entry.subject_id,
+        summary:
+          typeof entry.content === 'object' && entry.content && 'summary' in entry.content
+            ? String((entry.content as Record<string, unknown>).summary ?? '')
+            : pipelineTrace.summary,
+      },
+      artifact: {
+        simulation_id: simulationSummary.simulation_id,
+        provider_kind: runtime.provider_kind,
+        memory_count: simulationSummary.memory_count,
+        top_memories: simulationSummary.top_memories.slice(0, 5).map((memory) => ({
+          memory_id: memory.memory_id,
+          kind: memory.kind,
+          score: memory.score,
+          subject_id: memory.subject_id,
+          tags: memory.tags,
+        })),
+        topic_distribution: simulationSummary.topic_distribution,
+        validation_summary: simulationSummary.validation_summary,
+        summary: `memory=${simulationSummary.memory_count} provider=${runtime.provider_kind} validations=${simulationSummary.validation_summary.validations}`,
+      },
+    }
+  } catch {
+    return {
+      entry: null,
+      artifact: null,
+    }
+  }
+}
+
+function buildPredictionMarketCopiedPatternArtifacts(input: {
+  runId: string
+  venue: PredictionMarketVenue
+  snapshot: MarketSnapshot
+  resolutionPolicy: ResolutionPolicy
+  evidencePackets: EvidencePacket[]
+  forecast: ForecastPacket
+  recommendation: MarketRecommendationPacket
+  evaluationHistory?: ForecastEvaluationRecord[]
+  evaluationHistorySourceSummary?: string | null
+  researchSidecar?: MarketResearchSidecar | null
+  strategyDecision?: StrategyDecisionPacket | null
+  marketGraph?: PredictionMarketMarketGraph | null
+  researchMemorySummary?: PredictionMarketJsonArtifact | null
+}): PredictionMarketCopiedPatternArtifacts {
+  const marketId = input.snapshot.market.market_id
+  const marketQuestion = input.snapshot.market.question
+  const asOf =
+    input.recommendation.produced_at
+    || input.forecast.produced_at
+    || input.snapshot.captured_at
+    || new Date().toISOString()
+  const decisionPacket = extractDecisionPacketFromEvidencePackets(input.evidencePackets) ?? null
+  const strategyExecutionIntentPreview = asRecord(input.strategyDecision?.execution_intent_preview)
+  const strategyTradeIntentPreview = asRecord(strategyExecutionIntentPreview?.trade_intent_preview)
+  const normalizedBookLevels = (
+    levels: Array<{ price?: number | null; size?: number | null }> | null | undefined,
+  ) =>
+    (levels ?? [])
+      .map((level) => ({
+        price: asNumber(level?.price),
+        size: asNumber(level?.size),
+      }))
+      .filter((level): level is { price: number; size: number } => level.price != null && level.size != null)
+  const researchSidecarSummary =
+    input.researchSidecar?.synthesis.supercompact_context.compact_summary
+    ?? input.researchSidecar?.synthesis.pipeline_trace.summary
+    ?? 'research sidecar'
+  const worldStateSpine = buildPredictionMarketWorldStateSpine({
+    market_id: marketId,
+    market_question: marketQuestion,
+    venue: input.venue,
+    as_of: asOf,
+    regime: input.strategyDecision?.market_regime?.label ?? null,
+    source_audit: {
+      market_id: marketId,
+      as_of: asOf,
+      sources: [
+        {
+          kind: 'market_data',
+          title: 'Market snapshot',
+          url: input.snapshot.market.source_urls?.[0] ?? null,
+          captured_at: input.snapshot.captured_at,
+          trust: 0.88,
+          freshness: 0.9,
+          evidence_strength: 0.82,
+          source_refs: uniqueStrings([input.snapshot.market.market_id, input.snapshot.market.slug ?? null]),
+        },
+        {
+          kind: 'official_docs',
+          title: 'Resolution policy',
+          url: input.resolutionPolicy.primary_sources?.[0] ?? null,
+          captured_at: input.resolutionPolicy.evaluated_at,
+          trust: input.resolutionPolicy.manual_review_required ? 0.62 : 0.84,
+          freshness: 0.7,
+          evidence_strength: input.resolutionPolicy.status === 'eligible' ? 0.82 : 0.58,
+          notes: input.resolutionPolicy.reasons,
+          source_refs: input.resolutionPolicy.primary_sources ?? [],
+        },
+        ...input.evidencePackets.map((packet) => ({
+          kind:
+            packet.type === 'market_data'
+              || packet.type === 'orderbook'
+              || packet.type === 'history'
+              ? 'market_data'
+              : packet.type === 'system_note' || packet.type === 'manual_thesis'
+                  ? 'operator_brief'
+                  : 'other',
+          title: packet.title,
+          url: packet.source_url ?? null,
+          captured_at: packet.captured_at,
+          trust: packet.type === 'market_data' || packet.type === 'orderbook' ? 0.82 : 0.56,
+          freshness: packet.type === 'market_data' || packet.type === 'orderbook' ? 0.88 : 0.62,
+          evidence_strength: packet.type === 'market_data' || packet.type === 'orderbook' ? 0.8 : 0.58,
+          notes: [packet.summary],
+          source_refs: uniqueStrings([packet.evidence_id, packet.source_url ?? null]),
+        })),
+        ...(decisionPacket ? [{
+          kind: 'decision_packet' as const,
+          title: 'Decision packet',
+          captured_at: asOf,
+          trust: 0.74,
+          freshness: 0.7,
+          evidence_strength: 0.76,
+          notes: [decisionPacket.rationale_summary],
+          source_refs: uniqueStrings([
+            decisionPacket.correlation_id,
+            ...(decisionPacket.source_packet_refs ?? []),
+          ]),
+        }] : []),
+        ...(input.researchSidecar ? [{
+          kind: 'operator_brief' as const,
+          title: 'Research sidecar synthesis',
+          captured_at: input.researchSidecar.generated_at,
+          trust: 0.66,
+          freshness: 0.72,
+          evidence_strength: 0.64,
+          notes: [researchSidecarSummary],
+          source_refs: uniqueStrings([
+            input.researchSidecar.generated_at ?? null,
+          ]),
+        }] : []),
+      ],
+    },
+    rules_lineage: {
+      market_id: marketId,
+      as_of: asOf,
+      rule_set_name: `${input.venue}-resolution-rules`,
+      clauses: [
+        {
+          rule_id: 'resolution_text',
+          title: 'Resolution text',
+          text: input.resolutionPolicy.resolution_text || input.snapshot.market.description || marketQuestion,
+          source_refs: input.resolutionPolicy.primary_sources ?? [],
+          status: input.resolutionPolicy.manual_review_required ? 'conflicted' : 'active',
+          introduced_at: input.resolutionPolicy.evaluated_at,
+        },
+        ...input.resolutionPolicy.reasons.map((reason, index) => ({
+          rule_id: `resolution_reason_${index + 1}`,
+          title: `Resolution reason ${index + 1}`,
+          text: reason,
+          source_refs: input.resolutionPolicy.primary_sources ?? [],
+          status: reason.toLowerCase().includes('manual') ? 'conflicted' as const : 'active' as const,
+          introduced_at: input.resolutionPolicy.evaluated_at,
+        })),
+      ],
+    },
+    catalyst_timeline: {
+      market_id: marketId,
+      as_of: asOf,
+      catalysts: [
+        input.snapshot.market.end_at ? {
+          label: 'Market end',
+          expected_at: input.snapshot.market.end_at,
+          status: 'pending' as const,
+          direction: 'neutral' as const,
+          urgency: 0.9,
+          source_refs: uniqueStrings([input.snapshot.market.market_id, input.snapshot.market.slug ?? null]),
+          impact_hint: 'Trading window closes at market end.',
+        } : null,
+        input.recommendation.next_review_at ? {
+          label: 'Next review',
+          expected_at: input.recommendation.next_review_at,
+          status: 'pending' as const,
+          direction: 'neutral' as const,
+          urgency: 0.55,
+          source_refs: uniqueStrings([marketId, input.recommendation.resolution_policy_ref ?? null]),
+          impact_hint: 'Operator review checkpoint.',
+        } : null,
+        input.resolutionPolicy.evaluated_at ? {
+          label: 'Resolution evaluation',
+          occurred_at: input.resolutionPolicy.evaluated_at,
+          status: 'confirmed' as const,
+          direction: 'neutral' as const,
+          urgency: 0.4,
+          source_refs: input.resolutionPolicy.primary_sources ?? [],
+          impact_hint: 'Rules were last evaluated here.',
+        } : null,
+      ].filter(isPresent),
+    },
+    price_signal: {
+      midpoint_yes: input.snapshot.midpoint_yes ?? input.snapshot.yes_price ?? null,
+      market_price_yes: input.recommendation.market_price_yes ?? input.snapshot.yes_price ?? null,
+      fair_value_yes: input.recommendation.fair_value_yes ?? input.forecast.probability_yes ?? null,
+      spread_bps: input.snapshot.spread_bps ?? null,
+    },
+    ticket_kind: input.recommendation.action === 'bet' ? 'approval' : 'analysis',
+    action: input.recommendation.action,
+    size_usd: firstPositiveNumber(
+      asNumber(strategyTradeIntentPreview?.size_usd),
+      input.recommendation.requires_manual_review ? 25 : 10,
+    ),
+    limit_price_yes: input.recommendation.market_ask_yes ?? input.snapshot.best_ask_yes ?? null,
+    operator_notes: uniqueStrings([
+      input.recommendation.rationale,
+      ...(input.recommendation.reasons ?? []),
+    ]),
+  })
+  const binaryParity = assessBinaryParity({
+    market_id: marketId,
+    yes_price: input.snapshot.yes_price,
+    no_price: input.snapshot.no_price,
+    fee_rate: 0.02,
+    min_edge_bps: 1,
+  })
+  const orderbookImbalance = assessOrderbookImbalance({
+    market_id: marketId,
+    question: marketQuestion,
+    token_id: input.snapshot.yes_token_id ?? null,
+    best_bid: input.snapshot.best_bid_yes,
+    best_ask: input.snapshot.best_ask_yes,
+    spread: input.snapshot.best_ask_yes != null && input.snapshot.best_bid_yes != null
+      ? Math.max(0, input.snapshot.best_ask_yes - input.snapshot.best_bid_yes)
+      : null,
+    liquidity_usd: input.snapshot.market.liquidity_usd,
+    volume_24h_usd: input.snapshot.market.volume_24h_usd,
+    fetched_at: input.snapshot.captured_at,
+    bids: normalizedBookLevels(input.snapshot.book?.bids),
+    asks: normalizedBookLevels(input.snapshot.book?.asks),
+    market_yes_price: input.snapshot.yes_price,
+    fee_rate: 0.02,
+  })
+  const oddsDivergence = assessOddsDivergence({
+    market_id: marketId,
+    question: marketQuestion,
+    market_yes_price: input.snapshot.yes_price,
+    fee_rate: 0.02,
+    bookmaker_quotes: [],
+  })
+  const spreadCapture = assessSpreadCapture({
+    market_id: marketId,
+    question: marketQuestion,
+    best_bid: input.snapshot.best_bid_yes ?? input.snapshot.yes_price,
+    best_ask: input.snapshot.best_ask_yes ?? input.snapshot.yes_price,
+    fee_rate: 0.02,
+    freshness_gap_ms: null,
+    freshness_budget_ms: null,
+    inventory_bias: input.strategyDecision?.strategy_family === 'maker_spread_capture' ? 0.1 : 0,
+  })
+  const kellySizing = calculateKellySizing({
+    market_id: marketId,
+    question: marketQuestion,
+    probability_yes: input.forecast.probability_yes,
+    market_yes_price: input.snapshot.yes_price,
+    bankroll_usd: 1_000,
+    max_position_usd: firstPositiveNumber(
+      asNumber(strategyTradeIntentPreview?.size_usd),
+      100,
+    ) ?? 100,
+    fee_rate: 0.02,
+    preferred_side: input.recommendation.side ?? null,
+  })
+  const comparableGroup = input.marketGraph?.comparable_groups?.[0] ?? null
+  const multiOutcomeParity = comparableGroup && comparableGroup.market_ids.length > 1
+    ? assessMultiOutcomeParity({
+      market_group_id: comparableGroup.group_id,
+      min_edge_bps: 1,
+      legs: comparableGroup.market_ids.map((market_id) => ({
+        market_id,
+        yes_price: input.snapshot.yes_price / comparableGroup.market_ids.length,
+        fee_rate: 0.02,
+      })),
+    })
+    : null
+  const quantAssessments = [
+    orderbookImbalance,
+    oddsDivergence,
+    binaryParity,
+    spreadCapture,
+    kellySizing,
+    multiOutcomeParity,
+  ].filter(isPresent)
+  const viableQuantSignals = quantAssessments.filter((assessment) => assessment.viable)
+  const quant_signal_bundle: PredictionMarketJsonArtifact = {
+    run_id: input.runId,
+    market_id: marketId,
+    generated_at: asOf,
+    assessments: {
+      orderbook_imbalance: orderbookImbalance,
+      odds_divergence: oddsDivergence,
+      binary_parity: binaryParity,
+      multi_outcome_parity: multiOutcomeParity,
+      spread_capture: spreadCapture,
+      kelly_sizing: kellySizing,
+    },
+    viable_count: viableQuantSignals.length,
+    viable_kinds: viableQuantSignals.map((assessment) => String(assessment.kind)),
+    summary:
+      viableQuantSignals.length > 0
+        ? `${viableQuantSignals.length} quant signals are viable; strongest=${String(viableQuantSignals[0]?.kind ?? 'none')}`
+        : 'Quant signal pack collected but no signal clears fees, spread and viability gates.',
+  }
+  const resolved_history = buildResolvedHistoryDataset({
+    runId: input.runId,
+    venue: input.venue,
+    marketId,
+    generatedAt: asOf,
+    evaluationHistory: input.evaluationHistory,
+    defaults: {
+      liquidity_usd: input.snapshot.market.liquidity_usd ?? null,
+      volume_24h_usd: input.snapshot.market.volume_24h_usd ?? null,
+      spread_bps: input.snapshot.spread_bps ?? null,
+      size_usd: firstPositiveNumber(
+        asNumber(strategyTradeIntentPreview?.size_usd),
+        input.recommendation.requires_manual_review ? 25 : 10,
+      ) ?? null,
+      category: input.strategyDecision?.strategy_family ?? null,
+    },
+  })
+  resolved_history.source_summary = input.evaluationHistorySourceSummary ?? null
+  if (input.evaluationHistorySourceSummary) {
+    resolved_history.notes = uniqueStrings([
+      ...resolved_history.notes,
+      input.evaluationHistorySourceSummary,
+    ])
+  }
+  const cost_model_report = buildPredictionMarketCostModelReport({
+    runId: input.runId,
+    venue: input.venue,
+    marketId,
+    generatedAt: asOf,
+    points: resolved_history.points,
+  })
+  const walk_forward_report = buildPredictionMarketWalkForwardReport({
+    runId: input.runId,
+    venue: input.venue,
+    marketId,
+    generatedAt: asOf,
+    points: resolved_history.points,
+    options: {
+      weight_by_liquidity: true,
+    },
+  })
+  const calibration_report_base = buildCalibrationReport(
+    toCalibrationPointsFromResolvedHistory(resolved_history.points, {
+      weight_by_liquidity: true,
+    }),
+    {
+      bin_count: 10,
+      minimum_points_for_summary: 3,
+    },
+  )
+  const calibration_report: CalibrationReport = {
+    ...calibration_report_base,
+    notes: uniqueStrings([
+      ...calibration_report_base.notes,
+      `resolved_history_points:${resolved_history.resolved_records}`,
+      `walk_forward_windows:${walk_forward_report.total_windows}`,
+      cost_model_report.average_net_edge_bps == null
+        ? null
+        : `mean_net_edge_bps:${cost_model_report.average_net_edge_bps}`,
+    ]),
+  }
+  let ledgerEntries: DecisionLedgerEntry[] = []
+  ledgerEntries = appendDecisionLedgerEntry(ledgerEntries, {
+    entry_type: 'PARAM_CHANGED',
+    market_id: marketId,
+    question: marketQuestion,
+    cycle_id: input.runId,
+    explanation: `World-state snapshot recorded for ${marketId}.`,
+    tags: ['world_state', input.venue],
+    source: 'clonehorse',
+    confidence: worldStateSpine.world_state.confidence_score,
+    data: {
+      stage: 'scan',
+      status: 'resolved',
+      market_id: marketId,
+      world_state_id: worldStateSpine.world_state.world_state_id,
+      regime: input.strategyDecision?.market_regime?.label ?? null,
+    },
+  }).entries
+  ledgerEntries = appendDecisionLedgerEntry(ledgerEntries, {
+    entry_type: input.recommendation.action === 'bet' ? 'BET_PLACED' : 'BET_SKIPPED',
+    market_id: marketId,
+    question: marketQuestion,
+    cycle_id: input.runId,
+    explanation: worldStateSpine.ticket_payload.summary,
+    tags: ['ticket', input.recommendation.action, input.recommendation.side ?? 'flat'],
+    actor: 'swarm',
+    source: 'service',
+    confidence: input.recommendation.confidence ?? worldStateSpine.world_state.confidence_score,
+    data: {
+      stage: 'ticket',
+      status: input.recommendation.action === 'bet' ? 'approved' : 'skipped',
+      action_type: input.recommendation.action,
+      side: input.recommendation.side,
+      edge_bps: input.recommendation.edge_bps,
+      size_usd: worldStateSpine.ticket_payload.size_usd,
+      blocked_reason: input.recommendation.action === 'bet' ? null : 'no_trade_default',
+    },
+  }).entries
+  ledgerEntries = appendDecisionLedgerEntry(ledgerEntries, {
+    entry_type: 'CALIBRATION_UPDATE',
+    market_id: marketId,
+    question: marketQuestion,
+    cycle_id: input.runId,
+    explanation: calibration_report.notes.join('; ') || 'Calibration module attached without resolved outcomes yet.',
+    tags: ['calibration'],
+    actor: 'swarm',
+    source: 'polfish',
+    confidence: null,
+    data: {
+      stage: 'forecast',
+      status: calibration_report.total_points > 0 ? 'resolved' : 'running',
+      calibration_error: calibration_report.calibration_error,
+      brier_score: calibration_report.brier_score,
+      note_count: calibration_report.notes.length,
+    },
+  }).entries
+  const autopilotRecords = [
+    buildAutopilotCycleRecord({
+      cycle_id: input.runId,
+      stage: 'scan',
+      status: 'resolved',
+      market_id: marketId,
+      action_type: 'scan',
+      confidence: worldStateSpine.world_state.confidence_score,
+      created_at: asOf,
+      completed_at: asOf,
+      note: worldStateSpine.source_audit.summary,
+    }),
+    buildAutopilotCycleRecord({
+      cycle_id: input.runId,
+      stage: 'research',
+      status: input.researchSidecar ? 'resolved' : 'skipped',
+      market_id: marketId,
+      action_type: 'research',
+      confidence: input.forecast.confidence ?? null,
+      created_at: asOf,
+      completed_at: asOf,
+      note:
+        input.researchSidecar?.synthesis.supercompact_context.compact_summary
+        ?? input.researchSidecar?.synthesis.pipeline_trace.summary
+        ?? 'No research sidecar attached.',
+    }),
+    buildAutopilotCycleRecord({
+      cycle_id: input.runId,
+      stage: 'forecast',
+      status: 'approved',
+      market_id: marketId,
+      action_type: 'forecast',
+      edge_bps: input.recommendation.edge_bps,
+      confidence: input.forecast.confidence ?? input.recommendation.confidence ?? null,
+      created_at: asOf,
+      completed_at: asOf,
+      note: `forecast_yes=${formatPercent(input.forecast.probability_yes)}`,
+    }),
+    buildAutopilotCycleRecord({
+      cycle_id: input.runId,
+      stage: 'ticket',
+      status: input.recommendation.action === 'bet' ? 'approved' : 'skipped',
+      market_id: marketId,
+      action_type: input.recommendation.action,
+      edge_bps: input.recommendation.edge_bps,
+      confidence: input.recommendation.confidence ?? null,
+      created_at: asOf,
+      completed_at: asOf,
+      blocked_reason: input.recommendation.action === 'bet' ? null : 'no_trade_default',
+      note: worldStateSpine.ticket_payload.summary,
+    }),
+  ]
+  const autopilot_cycle_summary = summarizeAutopilotCycles(autopilotRecords, {
+    calibration_report,
+    ledger_entries: ledgerEntries,
+  })
+  ledgerEntries = appendDecisionLedgerEntry(ledgerEntries, {
+    entry_type: 'CYCLE_SUMMARY',
+    market_id: marketId,
+    question: marketQuestion,
+    cycle_id: input.runId,
+    explanation: `Autopilot cycle health is ${autopilot_cycle_summary.overview.health}.`,
+    tags: ['autopilot', autopilot_cycle_summary.overview.health],
+    actor: 'swarm',
+    source: 'polfish',
+    confidence: input.recommendation.confidence ?? null,
+    data: {
+      stage: 'monitor',
+      status: autopilot_cycle_summary.overview.health === 'blocked' ? 'blocked' : 'resolved',
+      edge_bps: input.recommendation.edge_bps,
+      health: autopilot_cycle_summary.overview.health,
+      total_cycles: autopilot_cycle_summary.total_cycles,
+    },
+  }).entries
+  const decision_ledger: PredictionMarketCopiedPatternArtifacts['decision_ledger'] = {
+    ledger_id: `${input.runId}:decision-ledger`,
+    entries: ledgerEntries,
+    summary: summarizeDecisionLedgerEntries(ledgerEntries),
+  }
+
+  return {
+    ...worldStateSpine,
+    quant_signal_bundle,
+    decision_ledger,
+    calibration_report,
+    resolved_history: asJsonArtifact(resolved_history),
+    cost_model_report: asJsonArtifact(cost_model_report),
+    walk_forward_report: asJsonArtifact(walk_forward_report),
+    autopilot_cycle_summary,
+    research_memory_summary: input.researchMemorySummary ?? null,
+  }
 }
 
 function buildPredictionMarketPacketBundle(input: {
@@ -1928,8 +3169,8 @@ function buildPredictionMarketAdvisorArchitecture(input: {
         ].filter(isPresent),
         contract_ids: [],
         summary: benchmarkGateBlocksLive
-          ? 'Execution remains preflight-only in the autonomous prediction subproject; live promotion is still blocked by the benchmark gate.'
-          : 'Execution remains preflight-only in the autonomous prediction subproject.',
+          ? 'Execution stays preflight-first in the autonomous prediction subproject; governed live materialization is still blocked by the benchmark gate.'
+          : 'Execution stays preflight-first in the autonomous prediction subproject; governed live materialization still requires an approved live intent and a configured transport.',
         metadata: {
           trade_intent_guard_verdict: input.tradeIntentGuard?.verdict ?? null,
           trade_intent_guard_blocked_reasons: input.tradeIntentGuard?.blocked_reasons ?? [],
@@ -1975,6 +3216,34 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function deriveTimesFMCrossVenueGapBps(
+  crossVenueIntelligence: PredictionMarketCrossVenueIntelligence | null | undefined,
+): number | null {
+  const highestConfidenceCandidate = crossVenueIntelligence?.summary?.highest_confidence_candidate ?? null
+  const candidateGap =
+    asFiniteNumber(highestConfidenceCandidate?.net_spread_bps)
+    ?? asFiniteNumber(highestConfidenceCandidate?.gross_spread_bps)
+    ?? null
+  if (candidateGap != null) return candidateGap
+
+  for (const evaluation of crossVenueIntelligence?.evaluations ?? []) {
+    const executableEdge = asRecord(evaluation.executable_edge)
+    const evaluationGap =
+      asFiniteNumber(executableEdge?.gap_bps)
+      ?? asFiniteNumber(executableEdge?.price_gap_bps)
+      ?? asFiniteNumber(evaluation.arbitrage_candidate?.net_spread_bps)
+      ?? asFiniteNumber(evaluation.arbitrage_candidate?.gross_spread_bps)
+      ?? null
+    if (evaluationGap != null) return evaluationGap
+  }
+
+  return null
 }
 
 function asSurfaceRecord(value: unknown): PredictionMarketReplaySurface | null {
@@ -3281,6 +4550,18 @@ function enrichPredictionMarketRunSummaryWithArtifactAudit(
   })
   const hasRuntimeHints = summary.artifact_refs.some((artifactRef) =>
     artifactRef.artifact_type === 'research_sidecar' ||
+    artifactRef.artifact_type === 'timesfm_sidecar' ||
+    artifactRef.artifact_type === 'source_audit' ||
+    artifactRef.artifact_type === 'world_state' ||
+    artifactRef.artifact_type === 'ticket_payload' ||
+    artifactRef.artifact_type === 'quant_signal_bundle' ||
+    artifactRef.artifact_type === 'decision_ledger' ||
+    artifactRef.artifact_type === 'calibration_report' ||
+    artifactRef.artifact_type === 'resolved_history' ||
+    artifactRef.artifact_type === 'cost_model_report' ||
+    artifactRef.artifact_type === 'walk_forward_report' ||
+    artifactRef.artifact_type === 'autopilot_cycle_summary' ||
+    artifactRef.artifact_type === 'research_memory_summary' ||
     artifactRef.artifact_type === 'strategy_candidate_packet' ||
     artifactRef.artifact_type === 'strategy_decision_packet' ||
     artifactRef.artifact_type === 'strategy_shadow_summary' ||
@@ -3321,6 +4602,18 @@ function enrichPredictionMarketRunSummaryWithArtifactAudit(
       )
       const multiVenueExecution = (findArtifact('multi_venue_execution') ?? null) as MultiVenueExecution | null
       const researchSidecar = (findArtifact('research_sidecar') ?? null) as MarketResearchSidecar | null
+      const timesfmSidecar = (findArtifact('timesfm_sidecar') ?? null) as PredictionMarketTimesFMSidecar | null
+      const sourceAudit = (findArtifact('source_audit') ?? null) as PredictionMarketJsonArtifact | null
+      const worldState = (findArtifact('world_state') ?? null) as PredictionMarketJsonArtifact | null
+      const ticketPayload = (findArtifact('ticket_payload') ?? null) as PredictionMarketJsonArtifact | null
+      const quantSignalBundle = (findArtifact('quant_signal_bundle') ?? null) as PredictionMarketJsonArtifact | null
+      const decisionLedger = (findArtifact('decision_ledger') ?? null) as PredictionMarketJsonArtifact | null
+      const calibrationReport = (findArtifact('calibration_report') ?? null) as PredictionMarketJsonArtifact | null
+      const resolvedHistory = (findArtifact('resolved_history') ?? null) as PredictionMarketJsonArtifact | null
+      const costModelReport = (findArtifact('cost_model_report') ?? null) as PredictionMarketJsonArtifact | null
+      const walkForwardReport = (findArtifact('walk_forward_report') ?? null) as PredictionMarketJsonArtifact | null
+      const autopilotCycleSummary = (findArtifact('autopilot_cycle_summary') ?? null) as PredictionMarketJsonArtifact | null
+      const researchMemorySummary = (findArtifact('research_memory_summary') ?? null) as PredictionMarketJsonArtifact | null
       const strategyCandidate = (findArtifact('strategy_candidate_packet') ?? null) as StrategyCandidatePacket | null
       const strategyDecision = (findArtifact('strategy_decision_packet') ?? null) as StrategyDecisionPacket | null
       const strategyShadowSummary = (findArtifact('strategy_shadow_summary') ?? null) as StrategyShadowSummary | null
@@ -3373,6 +4666,7 @@ function enrichPredictionMarketRunSummaryWithArtifactAudit(
 
       runtimeHints = buildPredictionMarketRunRuntimeHints({
         researchSidecar,
+        timesfmSidecar,
         forecast,
         recommendation,
         venueFeedSurface,
@@ -3385,6 +4679,17 @@ function enrichPredictionMarketRunSummaryWithArtifactAudit(
         executionIntentPreview,
         resolutionAnomalyReport,
         strategyShadowSummary,
+        sourceAudit,
+        worldState,
+        ticketPayload,
+        quantSignalBundle,
+        decisionLedger,
+        calibrationReport,
+        resolvedHistory,
+        costModelReport,
+        walkForwardReport,
+        autopilotCycleSummary,
+        researchMemorySummary,
         benchmarkGateOverride,
       })
     }
@@ -4611,6 +5916,8 @@ function derivePredictionMarketExecutionPathways(input: {
   strategy_trade_intent_preview?: TradeIntent | null
   strategy_canonical_trade_intent_preview?: TradeIntent | null
   strategy_shadow_summary?: string | null
+  operator_thesis?: PredictionMarketExecutionPathwaysOperatorThesis | null
+  research_pipeline_trace?: PredictionMarketExecutionPathwaysResearchPipelineTrace | null
 }): PredictionMarketExecutionPathwaysReport {
   return buildPredictionMarketExecutionPathways({
     runId: input.runId,
@@ -4626,7 +5933,106 @@ function derivePredictionMarketExecutionPathways(input: {
     strategy_trade_intent_preview: input.strategy_trade_intent_preview ?? null,
     strategy_canonical_trade_intent_preview: input.strategy_canonical_trade_intent_preview ?? null,
     strategy_shadow_summary: input.strategy_shadow_summary ?? null,
+    operator_thesis: input.operator_thesis ?? null,
+    research_pipeline_trace: input.research_pipeline_trace ?? null,
   })
+}
+
+function buildPredictionMarketExecutionPathwaySupplementalArtifacts(input: {
+  evidencePackets?: EvidencePacket[] | null
+  decisionPacket?: DecisionPacket | null
+  researchSidecar?: MarketResearchSidecar | null
+  thesisProbability?: number | null
+  thesisRationale?: string | null
+}): {
+  operator_thesis: PredictionMarketExecutionPathwaysOperatorThesis | null
+  research_pipeline_trace: PredictionMarketExecutionPathwaysResearchPipelineTrace | null
+} {
+  const researchSynthesis = input.researchSidecar?.synthesis ?? null
+  const manualThesisEvidenceRefs = uniqueStrings(
+    (input.evidencePackets ?? [])
+      .filter((packet) => packet.type === 'manual_thesis')
+      .map((packet) => packet.evidence_id),
+  )
+  const hasManualThesisHints =
+    manualThesisEvidenceRefs.length > 0 ||
+    input.thesisProbability != null ||
+    input.thesisRationale != null ||
+    researchSynthesis?.manual_thesis_probability_hint != null ||
+    researchSynthesis?.manual_thesis_rationale_hint != null
+  const operatorSource: PredictionMarketExecutionPathwaysOperatorThesis['source'] =
+    hasManualThesisHints
+      ? 'manual_thesis'
+      : input.decisionPacket
+        ? 'decision_packet'
+        : input.researchSidecar
+          ? 'research_bridge'
+          : 'none'
+  const probabilityYes =
+    input.thesisProbability
+    ?? input.decisionPacket?.probability_estimate
+    ?? researchSynthesis?.manual_thesis_probability_hint
+    ?? null
+  const rationale =
+    input.thesisRationale
+    ?? (input.decisionPacket ? buildDecisionPacketThesisRationale(input.decisionPacket) : undefined)
+    ?? researchSynthesis?.manual_thesis_rationale_hint
+    ?? null
+  const evidenceRefs = uniqueStrings([
+    ...manualThesisEvidenceRefs,
+    ...(input.decisionPacket?.source_packet_refs ?? []),
+    ...(researchSynthesis?.evidence_refs ?? []),
+  ])
+
+  const operatorThesis =
+    operatorSource === 'none' &&
+    probabilityYes == null &&
+    rationale == null &&
+    evidenceRefs.length === 0
+      ? null
+      : {
+          present: probabilityYes != null || rationale != null || evidenceRefs.length > 0,
+          source: operatorSource,
+          probability_yes: probabilityYes,
+          rationale,
+          evidence_refs: evidenceRefs,
+          summary: probabilityYes != null
+            ? `Operator thesis: ${Math.round(probabilityYes * 100)}% yes via ${operatorSource}.`
+            : `Operator thesis: ${operatorSource}.`,
+        }
+
+  const pipelineTrace = researchSynthesis?.pipeline_trace ?? null
+  const researchPipelineTrace: PredictionMarketExecutionPathwaysResearchPipelineTrace | null = pipelineTrace && researchSynthesis
+    ? {
+        pipeline_id: researchSynthesis.pipeline_version_metadata.pipeline_id,
+        pipeline_version: researchSynthesis.pipeline_version_metadata.pipeline_version,
+        preferred_mode: pipelineTrace.stages.aggregate.preferred_mode,
+        oracle_family: researchSynthesis.forecaster_candidates.length > 0 ||
+          researchSynthesis.independent_forecaster_outputs.length > 0
+          ? 'llm_superforecaster'
+          : researchSynthesis.manual_thesis_probability_hint != null ||
+              researchSynthesis.manual_thesis_rationale_hint != null
+            ? 'manual_only'
+            : 'llm_oracle',
+        forecaster_count:
+          researchSynthesis.forecaster_candidates.length > 0
+            ? researchSynthesis.forecaster_candidates.length
+            : researchSynthesis.independent_forecaster_outputs.length > 0
+              ? researchSynthesis.independent_forecaster_outputs.length
+              : null,
+        evidence_count: researchSynthesis.evidence_count,
+        source_refs: uniqueStrings([
+          ...researchSynthesis.evidence_refs,
+          ...pipelineTrace.stages.query.queries,
+        ]),
+        summary: pipelineTrace.summary,
+      }
+    : null
+
+  return {
+    operator_thesis: operatorThesis,
+    research_pipeline_trace: researchPipelineTrace,
+  }
 }
 
 function derivePredictionMarketExecutionProjection(input: {
@@ -4850,6 +6256,15 @@ function buildPredictionMarketExecutionPreflightSummary(
   },
 ): PredictionMarketExecutionPreflightSummary {
   const projectedPathReports = Object.values(projection.projected_paths)
+  const canonicalProjectionPath = resolveCanonicalPredictionMarketProjectionPath(projection)
+  const selectedEdgeBucket =
+    projection.selected_edge_bucket
+    ?? canonicalProjectionPath?.edge_bucket
+    ?? null
+  const selectedPreTradeGate =
+    projection.selected_pre_trade_gate
+    ?? canonicalProjectionPath?.pre_trade_gate
+    ?? null
   const counts = {
     total: projectedPathReports.length,
     eligible: projection.eligible_paths.length,
@@ -4891,6 +6306,8 @@ function buildPredictionMarketExecutionPreflightSummary(
     source_refs: sourceRefs,
     blockers: [...projection.blocking_reasons],
     downgrade_reasons: [...projection.downgrade_reasons],
+    selected_edge_bucket: selectedEdgeBucket,
+    selected_pre_trade_gate: selectedPreTradeGate,
     microstructure: projection.microstructure_summary,
     summary: [
       `gate=${projection.gate_name}`,
@@ -4905,6 +6322,8 @@ function buildPredictionMarketExecutionPreflightSummary(
       `eligible=${counts.eligible}/${counts.total}`,
       `paths=ready:${counts.ready}|degraded:${counts.degraded}|blocked:${counts.blocked}`,
       `basis=${basisParts.length > 0 ? basisParts.join(',') : 'none'}`,
+      selectedEdgeBucket ? `edge_bucket=${selectedEdgeBucket}` : null,
+      selectedPreTradeGate ? `pre_trade=${selectedPreTradeGate.verdict}:${selectedPreTradeGate.net_edge_bps}/${selectedPreTradeGate.minimum_net_edge_bps}bps` : null,
       projection.microstructure_summary
         ? `microstructure=${projection.microstructure_summary.recommended_mode}:${projection.microstructure_summary.worst_case_severity}:${projection.microstructure_summary.executable_deterioration_bps}bps`
         : null,
@@ -4950,7 +6369,10 @@ function derivePredictionMarketShadowArbitrage(
 }
 
 function resolveCanonicalPredictionMarketProjectionPath(
-  executionProjection: PredictionMarketExecutionProjectionReport | null | undefined,
+  executionProjection: Pick<
+    PredictionMarketExecutionProjectionReport,
+    'selected_path' | 'requested_path' | 'projected_paths'
+  > | null | undefined,
 ) {
   if (!executionProjection) return null
 
@@ -4962,7 +6384,10 @@ function resolveCanonicalPredictionMarketProjectionPath(
 }
 
 function resolvePredictionMarketProjectionPathByMode(
-  executionProjection: PredictionMarketExecutionProjectionReport | null | undefined,
+  executionProjection: Pick<
+    PredictionMarketExecutionProjectionReport,
+    'projected_paths'
+  > | null | undefined,
   mode: PredictionMarketExecutionProjectionMode,
 ) {
   if (!executionProjection) return null
@@ -5093,7 +6518,9 @@ function resolvePredictionMarketExecutionSurfacePreview(input: {
 }
 
 function buildPredictionMarketRunRuntimeHints(input: {
+  requestContract?: PredictionMarketAdviceRequestContract | null
   researchSidecar?: MarketResearchSidecar | null
+  timesfmSidecar?: PredictionMarketTimesFMSidecar | null
   forecast?: ForecastPacket | null
   recommendation?: MarketRecommendationPacket | null
   venueFeedSurface?: MarketFeedSurface | null
@@ -5106,6 +6533,17 @@ function buildPredictionMarketRunRuntimeHints(input: {
   executionIntentPreview?: ExecutionIntentPreview | null
   resolutionAnomalyReport?: ResolutionAnomalyReport | null
   strategyShadowSummary?: StrategyShadowSummary | null
+  sourceAudit?: PredictionMarketJsonArtifact | null
+  worldState?: PredictionMarketJsonArtifact | null
+  ticketPayload?: PredictionMarketJsonArtifact | null
+  quantSignalBundle?: PredictionMarketJsonArtifact | null
+  decisionLedger?: PredictionMarketJsonArtifact | null
+  calibrationReport?: PredictionMarketJsonArtifact | null
+  resolvedHistory?: PredictionMarketJsonArtifact | null
+  costModelReport?: PredictionMarketJsonArtifact | null
+  walkForwardReport?: PredictionMarketJsonArtifact | null
+  autopilotCycleSummary?: PredictionMarketJsonArtifact | null
+  researchMemorySummary?: PredictionMarketJsonArtifact | null
   benchmarkGateOverride?: Partial<Pick<
     PredictionMarketRunRuntimeHints,
     | 'research_benchmark_gate_summary'
@@ -5150,6 +6588,14 @@ function buildPredictionMarketRunRuntimeHints(input: {
   >> | null
 }): PredictionMarketRunRuntimeHints {
   const selectedProjectionPath = resolveCanonicalPredictionMarketProjectionPath(input.executionProjection)
+  const selectedPreTradeGate =
+    selectedProjectionPath?.pre_trade_gate
+    ?? input.executionProjection?.selected_pre_trade_gate
+    ?? null
+  const selectedEdgeBucket =
+    selectedProjectionPath?.edge_bucket
+    ?? input.executionProjection?.selected_edge_bucket
+    ?? null
   const selectedPreview = resolvePredictionMarketExecutionSurfacePreview({
     executionProjection: input.executionProjection,
     executionPathways: input.executionPathways,
@@ -5316,8 +6762,48 @@ function buildPredictionMarketRunRuntimeHints(input: {
   })
   const benchmarkGateBlocksLive = benchmarkLiveGate.blocks_live
   const benchmarkGateLiveBlockReason = benchmarkLiveGate.live_block_reason
+  const timesfmSidecar = input.timesfmSidecar ?? null
+  const timesfmSummary = summarizePredictionMarketTimesFMSidecar(timesfmSidecar) ?? timesfmSidecar?.summary ?? null
 
   const runtimeHints: PredictionMarketRunRuntimeHints = {}
+  if (input.requestContract?.request_mode != null) {
+    runtimeHints.request_mode = input.requestContract.request_mode
+  }
+  if (input.requestContract?.response_variant != null) {
+    runtimeHints.response_variant = input.requestContract.response_variant
+  }
+  if (input.requestContract?.variant_tags != null) {
+    runtimeHints.request_variant_tags = input.requestContract.variant_tags
+  }
+  const timesfmRequestedMode =
+    timesfmSidecar?.requested_mode
+    ?? input.requestContract?.timesfm_mode
+    ?? null
+  if (timesfmRequestedMode != null) {
+    runtimeHints.timesfm_requested_mode = timesfmRequestedMode
+  }
+  const timesfmEffectiveMode =
+    timesfmSidecar?.effective_mode
+    ?? (timesfmRequestedMode === 'off' ? 'off' : null)
+  if (timesfmEffectiveMode != null) {
+    runtimeHints.timesfm_effective_mode = timesfmEffectiveMode
+  }
+  const timesfmRequestedLanes =
+    timesfmSidecar?.requested_lanes
+    ?? input.requestContract?.timesfm_lanes
+    ?? []
+  if (timesfmRequestedLanes.length > 0) {
+    runtimeHints.timesfm_requested_lanes = timesfmRequestedLanes
+  }
+  if (timesfmSidecar?.selected_lane != null) {
+    runtimeHints.timesfm_selected_lane = timesfmSidecar.selected_lane
+  }
+  if (timesfmSidecar?.health?.status != null) {
+    runtimeHints.timesfm_health = timesfmSidecar.health.status
+  }
+  if (timesfmSummary != null) {
+    runtimeHints.timesfm_summary = timesfmSummary
+  }
 
   if (researchPipeline?.pipeline_id != null) {
     runtimeHints.research_pipeline_id = researchPipeline.pipeline_id
@@ -5419,6 +6905,9 @@ function buildPredictionMarketRunRuntimeHints(input: {
     ?? strategyDecision?.shadow_report?.summary
     ?? strategyCandidate?.shadow_summary?.summary
     ?? null
+  const approvalTicket = input.executionPathways?.approval_ticket ?? null
+  const operatorThesis = input.executionPathways?.operator_thesis ?? null
+  const researchPipelineTrace = input.executionPathways?.research_pipeline_trace ?? null
   if (strategyPrimary != null) {
     runtimeHints.primary_strategy = strategyPrimary
     runtimeHints.strategy_primary = strategyPrimary
@@ -5444,6 +6933,54 @@ function buildPredictionMarketRunRuntimeHints(input: {
       ? 'strategy_decision_packet'
       : 'strategy_candidate_packet'
   }
+  if (approvalTicket?.ticket_id != null) {
+    runtimeHints.approval_ticket_id = approvalTicket.ticket_id
+  }
+  if (approvalTicket?.required != null) {
+    runtimeHints.approval_ticket_required = approvalTicket.required
+  }
+  if (approvalTicket?.status != null) {
+    runtimeHints.approval_ticket_status = approvalTicket.status
+  }
+  if (approvalTicket?.summary != null) {
+    runtimeHints.approval_ticket_summary = approvalTicket.summary
+  }
+  if (approvalTicket != null) {
+    runtimeHints.approval_ticket = approvalTicket
+  }
+  if (operatorThesis?.present != null) {
+    runtimeHints.operator_thesis_present = operatorThesis.present
+  }
+  if (operatorThesis?.source != null) {
+    runtimeHints.operator_thesis_source = operatorThesis.source
+  }
+  if (operatorThesis?.probability_yes != null) {
+    runtimeHints.operator_thesis_probability_yes = operatorThesis.probability_yes
+  }
+  if (operatorThesis?.summary != null) {
+    runtimeHints.operator_thesis_summary = operatorThesis.summary
+  }
+  if (operatorThesis != null) {
+    runtimeHints.operator_thesis = operatorThesis
+  }
+  if (researchPipelineTrace?.summary != null) {
+    runtimeHints.research_pipeline_trace_summary = researchPipelineTrace.summary
+  }
+  if (researchPipelineTrace?.preferred_mode != null) {
+    runtimeHints.research_pipeline_trace_preferred_mode = researchPipelineTrace.preferred_mode
+  }
+  if (researchPipelineTrace?.oracle_family != null) {
+    runtimeHints.research_pipeline_trace_oracle_family = researchPipelineTrace.oracle_family
+  }
+  if (researchPipelineTrace?.forecaster_count != null) {
+    runtimeHints.research_pipeline_trace_forecaster_count = researchPipelineTrace.forecaster_count
+  }
+  if (researchPipelineTrace?.evidence_count != null) {
+    runtimeHints.research_pipeline_trace_evidence_count = researchPipelineTrace.evidence_count
+  }
+  if (researchPipelineTrace != null) {
+    runtimeHints.research_pipeline_trace = researchPipelineTrace
+  }
   if (strategyShadowSummary != null) {
     runtimeHints.strategy_shadow_summary = strategyShadowSummary
   }
@@ -5454,6 +6991,25 @@ function buildPredictionMarketRunRuntimeHints(input: {
   if (resolutionAnomalies.length > 0) {
     runtimeHints.resolution_anomalies = resolutionAnomalies
   }
+  const makerSpreadCaptureMetadata =
+    asRecord(executionIntentPreview?.metadata) ??
+    strategyMetadata
+  const makerSpreadCaptureInventorySummary = asString(makerSpreadCaptureMetadata?.maker_spread_capture_inventory_summary)
+  const makerSpreadCaptureAdverseSelectionSummary = asString(makerSpreadCaptureMetadata?.maker_spread_capture_adverse_selection_summary)
+  const makerSpreadCaptureQuoteTransportSummary = asString(makerSpreadCaptureMetadata?.maker_spread_capture_quote_transport_summary)
+  const makerSpreadCaptureBlockers = asStringArray(makerSpreadCaptureMetadata?.maker_spread_capture_blockers)
+  const makerSpreadCaptureRiskCaps = asStringArray(makerSpreadCaptureMetadata?.maker_spread_capture_risk_caps)
+  if (makerSpreadCaptureInventorySummary != null) {
+    runtimeHints.maker_spread_capture_inventory_summary = makerSpreadCaptureInventorySummary
+  }
+  if (makerSpreadCaptureAdverseSelectionSummary != null) {
+    runtimeHints.maker_spread_capture_adverse_selection_summary = makerSpreadCaptureAdverseSelectionSummary
+  }
+  if (makerSpreadCaptureQuoteTransportSummary != null) {
+    runtimeHints.maker_spread_capture_quote_transport_summary = makerSpreadCaptureQuoteTransportSummary
+  }
+  runtimeHints.maker_spread_capture_blockers = makerSpreadCaptureBlockers
+  runtimeHints.maker_spread_capture_risk_caps = makerSpreadCaptureRiskCaps
   if (researchBenchmarkGate.summary != null) runtimeHints.research_benchmark_gate_summary = researchBenchmarkGate.summary
   if (researchBenchmarkGate.upliftBps != null) runtimeHints.research_benchmark_uplift_bps = researchBenchmarkGate.upliftBps
   if (researchBenchmarkGate.verdict != null) runtimeHints.research_benchmark_verdict = researchBenchmarkGate.verdict
@@ -5506,6 +7062,176 @@ function buildPredictionMarketRunRuntimeHints(input: {
     runtimeHints.research_abstention_flipped_recommendation = recommendationOrigin.abstention_flipped_recommendation
   }
 
+  const sourceAudit = asRecord(input.sourceAudit)
+  if (typeof sourceAudit?.average_score === 'number') {
+    runtimeHints.source_audit_average_score = sourceAudit.average_score
+  }
+  if (typeof sourceAudit?.coverage_score === 'number') {
+    runtimeHints.source_audit_coverage_score = sourceAudit.coverage_score
+  }
+  if (typeof sourceAudit?.summary === 'string') {
+    runtimeHints.source_audit_summary = sourceAudit.summary
+  }
+  const worldState = asRecord(input.worldState)
+  if (
+    worldState?.recommended_action === 'bet'
+    || worldState?.recommended_action === 'wait'
+    || worldState?.recommended_action === 'no_trade'
+  ) {
+    runtimeHints.world_state_recommended_action = worldState.recommended_action
+  }
+  if (worldState?.recommended_side === 'yes' || worldState?.recommended_side === 'no') {
+    runtimeHints.world_state_recommended_side = worldState.recommended_side
+  }
+  if (typeof worldState?.confidence_score === 'number') {
+    runtimeHints.world_state_confidence_score = worldState.confidence_score
+  }
+  if (typeof worldState?.summary === 'string') {
+    runtimeHints.world_state_summary = worldState.summary
+  }
+  const worldStateRiskFlags = asStringArray(worldState?.risk_flags)
+  if (worldStateRiskFlags.length > 0) {
+    runtimeHints.world_state_risk_flags = worldStateRiskFlags
+  }
+  const ticketPayload = asRecord(input.ticketPayload)
+  if (typeof ticketPayload?.action === 'string') {
+    runtimeHints.ticket_payload_action = ticketPayload.action
+  }
+  if (typeof ticketPayload?.size_usd === 'number') {
+    runtimeHints.ticket_payload_size_usd = ticketPayload.size_usd
+  }
+  if (typeof ticketPayload?.summary === 'string') {
+    runtimeHints.ticket_payload_summary = ticketPayload.summary
+  }
+  const quantSignalBundle = asRecord(input.quantSignalBundle)
+  if (typeof quantSignalBundle?.summary === 'string') {
+    runtimeHints.quant_signal_summary = quantSignalBundle.summary
+  }
+  if (typeof quantSignalBundle?.viable_count === 'number') {
+    runtimeHints.quant_signal_viable_count = quantSignalBundle.viable_count
+  }
+  const decisionLedger = asRecord(input.decisionLedger)
+  const ledgerSummary = asRecord(decisionLedger?.summary)
+  if (typeof ledgerSummary?.total_entries === 'number') {
+    runtimeHints.decision_ledger_total_entries = ledgerSummary.total_entries
+  }
+  const latestLedgerEntry = asRecord(ledgerSummary?.latest_entry)
+  if (typeof latestLedgerEntry?.entry_type === 'string') {
+    runtimeHints.decision_ledger_latest_entry_type = latestLedgerEntry.entry_type
+  }
+  const calibrationReport = asRecord(input.calibrationReport)
+  if (typeof calibrationReport?.calibration_error === 'number') {
+    runtimeHints.calibration_error = calibrationReport.calibration_error
+  }
+  if (typeof calibrationReport?.brier_score === 'number') {
+    runtimeHints.calibration_brier_score = calibrationReport.brier_score
+  }
+  const resolvedHistory = asRecord(input.resolvedHistory)
+  if (typeof resolvedHistory?.summary === 'string') {
+    runtimeHints.resolved_history_summary = resolvedHistory.summary
+  }
+  if (typeof resolvedHistory?.resolved_records === 'number') {
+    runtimeHints.resolved_history_points = resolvedHistory.resolved_records
+  }
+  if (typeof resolvedHistory?.source_summary === 'string') {
+    runtimeHints.resolved_history_source_summary = resolvedHistory.source_summary
+  }
+  if (typeof resolvedHistory?.first_cutoff_at === 'string') {
+    runtimeHints.resolved_history_first_cutoff_at = resolvedHistory.first_cutoff_at
+  }
+  if (typeof resolvedHistory?.last_cutoff_at === 'string') {
+    runtimeHints.resolved_history_last_cutoff_at = resolvedHistory.last_cutoff_at
+  }
+  const costModelReport = asRecord(input.costModelReport)
+  if (typeof costModelReport?.summary === 'string') {
+    runtimeHints.cost_model_summary = costModelReport.summary
+  }
+  if (typeof costModelReport?.total_points === 'number') {
+    runtimeHints.cost_model_total_points = costModelReport.total_points
+  }
+  if (typeof costModelReport?.viable_point_count === 'number') {
+    runtimeHints.cost_model_viable_point_count = costModelReport.viable_point_count
+  }
+  if (typeof costModelReport?.viable_point_rate === 'number') {
+    runtimeHints.cost_model_viable_point_rate = costModelReport.viable_point_rate
+  }
+  if (typeof costModelReport?.average_cost_bps === 'number') {
+    runtimeHints.cost_model_average_cost_bps = costModelReport.average_cost_bps
+  }
+  if (typeof costModelReport?.average_net_edge_bps === 'number') {
+    runtimeHints.cost_model_average_net_edge_bps = costModelReport.average_net_edge_bps
+  }
+  const walkForwardReport = asRecord(input.walkForwardReport)
+  const walkForwardSummary: PredictionMarketWalkForwardSurfaceSummary | null = walkForwardReport
+    ? {
+      summary: asString(walkForwardReport.summary),
+      sample_count: asNumber(walkForwardReport.total_points),
+      window_count: asNumber(walkForwardReport.total_windows),
+      win_rate: asNumber(walkForwardReport.stable_window_rate),
+      brier_score: asNumber(walkForwardReport.mean_calibrated_brier_score),
+      log_loss: asNumber(walkForwardReport.mean_calibrated_log_loss),
+      uplift_bps: asNumber(walkForwardReport.mean_net_edge_bps),
+      promotion_ready: walkForwardReport.promotion_ready === true,
+      notes: asStringArray(walkForwardReport.notes),
+    }
+    : null
+  if (walkForwardSummary && (
+    walkForwardSummary.summary != null ||
+    walkForwardSummary.sample_count != null ||
+    walkForwardSummary.window_count != null ||
+    walkForwardSummary.win_rate != null ||
+    walkForwardSummary.brier_score != null ||
+    walkForwardSummary.log_loss != null ||
+    walkForwardSummary.uplift_bps != null ||
+    walkForwardSummary.notes.length > 0
+  )) {
+    runtimeHints.walk_forward_summary = walkForwardSummary
+  }
+  if (typeof walkForwardReport?.total_points === 'number') {
+    runtimeHints.walk_forward_total_points = walkForwardReport.total_points
+  }
+  if (typeof walkForwardReport?.total_windows === 'number') {
+    runtimeHints.walk_forward_windows = walkForwardReport.total_windows
+  }
+  if (typeof walkForwardReport?.stable_window_rate === 'number') {
+    runtimeHints.walk_forward_stable_window_rate = walkForwardReport.stable_window_rate
+  }
+  if (typeof walkForwardReport?.mean_brier_improvement === 'number') {
+    runtimeHints.walk_forward_mean_brier_improvement = walkForwardReport.mean_brier_improvement
+  }
+  if (typeof walkForwardReport?.mean_log_loss_improvement === 'number') {
+    runtimeHints.walk_forward_mean_log_loss_improvement = walkForwardReport.mean_log_loss_improvement
+  }
+  if (typeof walkForwardReport?.mean_net_edge_bps === 'number') {
+    runtimeHints.walk_forward_mean_net_edge_bps = walkForwardReport.mean_net_edge_bps
+  }
+  if (typeof walkForwardReport?.promotion_ready === 'boolean') {
+    runtimeHints.walk_forward_promotion_ready = walkForwardReport.promotion_ready
+  }
+  const autopilotCycleSummary = asRecord(input.autopilotCycleSummary)
+  const autopilotOverview = asRecord(autopilotCycleSummary?.overview)
+  if (
+    autopilotOverview?.health === 'healthy'
+    || autopilotOverview?.health === 'degraded'
+    || autopilotOverview?.health === 'blocked'
+  ) {
+    runtimeHints.autopilot_cycle_health = autopilotOverview.health
+  }
+  if (typeof autopilotOverview?.health === 'string') {
+    runtimeHints.autopilot_cycle_summary = `autopilot=${autopilotOverview.health} cycles=${String(autopilotCycleSummary?.total_cycles ?? 0)}`
+  }
+  const researchMemorySummary = asRecord(input.researchMemorySummary)
+  if (typeof researchMemorySummary?.summary === 'string') {
+    runtimeHints.research_memory_summary = researchMemorySummary.summary
+  }
+  if (typeof researchMemorySummary?.memory_count === 'number') {
+    runtimeHints.research_memory_memory_count = researchMemorySummary.memory_count
+  }
+  const validationSummary = asRecord(researchMemorySummary?.validation_summary)
+  if (typeof validationSummary?.average_score === 'number') {
+    runtimeHints.research_memory_validation_score = validationSummary.average_score
+  }
+
   return {
     ...runtimeHints,
     multi_venue_taxonomy: input.multiVenueExecution?.taxonomy ?? null,
@@ -5538,6 +7264,12 @@ function buildPredictionMarketRunRuntimeHints(input: {
     execution_projection_selected_preview: selectedPreview.preview,
     execution_projection_selected_preview_source:
       selectedPreview.preview_source === 'none' ? null : selectedPreview.preview_source,
+    execution_projection_selected_edge_bucket: selectedEdgeBucket,
+    execution_projection_selected_pre_trade_gate: selectedPreTradeGate,
+    execution_projection_selected_pre_trade_gate_verdict: selectedPreTradeGate?.verdict ?? null,
+    execution_projection_selected_pre_trade_gate_summary: selectedPreTradeGate?.summary ?? null,
+    execution_projection_selected_path_net_edge_bps: selectedPreTradeGate?.net_edge_bps ?? null,
+    execution_projection_selected_path_minimum_net_edge_bps: selectedPreTradeGate?.minimum_net_edge_bps ?? null,
     execution_projection_selected_path_canonical_size_usd: selectedProjectionPath?.sizing_signal?.canonical_size_usd ?? null,
     execution_projection_selected_path_shadow_signal_present: selectedProjectionPath?.shadow_arbitrage_signal != null,
     shadow_arbitrage_present: canonicalShadowArbitrage != null,
@@ -5705,10 +7437,24 @@ function extractStoredExecutionArtifacts(details: StoredPredictionMarketRunDetai
   const recommendation = findArtifact('recommendation_packet') as MarketRecommendationPacket | undefined
   const marketEvents = (findArtifact('market_events') ?? null) as PredictionMarketJsonArtifact | null
   const marketPositions = (findArtifact('market_positions') ?? null) as PredictionMarketJsonArtifact | null
+  const sourceAudit = (findArtifact('source_audit') ?? null) as PredictionMarketJsonArtifact | null
+  const rulesLineage = (findArtifact('rules_lineage') ?? null) as PredictionMarketJsonArtifact | null
+  const catalystTimeline = (findArtifact('catalyst_timeline') ?? null) as PredictionMarketJsonArtifact | null
+  const worldState = (findArtifact('world_state') ?? null) as PredictionMarketJsonArtifact | null
+  const ticketPayload = (findArtifact('ticket_payload') ?? null) as PredictionMarketJsonArtifact | null
+  const quantSignalBundle = (findArtifact('quant_signal_bundle') ?? null) as PredictionMarketJsonArtifact | null
+  const decisionLedger = (findArtifact('decision_ledger') ?? null) as PredictionMarketJsonArtifact | null
+  const calibrationReport = (findArtifact('calibration_report') ?? null) as PredictionMarketJsonArtifact | null
+  const resolvedHistory = (findArtifact('resolved_history') ?? null) as PredictionMarketJsonArtifact | null
+  const costModelReport = (findArtifact('cost_model_report') ?? null) as PredictionMarketJsonArtifact | null
+  const walkForwardReport = (findArtifact('walk_forward_report') ?? null) as PredictionMarketJsonArtifact | null
+  const autopilotCycleSummary = (findArtifact('autopilot_cycle_summary') ?? null) as PredictionMarketJsonArtifact | null
+  const researchMemorySummary = (findArtifact('research_memory_summary') ?? null) as PredictionMarketJsonArtifact | null
   const paperSurface = asSurfaceRecord(findArtifact('paper_surface'))
   const replaySurface = asSurfaceRecord(findArtifact('replay_surface'))
   const researchBridge = (findArtifact('research_bridge') ?? null) as ResearchBridgeBundle | null
   const researchSidecar = (findArtifact('research_sidecar') ?? null) as MarketResearchSidecar | null
+  const timesfmSidecar = (findArtifact('timesfm_sidecar') ?? null) as PredictionMarketTimesFMSidecar | null
   const microstructureLab = (findArtifact('microstructure_lab') ?? null) as MicrostructureLabReport | null
   const crossVenueIntelligence = normalizeCrossVenueIntelligence(
     (findArtifact('cross_venue_intelligence') ?? null) as PredictionMarketCrossVenueIntelligence | null,
@@ -5762,10 +7508,24 @@ function extractStoredExecutionArtifacts(details: StoredPredictionMarketRunDetai
     }),
     market_events: marketEvents,
     market_positions: marketPositions,
+    source_audit: sourceAudit,
+    rules_lineage: rulesLineage,
+    catalyst_timeline: catalystTimeline,
+    world_state: worldState,
+    ticket_payload: ticketPayload,
+    quant_signal_bundle: quantSignalBundle,
+    decision_ledger: decisionLedger,
+    calibration_report: calibrationReport,
+    resolved_history: resolvedHistory,
+    cost_model_report: costModelReport,
+    walk_forward_report: walkForwardReport,
+    autopilot_cycle_summary: autopilotCycleSummary,
+    research_memory_summary: researchMemorySummary,
     paper_surface: paperSurface,
     replay_surface: replaySurface,
     research_bridge: researchBridge,
     research_sidecar: researchSidecar,
+    timesfm_sidecar: timesfmSidecar,
     microstructure_lab: microstructureLab,
     cross_venue_intelligence: crossVenueIntelligence,
     provenance_bundle: provenanceBundle,
@@ -6383,22 +8143,10 @@ export async function listPredictionMarketUniverse(input: {
 export async function advisePredictionMarket(input: AdviceExecutionInput) {
   const requestStartedAt = Date.now()
   const parsed = predictionMarketsAdviceRequestSchema.parse(input)
+  const requestContract = resolvePredictionMarketAdviceRequestContract(input, parsed)
   const decisionPacket = parsed.decision_packet
   const decisionPacketHash = hashDecisionPacket(decisionPacket)
   const adapter = getVenueAdapter(parsed.venue)
-  const configHash = computeConfigHash({
-    venue: parsed.venue,
-    market_id: parsed.market_id,
-    slug: parsed.slug,
-    thesis_probability: parsed.thesis_probability,
-    thesis_rationale: parsed.thesis_rationale,
-    min_edge_bps: parsed.min_edge_bps ?? DEFAULT_MIN_EDGE_BPS,
-    max_spread_bps: parsed.max_spread_bps ?? DEFAULT_MAX_SPREAD_BPS,
-    history_limit: parsed.history_limit ?? 120,
-    research_signal_hash: parsed.research_signals ? hashText(JSON.stringify(parsed.research_signals)) : null,
-    decision_packet_hash: decisionPacketHash,
-    decision_packet_correlation_id: decisionPacket?.correlation_id ?? null,
-  })
   const actor = input.actor || 'system'
   let run: AgentRun | null = null
   let startedAt = ''
@@ -6408,7 +8156,37 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
     const snapshot = await adapter.buildSnapshot({
       marketId: parsed.market_id,
       slug: parsed.slug,
-      historyLimit: parsed.history_limit,
+      historyLimit: requestContract.history_limit,
+    })
+    const evaluationHistoryResolution = resolvePredictionMarketEvaluationHistory({
+      workspaceId: input.workspaceId,
+      venue: parsed.venue,
+      marketId: snapshot.market.market_id,
+      providedHistory: parsed.evaluation_history,
+      targetRecords: requestContract.history_limit,
+    })
+    const effectiveEvaluationHistory = evaluationHistoryResolution.evaluation_history
+    const configHash = computeConfigHash({
+      venue: parsed.venue,
+      market_id: parsed.market_id,
+      slug: parsed.slug,
+      resolved_market_id: snapshot.market.market_id,
+      request_mode: requestContract.request_mode,
+      response_variant: requestContract.response_variant,
+      strategy_profile: requestContract.strategy_profile,
+      variant_tags: requestContract.variant_tags,
+      thesis_probability: parsed.thesis_probability,
+      thesis_rationale: parsed.thesis_rationale,
+      min_edge_bps: parsed.min_edge_bps ?? DEFAULT_MIN_EDGE_BPS,
+      max_spread_bps: parsed.max_spread_bps ?? DEFAULT_MAX_SPREAD_BPS,
+      history_limit: requestContract.history_limit,
+      timesfm_mode: requestContract.timesfm_mode,
+      timesfm_lanes: requestContract.timesfm_lanes,
+      evaluation_history_hash: effectiveEvaluationHistory.length > 0 ? hashText(JSON.stringify(effectiveEvaluationHistory)) : null,
+      evaluation_history_source: evaluationHistoryResolution.source,
+      research_signal_hash: parsed.research_signals ? hashText(JSON.stringify(parsed.research_signals)) : null,
+      decision_packet_hash: decisionPacketHash,
+      decision_packet_correlation_id: decisionPacket?.correlation_id ?? null,
     })
     const pipelineGuard = buildPredictionMarketPipelineGuard({
       venue: parsed.venue,
@@ -6465,7 +8243,14 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
           strategyDecision: storedArtifacts.strategy_decision_packet,
           resolutionAnomalyReport: storedArtifacts.resolution_anomaly_report,
         })
-        const executionPathways = storedArtifacts.execution_pathways ?? derivePredictionMarketExecutionPathways({
+        const pathwaySupplementalArtifacts = buildPredictionMarketExecutionPathwaySupplementalArtifacts({
+          evidencePackets: storedArtifacts.evidence_packets,
+          decisionPacket: extractDecisionPacketFromEvidencePackets(storedArtifacts.evidence_packets),
+          researchSidecar: storedArtifacts.research_sidecar,
+          thesisProbability: extractManualThesisFromEvidencePackets(storedArtifacts.evidence_packets).thesisProbability,
+          thesisRationale: extractManualThesisFromEvidencePackets(storedArtifacts.evidence_packets).thesisRationale,
+        })
+        let executionPathways = storedArtifacts.execution_pathways ?? derivePredictionMarketExecutionPathways({
           runId: deduplicatedSummary.run_id,
           snapshot: storedArtifacts.snapshot,
           resolutionPolicy: storedArtifacts.resolution_policy,
@@ -6476,7 +8261,19 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
           market_regime_summary: storedArtifacts.strategy_decision_packet?.market_regime?.summary ?? storedArtifacts.strategy_candidate_packet?.market_regime?.summary ?? null,
           primary_strategy_summary: storedArtifacts.strategy_decision_packet?.summary ?? storedArtifacts.strategy_candidate_packet?.summary ?? null,
           strategy_summary: storedArtifacts.strategy_decision_packet?.summary ?? null,
+          operator_thesis: pathwaySupplementalArtifacts.operator_thesis,
+          research_pipeline_trace: pathwaySupplementalArtifacts.research_pipeline_trace,
         })
+        if (executionPathways && (
+          executionPathways.operator_thesis == null ||
+          executionPathways.research_pipeline_trace == null
+        )) {
+          executionPathways = {
+            ...executionPathways,
+            operator_thesis: executionPathways.operator_thesis ?? pathwaySupplementalArtifacts.operator_thesis,
+            research_pipeline_trace: executionPathways.research_pipeline_trace ?? pathwaySupplementalArtifacts.research_pipeline_trace,
+          }
+        }
         const executionProjection = storedArtifacts.execution_projection ?? derivePredictionMarketExecutionProjection({
           runId: deduplicatedSummary.run_id,
           snapshot: storedArtifacts.snapshot,
@@ -6515,10 +8312,13 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
           : null
         return {
           run: getRun(deduplicatedSummary.run_id, input.workspaceId),
+          request_contract: requestContract,
           prediction_run: {
             ...deduplicatedSummary,
             ...buildPredictionMarketRunRuntimeHints({
+              requestContract,
               researchSidecar: annotatedResearchSidecar,
+              timesfmSidecar: storedArtifacts.timesfm_sidecar,
               forecast: storedArtifacts.forecast,
               recommendation: storedArtifacts.recommendation,
               venueFeedSurface: details.venue_feed_surface ?? null,
@@ -6531,6 +8331,17 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
               executionIntentPreview: storedArtifacts.execution_intent_preview,
               resolutionAnomalyReport: storedArtifacts.resolution_anomaly_report,
               strategyShadowSummary: storedArtifacts.strategy_shadow_summary,
+              sourceAudit: storedArtifacts.source_audit,
+              worldState: storedArtifacts.world_state,
+              ticketPayload: storedArtifacts.ticket_payload,
+              quantSignalBundle: storedArtifacts.quant_signal_bundle,
+              decisionLedger: storedArtifacts.decision_ledger,
+              calibrationReport: asJsonArtifact(storedArtifacts.calibration_report),
+              resolvedHistory: storedArtifacts.resolved_history,
+              costModelReport: storedArtifacts.cost_model_report,
+              walkForwardReport: storedArtifacts.walk_forward_report,
+              autopilotCycleSummary: asJsonArtifact(storedArtifacts.autopilot_cycle_summary),
+              researchMemorySummary: storedArtifacts.research_memory_summary,
               benchmarkGateOverride,
             }),
           },
@@ -6553,6 +8364,7 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
           resolution_anomaly_report: storedArtifacts.resolution_anomaly_report ?? undefined,
           autonomous_agent_report: storedArtifacts.autonomous_agent_report ?? undefined,
           research_sidecar: annotatedResearchSidecar,
+          timesfm_sidecar: storedArtifacts.timesfm_sidecar,
           microstructure_lab: storedArtifacts.microstructure_lab,
           cross_venue_intelligence: normalizedCrossVenueIntelligence,
           pipeline_guard: storedArtifacts.pipeline_guard ?? finalizedPipelineGuard,
@@ -6580,7 +8392,67 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
     }), input.workspaceId)
 
     const resolutionPolicy = buildResolutionPolicy(snapshot)
-    const researchSidecar = parsed.research_signals && parsed.research_signals.length > 0
+    const preTimesFMCrossVenueIntelligence = await buildCrossVenueIntelligence({
+      snapshot,
+    })
+    const preTimesFMMarketGraph = derivePredictionMarketMarketGraph({
+      snapshot,
+      crossVenueIntelligence: preTimesFMCrossVenueIntelligence,
+    })
+    const preTimesFMRegime = deriveMarketRegime({
+      snapshot,
+      market_graph: preTimesFMMarketGraph,
+      cross_venue_summary: preTimesFMCrossVenueIntelligence.summary ?? null,
+      microstructure_lab: null,
+      research_sidecar: null,
+      research_bridge: null,
+      resolution_policy: resolutionPolicy,
+      as_of_at: snapshot.captured_at,
+    })
+    let timesfmSidecar: PredictionMarketTimesFMSidecar | null = null
+    if (shouldRunPredictionMarketTimesFM({
+      mode: requestContract.timesfm_mode,
+      lanes: requestContract.timesfm_lanes,
+    })) {
+      try {
+        timesfmSidecar = runPredictionMarketTimesFMSidecar({
+          runId: run.id,
+          requestMode: requestContract.request_mode,
+          mode: requestContract.timesfm_mode,
+          lanes: requestContract.timesfm_lanes,
+          snapshot,
+          regime: preTimesFMRegime.disposition,
+          crossVenueGapBps: deriveTimesFMCrossVenueGapBps(preTimesFMCrossVenueIntelligence),
+        })
+      } catch (error) {
+        if (requestContract.timesfm_mode === 'required') {
+          throw new PredictionMarketsError(
+            `TimesFM required mode failed: ${error instanceof Error ? error.message : String(error)}`,
+            {
+              status: 503,
+              code: 'timesfm_required_unavailable',
+            },
+          )
+        }
+        timesfmSidecar = buildPredictionMarketTimesFMFailureBundle({
+          runId: run.id,
+          snapshot,
+          requestContract,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+      if (requestContract.timesfm_mode === 'required' && !hasReadyTimesFMLanes(timesfmSidecar)) {
+        throw new PredictionMarketsError(
+          `TimesFM required mode did not produce a ready lane: ${timesfmSidecar?.health.summary ?? 'unavailable'}`,
+          {
+            status: 503,
+            code: 'timesfm_required_unavailable',
+          },
+        )
+      }
+    }
+    const researchSignals = parsed.research_signals ?? []
+    const researchSidecar = researchSignals.length > 0 || timesfmSidecar
       ? buildMarketResearchSidecar({
         market: {
           market_id: snapshot.market.market_id,
@@ -6589,7 +8461,8 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
           slug: snapshot.market.slug,
         },
         snapshot,
-        signals: parsed.research_signals,
+        signals: researchSignals,
+        timesfmSidecar,
       })
       : null
     const thesisProbability = parsed.thesis_probability ??
@@ -6650,13 +8523,8 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       mode: 'discovery',
       capabilities: finalizedPipelineGuard.venue_capabilities,
     })
-    const crossVenueIntelligence = await buildCrossVenueIntelligence({
-      snapshot,
-    })
-    const marketGraph = derivePredictionMarketMarketGraph({
-      snapshot,
-      crossVenueIntelligence,
-    })
+    const crossVenueIntelligence = preTimesFMCrossVenueIntelligence
+    const marketGraph = preTimesFMMarketGraph
     const microstructureLab = guardedRecommendation.action === 'bet'
       ? buildMicrostructureLabReport({
         snapshot,
@@ -6677,7 +8545,7 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       microstructureLab,
       marketGraph,
       pipelineGuard: finalizedPipelineGuard,
-      strategyProfile: parsed.strategy_profile,
+      strategyProfile: requestContract.strategy_profile,
       enabledStrategyFamilies: parsed.enabled_strategy_families,
     })
     const executionReadiness = derivePredictionMarketExecutionReadiness({
@@ -6688,6 +8556,13 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       microstructureLab,
       strategyDecision: strategyArtifacts.strategy_decision_packet,
       resolutionAnomalyReport: strategyArtifacts.resolution_anomaly_report,
+    })
+    const pathwaySupplementalArtifacts = buildPredictionMarketExecutionPathwaySupplementalArtifacts({
+      evidencePackets,
+      decisionPacket,
+      researchSidecar: annotatedResearchSidecar,
+      thesisProbability,
+      thesisRationale,
     })
     const executionPathways = derivePredictionMarketExecutionPathways({
       runId: run.id,
@@ -6703,6 +8578,8 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       strategy_trade_intent_preview: strategyArtifacts.strategy_trade_intent_preview,
       strategy_canonical_trade_intent_preview: strategyArtifacts.strategy_canonical_trade_intent_preview,
       strategy_shadow_summary: strategyArtifacts.strategy_shadow_summary?.summary ?? null,
+      operator_thesis: pathwaySupplementalArtifacts.operator_thesis,
+      research_pipeline_trace: pathwaySupplementalArtifacts.research_pipeline_trace,
     })
     const executionProjection = derivePredictionMarketExecutionProjection({
       runId: run.id,
@@ -6764,6 +8641,36 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       benchmarkPromotionGateKind: benchmarkGateSummary.promotion_gate_kind,
       benchmarkPromotionBlockerSummary: benchmarkGateSummary.promotion_blocker_summary,
     })
+    const researchMemoryCapture = capturePredictionMarketResearchMemory({
+      runId: run.id,
+      workspaceId: input.workspaceId,
+      venue: parsed.venue,
+      marketId: snapshot.market.market_id,
+      marketSlug: snapshot.market.slug ?? null,
+      recommendation: guardedRecommendation,
+      forecast,
+      researchSidecar: annotatedResearchSidecar,
+      strategyName: strategyArtifacts.strategy_name ?? null,
+      marketRegime: strategyArtifacts.strategy_decision_packet?.market_regime?.label ?? null,
+      requestMode: requestContract.request_mode,
+      responseVariant: requestContract.response_variant,
+    })
+    const researchMemoryEntry = researchMemoryCapture.entry
+    const copiedPatternArtifacts = buildPredictionMarketCopiedPatternArtifacts({
+      runId: run.id,
+      venue: parsed.venue,
+      snapshot,
+      resolutionPolicy,
+      evidencePackets,
+      forecast,
+      recommendation: guardedRecommendation,
+      evaluationHistory: effectiveEvaluationHistory,
+      evaluationHistorySourceSummary: evaluationHistoryResolution.source_summary,
+      researchSidecar: annotatedResearchSidecar,
+      strategyDecision: strategyArtifacts.strategy_decision_packet,
+      marketGraph,
+      researchMemorySummary: researchMemoryCapture.artifact,
+    })
 
     const manifest = runManifestSchema.parse({
       run_id: run.id,
@@ -6787,7 +8694,21 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       evidencePackets,
       forecast,
       recommendation: guardedRecommendation,
+      sourceAudit: asJsonArtifact(copiedPatternArtifacts.source_audit),
+      rulesLineage: asJsonArtifact(copiedPatternArtifacts.rules_lineage),
+      catalystTimeline: asJsonArtifact(copiedPatternArtifacts.catalyst_timeline),
+      worldState: asJsonArtifact(copiedPatternArtifacts.world_state),
+      ticketPayload: asJsonArtifact(copiedPatternArtifacts.ticket_payload),
+      quantSignalBundle: copiedPatternArtifacts.quant_signal_bundle,
+      decisionLedger: copiedPatternArtifacts.decision_ledger,
+      calibrationReport: asJsonArtifact(copiedPatternArtifacts.calibration_report),
+      resolvedHistory: copiedPatternArtifacts.resolved_history,
+      costModelReport: copiedPatternArtifacts.cost_model_report,
+      walkForwardReport: copiedPatternArtifacts.walk_forward_report,
+      autopilotCycleSummary: asJsonArtifact(copiedPatternArtifacts.autopilot_cycle_summary),
+      researchMemorySummary: copiedPatternArtifacts.research_memory_summary ?? undefined,
       researchSidecar: annotatedResearchSidecar ?? undefined,
+      timesfmSidecar: timesfmSidecar ? asJsonArtifact(timesfmSidecar) : undefined,
       microstructureLab: microstructureLab ?? undefined,
       crossVenueIntelligence,
       strategyCandidatePacket: strategyArtifacts.strategy_candidate_packet ?? undefined,
@@ -6828,6 +8749,8 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       tags: [
         'prediction_markets',
         'mode:advise',
+        `request_mode:${requestContract.request_mode}`,
+        `response_variant:${requestContract.response_variant}`,
         `venue:${parsed.venue}`,
         `recommendation:${guardedRecommendation.action}`,
         `pipeline:${finalizedPipelineGuard.status}`,
@@ -6835,6 +8758,14 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       metadata: {
         market_id: snapshot.market.market_id,
         market_slug: snapshot.market.slug,
+        request_mode: requestContract.request_mode,
+        response_variant: requestContract.response_variant,
+        request_variant_tags: requestContract.variant_tags,
+        strategy_profile_resolved: requestContract.strategy_profile,
+        history_limit_resolved: requestContract.history_limit,
+        research_memory_id: researchMemoryEntry?.memory_id ?? null,
+        research_memory_provider_kind: researchMemoryEntry?.provider_kind ?? null,
+        research_memory_summary: researchMemoryCapture.artifact?.summary ?? null,
         recommendation: guardedRecommendation.action,
         side: guardedRecommendation.side,
         confidence: guardedRecommendation.confidence,
@@ -6879,6 +8810,10 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
         execution_intent_preview_kind: strategyArtifacts.execution_intent_preview?.preview_kind ?? null,
         strategy_shadow_summary: strategyArtifacts.strategy_shadow_summary?.summary ?? null,
         resolution_anomalies: strategyArtifacts.resolution_anomalies,
+        source_audit_average_score: copiedPatternArtifacts.source_audit.average_score,
+        world_state_action: copiedPatternArtifacts.world_state.recommended_action,
+        quant_signal_viable_count: asNumber(copiedPatternArtifacts.quant_signal_bundle.viable_count),
+        autopilot_cycle_health: copiedPatternArtifacts.autopilot_cycle_summary.overview.health,
         shadow_arbitrage_present: shadowArbitrage != null,
         shadow_arbitrage_shadow_edge_bps: shadowArbitrage?.summary.shadow_edge_bps ?? null,
         shadow_arbitrage_recommended_size_usd: shadowArbitrage?.summary.recommended_size_usd ?? null,
@@ -6887,10 +8822,14 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
 
     return {
       run: getRun(run.id, input.workspaceId),
+      request_contract: requestContract,
+      research_memory: researchMemoryEntry,
       prediction_run: {
         ...summary,
         ...buildPredictionMarketRunRuntimeHints({
+          requestContract,
           researchSidecar: annotatedResearchSidecar,
+          timesfmSidecar,
           forecast,
           recommendation: guardedRecommendation,
           venueFeedSurface: pipelineGuard.venue_feed_surface,
@@ -6903,6 +8842,17 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
           executionIntentPreview: strategyArtifacts.execution_intent_preview,
           resolutionAnomalyReport: strategyArtifacts.resolution_anomaly_report,
           strategyShadowSummary: strategyArtifacts.strategy_shadow_summary,
+          sourceAudit: asJsonArtifact(copiedPatternArtifacts.source_audit),
+          worldState: asJsonArtifact(copiedPatternArtifacts.world_state),
+          ticketPayload: asJsonArtifact(copiedPatternArtifacts.ticket_payload),
+          quantSignalBundle: copiedPatternArtifacts.quant_signal_bundle,
+          decisionLedger: copiedPatternArtifacts.decision_ledger,
+          calibrationReport: asJsonArtifact(copiedPatternArtifacts.calibration_report),
+          resolvedHistory: copiedPatternArtifacts.resolved_history,
+          costModelReport: copiedPatternArtifacts.cost_model_report,
+          walkForwardReport: copiedPatternArtifacts.walk_forward_report,
+          autopilotCycleSummary: asJsonArtifact(copiedPatternArtifacts.autopilot_cycle_summary),
+          researchMemorySummary: copiedPatternArtifacts.research_memory_summary,
           benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverrideFromSummary(benchmarkGateSummary),
         }),
     },
@@ -6913,6 +8863,19 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       recommendation: guardedRecommendation,
       market_events: undefined,
       market_positions: undefined,
+      source_audit_artifact: asJsonArtifact(copiedPatternArtifacts.source_audit),
+      rules_lineage_artifact: asJsonArtifact(copiedPatternArtifacts.rules_lineage),
+      catalyst_timeline_artifact: asJsonArtifact(copiedPatternArtifacts.catalyst_timeline),
+      world_state_artifact: asJsonArtifact(copiedPatternArtifacts.world_state),
+      ticket_payload_artifact: asJsonArtifact(copiedPatternArtifacts.ticket_payload),
+      quant_signal_bundle: copiedPatternArtifacts.quant_signal_bundle,
+      decision_ledger_artifact: copiedPatternArtifacts.decision_ledger,
+      calibration_report_artifact: asJsonArtifact(copiedPatternArtifacts.calibration_report),
+      resolved_history_artifact: copiedPatternArtifacts.resolved_history,
+      cost_model_report_artifact: copiedPatternArtifacts.cost_model_report,
+      walk_forward_report_artifact: copiedPatternArtifacts.walk_forward_report,
+      autopilot_cycle_summary_artifact: asJsonArtifact(copiedPatternArtifacts.autopilot_cycle_summary),
+      research_memory_summary_artifact: copiedPatternArtifacts.research_memory_summary,
       strategy_candidate_packet: strategyArtifacts.strategy_candidate_packet ?? undefined,
       strategy_decision_packet: strategyArtifacts.strategy_decision_packet ?? undefined,
       strategy_shadow_summary_packet: strategyArtifacts.strategy_shadow_summary ?? undefined,
@@ -6935,6 +8898,7 @@ export async function advisePredictionMarket(input: AdviceExecutionInput) {
       trade_intent_guard: executionSurfaces.trade_intent_guard,
       multi_venue_execution: executionSurfaces.multi_venue_execution,
       research_sidecar: annotatedResearchSidecar,
+      timesfm_sidecar: timesfmSidecar,
       packet_bundle: packetBundle,
       market_graph: marketGraph ?? undefined,
     }
@@ -6985,14 +8949,26 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
   const thesisRationale = manualThesis.thesisRationale ??
     (decisionPacket ? buildDecisionPacketThesisRationale(decisionPacket) : undefined)
   const researchSidecar = stored.research_sidecar
+  const timesfmSidecar = stored.timesfm_sidecar
 
   const actor = input.actor || 'system'
+  const adapter = getVenueAdapter(snapshot.venue)
+  const replayEvaluationHistoryResolution = resolvePredictionMarketEvaluationHistory({
+    workspaceId: input.workspaceId,
+    venue: snapshot.venue,
+    marketId: snapshot.market.market_id,
+    providedHistory: extractForecastEvaluationHistoryFromArtifacts(existing.artifacts),
+    providedSource: 'stored_artifact',
+    excludeRunIds: [input.runId],
+  })
+  const replayEvaluationHistory = replayEvaluationHistoryResolution.evaluation_history
   const configHash = computeConfigHash({
     replay_of: input.runId,
     thesis_probability: thesisProbability,
     decision_packet_hash: hashDecisionPacket(decisionPacket),
+    evaluation_history_hash: replayEvaluationHistory.length > 0 ? hashText(JSON.stringify(replayEvaluationHistory)) : null,
+    evaluation_history_source: replayEvaluationHistoryResolution.source,
   })
-  const adapter = getVenueAdapter(snapshot.venue)
   const deduplicatedSummary = findRecentPredictionMarketRunByConfig({
     workspaceId: input.workspaceId,
     venue: snapshot.venue,
@@ -7043,7 +9019,14 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
         strategyDecision: storedArtifacts.strategy_decision_packet,
         resolutionAnomalyReport: storedArtifacts.resolution_anomaly_report,
       })
-      const executionPathways = storedArtifacts.execution_pathways ?? derivePredictionMarketExecutionPathways({
+      const pathwaySupplementalArtifacts = buildPredictionMarketExecutionPathwaySupplementalArtifacts({
+        evidencePackets: storedArtifacts.evidence_packets,
+        decisionPacket,
+        researchSidecar: storedArtifacts.research_sidecar,
+        thesisProbability,
+        thesisRationale,
+      })
+      let executionPathways = storedArtifacts.execution_pathways ?? derivePredictionMarketExecutionPathways({
         runId: deduplicatedSummary.run_id,
         snapshot: storedArtifacts.snapshot,
         resolutionPolicy: storedArtifacts.resolution_policy,
@@ -7054,7 +9037,19 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
         market_regime_summary: storedArtifacts.strategy_decision_packet?.market_regime?.summary ?? storedArtifacts.strategy_candidate_packet?.market_regime?.summary ?? null,
         primary_strategy_summary: storedArtifacts.strategy_decision_packet?.summary ?? storedArtifacts.strategy_candidate_packet?.summary ?? null,
         strategy_summary: storedArtifacts.strategy_decision_packet?.summary ?? null,
+        operator_thesis: pathwaySupplementalArtifacts.operator_thesis,
+        research_pipeline_trace: pathwaySupplementalArtifacts.research_pipeline_trace,
       })
+      if (executionPathways && (
+        executionPathways.operator_thesis == null ||
+        executionPathways.research_pipeline_trace == null
+      )) {
+        executionPathways = {
+          ...executionPathways,
+          operator_thesis: executionPathways.operator_thesis ?? pathwaySupplementalArtifacts.operator_thesis,
+          research_pipeline_trace: executionPathways.research_pipeline_trace ?? pathwaySupplementalArtifacts.research_pipeline_trace,
+        }
+      }
       const executionProjection = storedArtifacts.execution_projection ?? derivePredictionMarketExecutionProjection({
         runId: deduplicatedSummary.run_id,
         snapshot: storedArtifacts.snapshot,
@@ -7096,6 +9091,7 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
         prediction_run: {
           ...deduplicatedSummary,
         ...buildPredictionMarketRunRuntimeHints({
+          timesfmSidecar: storedArtifacts.timesfm_sidecar,
           researchSidecar: annotatedResearchSidecar,
           forecast: storedArtifacts.forecast,
           recommendation: storedArtifacts.recommendation,
@@ -7137,6 +9133,7 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
         replay_no_trade_leg_count: extractReplaySurfaceCounters(storedArtifacts.replay_surface).no_trade_leg_count,
         replay_no_trade_leg_rate: extractReplaySurfaceCounters(storedArtifacts.replay_surface).no_trade_leg_rate,
         research_sidecar: storedArtifacts.research_sidecar,
+        timesfm_sidecar: storedArtifacts.timesfm_sidecar,
         microstructure_lab: storedArtifacts.microstructure_lab,
         cross_venue_intelligence: normalizedCrossVenueIntelligence,
         pipeline_guard: storedArtifacts.pipeline_guard ?? finalizedPipelineGuard,
@@ -7255,6 +9252,13 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     strategyDecision: strategyArtifacts.strategy_decision_packet,
     resolutionAnomalyReport: strategyArtifacts.resolution_anomaly_report,
   })
+  const pathwaySupplementalArtifacts = buildPredictionMarketExecutionPathwaySupplementalArtifacts({
+    evidencePackets: storedEvidence,
+    decisionPacket,
+    researchSidecar,
+    thesisProbability,
+    thesisRationale,
+  })
   const executionPathways = derivePredictionMarketExecutionPathways({
     runId: replayRun.id,
     snapshot,
@@ -7269,6 +9273,8 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     strategy_trade_intent_preview: strategyArtifacts.strategy_trade_intent_preview,
     strategy_canonical_trade_intent_preview: strategyArtifacts.strategy_canonical_trade_intent_preview,
     strategy_shadow_summary: strategyArtifacts.strategy_shadow_summary?.summary ?? null,
+    operator_thesis: pathwaySupplementalArtifacts.operator_thesis,
+    research_pipeline_trace: pathwaySupplementalArtifacts.research_pipeline_trace,
   })
   const executionProjection = derivePredictionMarketExecutionProjection({
     runId: replayRun.id,
@@ -7330,6 +9336,33 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     benchmarkPromotionGateKind: benchmarkGateSummary.promotion_gate_kind,
     benchmarkPromotionBlockerSummary: benchmarkGateSummary.promotion_blocker_summary,
   })
+  const researchMemoryCapture = capturePredictionMarketResearchMemory({
+    runId: replayRun.id,
+    workspaceId: input.workspaceId,
+    venue: snapshot.venue,
+    marketId: snapshot.market.market_id,
+    marketSlug: snapshot.market.slug ?? null,
+    recommendation: guardedRecommendation,
+    forecast,
+    researchSidecar: annotatedResearchSidecar,
+    strategyName: strategyArtifacts.strategy_name ?? null,
+    marketRegime: strategyArtifacts.strategy_decision_packet?.market_regime?.label ?? null,
+  })
+  const copiedPatternArtifacts = buildPredictionMarketCopiedPatternArtifacts({
+    runId: replayRun.id,
+    venue: snapshot.venue,
+    snapshot,
+    resolutionPolicy,
+    evidencePackets,
+    forecast,
+    recommendation: guardedRecommendation,
+    evaluationHistory: replayEvaluationHistory,
+    evaluationHistorySourceSummary: replayEvaluationHistoryResolution.source_summary,
+    researchSidecar: annotatedResearchSidecar,
+    strategyDecision: strategyArtifacts.strategy_decision_packet,
+    marketGraph,
+    researchMemorySummary: researchMemoryCapture.artifact,
+  })
 
   const manifest = runManifestSchema.parse({
     run_id: replayRun.id,
@@ -7355,7 +9388,21 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     evidencePackets,
     forecast,
     recommendation: guardedRecommendation,
+    sourceAudit: asJsonArtifact(copiedPatternArtifacts.source_audit),
+    rulesLineage: asJsonArtifact(copiedPatternArtifacts.rules_lineage),
+    catalystTimeline: asJsonArtifact(copiedPatternArtifacts.catalyst_timeline),
+    worldState: asJsonArtifact(copiedPatternArtifacts.world_state),
+    ticketPayload: asJsonArtifact(copiedPatternArtifacts.ticket_payload),
+    quantSignalBundle: copiedPatternArtifacts.quant_signal_bundle,
+    decisionLedger: copiedPatternArtifacts.decision_ledger,
+    calibrationReport: asJsonArtifact(copiedPatternArtifacts.calibration_report),
+    resolvedHistory: copiedPatternArtifacts.resolved_history,
+    costModelReport: copiedPatternArtifacts.cost_model_report,
+    walkForwardReport: copiedPatternArtifacts.walk_forward_report,
+    autopilotCycleSummary: asJsonArtifact(copiedPatternArtifacts.autopilot_cycle_summary),
+    researchMemorySummary: copiedPatternArtifacts.research_memory_summary ?? undefined,
     researchSidecar: annotatedResearchSidecar ?? undefined,
+    timesfmSidecar: timesfmSidecar ? asJsonArtifact(timesfmSidecar) : undefined,
     microstructureLab: microstructureLab ?? undefined,
     crossVenueIntelligence,
     strategyCandidatePacket: strategyArtifacts.strategy_candidate_packet ?? undefined,
@@ -7402,6 +9449,7 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     ],
     metadata: {
       source_run_id: input.runId,
+      research_memory_summary: researchMemoryCapture.artifact?.summary ?? null,
       replay_consistent: guardedRecommendation.action === previousRecommendation.action &&
         guardedRecommendation.side === previousRecommendation.side,
       artifact_refs: artifactRefs,
@@ -7445,6 +9493,10 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
       execution_intent_preview_kind: strategyArtifacts.execution_intent_preview?.preview_kind ?? null,
       strategy_shadow_summary: strategyArtifacts.strategy_shadow_summary?.summary ?? null,
       resolution_anomalies: strategyArtifacts.resolution_anomalies,
+      source_audit_average_score: copiedPatternArtifacts.source_audit.average_score,
+      world_state_action: copiedPatternArtifacts.world_state.recommended_action,
+      quant_signal_viable_count: asNumber(copiedPatternArtifacts.quant_signal_bundle.viable_count),
+      autopilot_cycle_health: copiedPatternArtifacts.autopilot_cycle_summary.overview.health,
       shadow_arbitrage_present: shadowArbitrage != null,
       shadow_arbitrage_shadow_edge_bps: shadowArbitrage?.summary.shadow_edge_bps ?? null,
       shadow_arbitrage_recommended_size_usd: shadowArbitrage?.summary.recommended_size_usd ?? null,
@@ -7455,9 +9507,10 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     run: getRun(replayRun.id, input.workspaceId),
       prediction_run: {
         ...summary,
-      ...buildPredictionMarketRunRuntimeHints({
-        researchSidecar: annotatedResearchSidecar,
-        forecast,
+        ...buildPredictionMarketRunRuntimeHints({
+          timesfmSidecar,
+          researchSidecar: annotatedResearchSidecar,
+          forecast,
         recommendation: guardedRecommendation,
         venueFeedSurface: pipelineGuard.venue_feed_surface,
         executionPathways,
@@ -7469,6 +9522,17 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
         executionIntentPreview: strategyArtifacts.execution_intent_preview,
         resolutionAnomalyReport: strategyArtifacts.resolution_anomaly_report,
         strategyShadowSummary: strategyArtifacts.strategy_shadow_summary,
+        sourceAudit: asJsonArtifact(copiedPatternArtifacts.source_audit),
+        worldState: asJsonArtifact(copiedPatternArtifacts.world_state),
+        ticketPayload: asJsonArtifact(copiedPatternArtifacts.ticket_payload),
+        quantSignalBundle: copiedPatternArtifacts.quant_signal_bundle,
+        decisionLedger: copiedPatternArtifacts.decision_ledger,
+        calibrationReport: asJsonArtifact(copiedPatternArtifacts.calibration_report),
+        resolvedHistory: copiedPatternArtifacts.resolved_history,
+        costModelReport: copiedPatternArtifacts.cost_model_report,
+        walkForwardReport: copiedPatternArtifacts.walk_forward_report,
+        autopilotCycleSummary: asJsonArtifact(copiedPatternArtifacts.autopilot_cycle_summary),
+        researchMemorySummary: copiedPatternArtifacts.research_memory_summary,
           benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverrideFromSummary(benchmarkGateSummary),
         }),
         ...buildPredictionMarketBenchmarkGateOverride(existing),
@@ -7480,6 +9544,20 @@ export async function replayPredictionMarketRun(input: ReplayExecutionInput) {
     recommendation: guardedRecommendation,
     market_events: undefined,
     market_positions: undefined,
+    source_audit_artifact: asJsonArtifact(copiedPatternArtifacts.source_audit),
+    rules_lineage_artifact: asJsonArtifact(copiedPatternArtifacts.rules_lineage),
+    catalyst_timeline_artifact: asJsonArtifact(copiedPatternArtifacts.catalyst_timeline),
+    world_state_artifact: asJsonArtifact(copiedPatternArtifacts.world_state),
+    ticket_payload_artifact: asJsonArtifact(copiedPatternArtifacts.ticket_payload),
+    quant_signal_bundle: copiedPatternArtifacts.quant_signal_bundle,
+    decision_ledger_artifact: copiedPatternArtifacts.decision_ledger,
+    calibration_report_artifact: asJsonArtifact(copiedPatternArtifacts.calibration_report),
+    resolved_history_artifact: copiedPatternArtifacts.resolved_history,
+    cost_model_report_artifact: copiedPatternArtifacts.cost_model_report,
+    walk_forward_report_artifact: copiedPatternArtifacts.walk_forward_report,
+    autopilot_cycle_summary_artifact: asJsonArtifact(copiedPatternArtifacts.autopilot_cycle_summary),
+    research_memory_summary_artifact: copiedPatternArtifacts.research_memory_summary,
+    timesfm_sidecar: timesfmSidecar,
     strategy_candidate_packet: strategyArtifacts.strategy_candidate_packet ?? undefined,
     strategy_decision_packet: strategyArtifacts.strategy_decision_packet ?? undefined,
     strategy_shadow_summary_packet: strategyArtifacts.strategy_shadow_summary ?? undefined,
@@ -7578,10 +9656,24 @@ export function getPredictionMarketRunDetails(
   let multiVenueExecution: MultiVenueExecution | undefined
   let marketEvents: PredictionMarketJsonArtifact | undefined
   let marketPositions: PredictionMarketJsonArtifact | undefined
+  let sourceAuditArtifact: PredictionMarketJsonArtifact | null | undefined
+  let rulesLineageArtifact: PredictionMarketJsonArtifact | null | undefined
+  let catalystTimelineArtifact: PredictionMarketJsonArtifact | null | undefined
+  let worldStateArtifact: PredictionMarketJsonArtifact | null | undefined
+  let ticketPayloadArtifact: PredictionMarketJsonArtifact | null | undefined
+  let quantSignalBundle: PredictionMarketJsonArtifact | null | undefined
+  let decisionLedgerArtifact: PredictionMarketJsonArtifact | null | undefined
+  let calibrationReportArtifact: PredictionMarketJsonArtifact | null | undefined
+  let resolvedHistoryArtifact: PredictionMarketJsonArtifact | null | undefined
+  let costModelReportArtifact: PredictionMarketJsonArtifact | null | undefined
+  let walkForwardReportArtifact: PredictionMarketJsonArtifact | null | undefined
+  let autopilotCycleSummaryArtifact: PredictionMarketJsonArtifact | null | undefined
+  let researchMemorySummaryArtifact: PredictionMarketJsonArtifact | null | undefined
   let paperSurface: PredictionMarketReplaySurface | null | undefined
   let replaySurface: PredictionMarketReplaySurface | null | undefined
   let microstructureLab: MicrostructureLabReport | undefined
   let researchSidecar: MarketResearchSidecar | undefined
+  let timesfmSidecar: PredictionMarketTimesFMSidecar | undefined
   let researchBridge: ResearchBridgeBundle | null | undefined
   let venueFeedSurface: MarketFeedSurface | undefined
   let marketGraph: PredictionMarketMarketGraph | null | undefined
@@ -7603,10 +9695,24 @@ export function getPredictionMarketRunDetails(
     const storedArtifacts = extractStoredExecutionArtifacts(benchmarkAwareDetails)
     marketEvents = storedArtifacts.market_events ?? undefined
     marketPositions = storedArtifacts.market_positions ?? undefined
+    sourceAuditArtifact = storedArtifacts.source_audit ?? undefined
+    rulesLineageArtifact = storedArtifacts.rules_lineage ?? undefined
+    catalystTimelineArtifact = storedArtifacts.catalyst_timeline ?? undefined
+    worldStateArtifact = storedArtifacts.world_state ?? undefined
+    ticketPayloadArtifact = storedArtifacts.ticket_payload ?? undefined
+    quantSignalBundle = storedArtifacts.quant_signal_bundle ?? undefined
+    decisionLedgerArtifact = storedArtifacts.decision_ledger ?? undefined
+    calibrationReportArtifact = storedArtifacts.calibration_report ?? undefined
+    resolvedHistoryArtifact = storedArtifacts.resolved_history ?? undefined
+    costModelReportArtifact = storedArtifacts.cost_model_report ?? undefined
+    walkForwardReportArtifact = storedArtifacts.walk_forward_report ?? undefined
+    autopilotCycleSummaryArtifact = storedArtifacts.autopilot_cycle_summary ?? undefined
+    researchMemorySummaryArtifact = storedArtifacts.research_memory_summary ?? undefined
     paperSurface = storedArtifacts.paper_surface ?? undefined
     replaySurface = storedArtifacts.replay_surface ?? undefined
     microstructureLab = storedArtifacts.microstructure_lab ?? undefined
     researchBridge = storedArtifacts.research_bridge ?? undefined
+    timesfmSidecar = storedArtifacts.timesfm_sidecar ?? undefined
     strategyCandidatePacket = storedArtifacts.strategy_candidate_packet
     strategyDecisionPacket = storedArtifacts.strategy_decision_packet
     strategyShadowSummary = storedArtifacts.strategy_shadow_summary
@@ -7644,6 +9750,13 @@ export function getPredictionMarketRunDetails(
         resolutionAnomalyReport: storedArtifacts.resolution_anomaly_report,
       })
       : undefined)
+    const pathwaySupplementalArtifacts = buildPredictionMarketExecutionPathwaySupplementalArtifacts({
+      evidencePackets: storedArtifacts.evidence_packets,
+      decisionPacket: extractDecisionPacketFromEvidencePackets(storedArtifacts.evidence_packets),
+      researchSidecar: researchSidecar ?? storedArtifacts.research_sidecar,
+      thesisProbability: extractManualThesisFromEvidencePackets(storedArtifacts.evidence_packets).thesisProbability,
+      thesisRationale: extractManualThesisFromEvidencePackets(storedArtifacts.evidence_packets).thesisRationale,
+    })
     executionPathways = storedArtifacts.execution_pathways ?? (executionReadiness
       ? derivePredictionMarketExecutionPathways({
         runId,
@@ -7656,8 +9769,20 @@ export function getPredictionMarketRunDetails(
         market_regime_summary: storedArtifacts.strategy_decision_packet?.market_regime?.summary ?? storedArtifacts.strategy_candidate_packet?.market_regime?.summary ?? null,
         primary_strategy_summary: storedArtifacts.strategy_decision_packet?.summary ?? storedArtifacts.strategy_candidate_packet?.summary ?? null,
         strategy_summary: storedArtifacts.strategy_decision_packet?.summary ?? null,
+        operator_thesis: pathwaySupplementalArtifacts.operator_thesis,
+        research_pipeline_trace: pathwaySupplementalArtifacts.research_pipeline_trace,
       })
       : undefined)
+    if (executionPathways && (
+      executionPathways.operator_thesis == null ||
+      executionPathways.research_pipeline_trace == null
+    )) {
+      executionPathways = {
+        ...executionPathways,
+        operator_thesis: executionPathways.operator_thesis ?? pathwaySupplementalArtifacts.operator_thesis,
+        research_pipeline_trace: executionPathways.research_pipeline_trace ?? pathwaySupplementalArtifacts.research_pipeline_trace,
+      }
+    }
     executionProjection = storedArtifacts.execution_projection ?? (executionReadiness
       ? derivePredictionMarketExecutionProjection({
         runId,
@@ -7748,6 +9873,7 @@ export function getPredictionMarketRunDetails(
     replay_no_trade_leg_count: extractReplaySurfaceCounters(replaySurface).no_trade_leg_count,
     replay_no_trade_leg_rate: extractReplaySurfaceCounters(replaySurface).no_trade_leg_rate,
     ...buildPredictionMarketRunRuntimeHints({
+      timesfmSidecar: timesfmSidecar ?? null,
       researchSidecar: researchSidecar,
       forecast: forecastPacket,
       recommendation: recommendationPacket,
@@ -7761,6 +9887,17 @@ export function getPredictionMarketRunDetails(
       executionIntentPreview: executionIntentPreview ?? null,
       resolutionAnomalyReport: resolutionAnomalyReport ?? null,
       strategyShadowSummary: strategyShadowSummary ?? null,
+      sourceAudit: sourceAuditArtifact ?? null,
+      worldState: worldStateArtifact ?? null,
+      ticketPayload: ticketPayloadArtifact ?? null,
+      quantSignalBundle: quantSignalBundle ?? null,
+      decisionLedger: decisionLedgerArtifact ?? null,
+      calibrationReport: calibrationReportArtifact ?? null,
+      resolvedHistory: resolvedHistoryArtifact ?? null,
+      costModelReport: costModelReportArtifact ?? null,
+      walkForwardReport: walkForwardReportArtifact ?? null,
+      autopilotCycleSummary: autopilotCycleSummaryArtifact ?? null,
+      researchMemorySummary: researchMemorySummaryArtifact ?? null,
       benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverride(benchmarkAwareDetails),
     }),
     ...buildPredictionMarketBenchmarkGateOverride(benchmarkAwareDetails),
@@ -7776,9 +9913,23 @@ export function getPredictionMarketRunDetails(
     multi_venue_execution: multiVenueExecution,
     research_bridge: researchBridge,
     research_sidecar: researchSidecar,
+    timesfm_sidecar: timesfmSidecar ?? null,
     packet_bundle: packetBundle,
     market_events: marketEvents,
     market_positions: marketPositions,
+    source_audit_artifact: sourceAuditArtifact ?? null,
+    rules_lineage_artifact: rulesLineageArtifact ?? null,
+    catalyst_timeline_artifact: catalystTimelineArtifact ?? null,
+    world_state_artifact: worldStateArtifact ?? null,
+    ticket_payload_artifact: ticketPayloadArtifact ?? null,
+    quant_signal_bundle: quantSignalBundle ?? null,
+    decision_ledger_artifact: decisionLedgerArtifact ?? null,
+    calibration_report_artifact: calibrationReportArtifact ?? null,
+    resolved_history_artifact: resolvedHistoryArtifact ?? null,
+    cost_model_report_artifact: costModelReportArtifact ?? null,
+    walk_forward_report_artifact: walkForwardReportArtifact ?? null,
+    autopilot_cycle_summary_artifact: autopilotCycleSummaryArtifact ?? null,
+    research_memory_summary_artifact: researchMemorySummaryArtifact ?? null,
     venue_feed_surface: venueFeedSurface,
     venue_coverage: venueCoverage,
     microstructure_lab: microstructureLab,
@@ -7899,6 +10050,7 @@ export function preparePredictionMarketRunDispatch(input: {
     trade_intent_guard: dispatchTradeIntentGuard,
     multi_venue_execution: details.multi_venue_execution ?? null,
     ...buildPredictionMarketRunRuntimeHints({
+      timesfmSidecar: details.timesfm_sidecar ?? null,
       researchSidecar: details.research_sidecar ?? null,
       forecast: forecastPacket,
       recommendation: recommendationPacket,
@@ -7907,6 +10059,17 @@ export function preparePredictionMarketRunDispatch(input: {
       executionProjection: executionProjection,
       shadowArbitrage: details.shadow_arbitrage,
       multiVenueExecution: details.multi_venue_execution ?? null,
+      sourceAudit: details.source_audit_artifact ?? null,
+      worldState: details.world_state_artifact ?? null,
+      ticketPayload: details.ticket_payload_artifact ?? null,
+      quantSignalBundle: details.quant_signal_bundle ?? null,
+      decisionLedger: details.decision_ledger_artifact ?? null,
+      calibrationReport: details.calibration_report_artifact ?? null,
+      resolvedHistory: details.resolved_history_artifact ?? null,
+      costModelReport: details.cost_model_report_artifact ?? null,
+      walkForwardReport: details.walk_forward_report_artifact ?? null,
+      autopilotCycleSummary: details.autopilot_cycle_summary_artifact ?? null,
+      researchMemorySummary: details.research_memory_summary_artifact ?? null,
       benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverride(details),
     }),
     execution_projection_selected_preview: selectedPreview,
@@ -8007,6 +10170,7 @@ export function preparePredictionMarketRunPaper(input: {
     paper_trade_intent_preview: paperPreview.preview,
     paper_trade_intent_preview_source: paperPreview.source,
     ...buildPredictionMarketRunRuntimeHints({
+      timesfmSidecar: details.timesfm_sidecar ?? null,
       researchSidecar: details.research_sidecar ?? null,
       forecast: forecastPacket,
       recommendation: recommendationPacket,
@@ -8015,6 +10179,17 @@ export function preparePredictionMarketRunPaper(input: {
       executionProjection: executionProjection,
       shadowArbitrage: details.shadow_arbitrage,
       multiVenueExecution: details.multi_venue_execution ?? null,
+      sourceAudit: details.source_audit_artifact ?? null,
+      worldState: details.world_state_artifact ?? null,
+      ticketPayload: details.ticket_payload_artifact ?? null,
+      quantSignalBundle: details.quant_signal_bundle ?? null,
+      decisionLedger: details.decision_ledger_artifact ?? null,
+      calibrationReport: details.calibration_report_artifact ?? null,
+      resolvedHistory: details.resolved_history_artifact ?? null,
+      costModelReport: details.cost_model_report_artifact ?? null,
+      walkForwardReport: details.walk_forward_report_artifact ?? null,
+      autopilotCycleSummary: details.autopilot_cycle_summary_artifact ?? null,
+      researchMemorySummary: details.research_memory_summary_artifact ?? null,
       benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverride(details),
     }),
   }
@@ -8114,6 +10289,7 @@ export function preparePredictionMarketRunShadow(input: {
     shadow_trade_intent_preview: shadowPreview.preview,
     shadow_trade_intent_preview_source: shadowPreview.source,
     ...buildPredictionMarketRunRuntimeHints({
+      timesfmSidecar: details.timesfm_sidecar ?? null,
       researchSidecar: details.research_sidecar ?? null,
       forecast: forecastPacket,
       recommendation: recommendationPacket,
@@ -8122,6 +10298,17 @@ export function preparePredictionMarketRunShadow(input: {
       executionProjection: executionProjection,
       shadowArbitrage: details.shadow_arbitrage,
       multiVenueExecution: details.multi_venue_execution ?? null,
+      sourceAudit: details.source_audit_artifact ?? null,
+      worldState: details.world_state_artifact ?? null,
+      ticketPayload: details.ticket_payload_artifact ?? null,
+      quantSignalBundle: details.quant_signal_bundle ?? null,
+      decisionLedger: details.decision_ledger_artifact ?? null,
+      calibrationReport: details.calibration_report_artifact ?? null,
+      resolvedHistory: details.resolved_history_artifact ?? null,
+      costModelReport: details.cost_model_report_artifact ?? null,
+      walkForwardReport: details.walk_forward_report_artifact ?? null,
+      autopilotCycleSummary: details.autopilot_cycle_summary_artifact ?? null,
+      researchMemorySummary: details.research_memory_summary_artifact ?? null,
       benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverride(details),
     }),
   }
@@ -8160,6 +10347,9 @@ export function preparePredictionMarketRunLive(input: {
   const livePreview = resolvePredictionMarketProjectionPreviewByMode(executionProjection, 'live')
   const benchmarkSurfaceBlockingReasons = resolvePredictionMarketBenchmarkSurfaceBlockingReasons(details)
   const liveVenueFeedSurface = details.venue_feed_surface ?? getVenueFeedSurfaceContract(details.venue)
+  const liveTransport = resolvePredictionMarketLiveExecutionBridgeStatus(
+    details.venue ?? liveVenueFeedSurface?.venue ?? null,
+  )
   const liveTradeIntentGuard = rehydratePredictionMarketTradeIntentGuardForBenchmarkPromotion(
     details.trade_intent_guard ?? null,
     details,
@@ -8172,7 +10362,10 @@ export function preparePredictionMarketRunLive(input: {
   const guardBlockers = liveTradeIntentGuard?.verdict === 'blocked'
     ? (liveTradeIntentGuard.blocked_reasons ?? []).map((reason) => `trade_intent_guard:${reason}`)
     : []
-  const liveProjectionIsPromotable = selectedPath === 'live' && benchmarkLiveGate.promotion_ready
+  const liveProjectionIsPromotable =
+    selectedPath === 'live'
+    && benchmarkLiveGate.promotion_ready
+    && liveTransport.live_transport_ready
   const liveBlockingReasons = uniqueStrings([
     ...(selectedPath ? [] : ['no_actionable_execution_projection_path']),
     ...(selectedPath === 'live' ? [] : ['selected_path_not_live']),
@@ -8186,6 +10379,7 @@ export function preparePredictionMarketRunLive(input: {
     ...(selectedPreview ? [] : ['selected_path_missing_trade_intent_preview']),
     ...(liveTradeIntentGuard ? [] : ['trade_intent_guard_unavailable']),
     ...guardBlockers,
+    ...liveTransport.blockers,
     ...(details.benchmark_gate_live_block_reason ? [`benchmark:${details.benchmark_gate_live_block_reason}`] : []),
     ...(benchmarkLiveGate.live_block_reason ? [`benchmark:${benchmarkLiveGate.live_block_reason}`] : []),
     ...benchmarkSurfaceBlockingReasons,
@@ -8202,7 +10396,7 @@ export function preparePredictionMarketRunLive(input: {
   })
 
   const summary = liveStatus === 'ready'
-    ? 'Live surface is ready using execution_projection.selected_path=live; it remains preflight-only and threads execution_readiness plus multi_venue_execution through the canonical execution_projection preview.'
+    ? 'Live surface is ready using execution_projection.selected_path=live; it remains the canonical preflight surface for governed live routing, and real venue execution is available via execution_mode=live after an approved live intent.'
     : buildBlockedSurfaceSummary({
       surfaceLabel: 'Live',
       blockedReasons: liveBlockingReasons,
@@ -8227,6 +10421,9 @@ export function preparePredictionMarketRunLive(input: {
     benchmark_surface_blocking_reasons: benchmarkSurfaceBlockingReasons,
     benchmark_promotion_blockers: benchmarkPromotionBlockers,
     benchmark_promotion_ready: benchmarkLiveGate.promotion_ready,
+    live_transport_ready: liveTransport.live_transport_ready,
+    live_transport_blockers: liveTransport.blockers,
+    live_transport_summary: liveTransport.summary,
     summary,
     source_refs: {
       run_detail: details.run_id,
@@ -8256,6 +10453,7 @@ export function preparePredictionMarketRunLive(input: {
       ? (selectedPreviewSource ?? null)
       : livePreview.source,
     ...buildPredictionMarketRunRuntimeHints({
+      timesfmSidecar: details.timesfm_sidecar ?? null,
       researchSidecar: details.research_sidecar ?? null,
       forecast: forecastPacket,
       recommendation: recommendationPacket,
@@ -8264,6 +10462,17 @@ export function preparePredictionMarketRunLive(input: {
       executionProjection: executionProjection,
       shadowArbitrage: details.shadow_arbitrage,
       multiVenueExecution: details.multi_venue_execution ?? null,
+      sourceAudit: details.source_audit_artifact ?? null,
+      worldState: details.world_state_artifact ?? null,
+      ticketPayload: details.ticket_payload_artifact ?? null,
+      quantSignalBundle: details.quant_signal_bundle ?? null,
+      decisionLedger: details.decision_ledger_artifact ?? null,
+      calibrationReport: details.calibration_report_artifact ?? null,
+      resolvedHistory: details.resolved_history_artifact ?? null,
+      costModelReport: details.cost_model_report_artifact ?? null,
+      walkForwardReport: details.walk_forward_report_artifact ?? null,
+      autopilotCycleSummary: details.autopilot_cycle_summary_artifact ?? null,
+      researchMemorySummary: details.research_memory_summary_artifact ?? null,
       benchmarkGateOverride: buildPredictionMarketBenchmarkGateOverride(details),
     }),
   }

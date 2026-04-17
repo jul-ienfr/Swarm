@@ -460,7 +460,7 @@ def test_meeting_cli_defaults_to_pydanticai_runtime(monkeypatch) -> None:
     )
 
     assert captured["runtime"] == RuntimeBackend.pydanticai
-    assert captured["allow_fallback"] is True
+    assert captured["allow_fallback"] is False
 
 
 def test_deliberate_cli_defaults_to_pydanticai_runtime(monkeypatch) -> None:
@@ -478,7 +478,8 @@ def test_deliberate_cli_defaults_to_pydanticai_runtime(monkeypatch) -> None:
     )
 
     assert captured["runtime"] == RuntimeBackend.pydanticai
-    assert captured["allow_fallback"] is True
+    assert captured["allow_fallback"] is False
+    assert captured["strict_analysis"] is True
     assert captured["mode"] == DeliberationMode.committee.value
 
 
@@ -521,6 +522,25 @@ def test_deliberate_cli_can_disable_fallback_and_forward_stability_runs(monkeypa
     assert captured["stability_runs"] == 3
 
 
+def test_deliberate_cli_can_enable_strict_analysis_and_forward_it(monkeypatch) -> None:
+    captured = {}
+
+    def fake_runtime_runner(**kwargs):
+        captured.update(kwargs)
+        return FakeDeliberationResult()
+
+    monkeypatch.setattr("main.run_deliberation_runtime", fake_runtime_runner)
+
+    main.deliberate(
+        topic="Choose the product launch approach",
+        strict_analysis=True,
+        json_output=True,
+    )
+
+    assert captured["strict_analysis"] is True
+    assert captured["allow_fallback"] is False
+
+
 def test_deliberate_cli_disables_fallback_for_repeated_stability_runs(monkeypatch) -> None:
     captured = {}
     printed = {}
@@ -548,6 +568,35 @@ def test_deliberate_cli_disables_fallback_for_repeated_stability_runs(monkeypatc
     assert printed["result"].metadata["stability_runs"] == 4
     assert printed["result"].metadata["stability_guard_applied"] is True
     assert printed["result"].metadata["stability_guard_reason"] == "fallback_disabled_for_repeated_stability_comparison"
+
+
+def test_deliberate_cli_disables_fallback_for_strict_analysis(monkeypatch) -> None:
+    captured = {}
+    printed = {}
+
+    def fake_runtime_runner(**kwargs):
+        captured.update(kwargs)
+        return FakeDeliberationResult()
+
+    def fake_print_deliberation_result(result, as_json=False):
+        printed["result"] = result
+        printed["as_json"] = as_json
+
+    monkeypatch.setattr("main.run_deliberation_runtime", fake_runtime_runner)
+    monkeypatch.setattr("main._print_deliberation_result", fake_print_deliberation_result)
+
+    main.deliberate(
+        topic="Choose the product launch approach",
+        strict_analysis=True,
+        json_output=False,
+    )
+
+    assert captured["strict_analysis"] is True
+    assert captured["allow_fallback"] is False
+    assert printed["as_json"] is False
+    assert printed["result"].metadata["strict_analysis"]["enabled"] is True
+    assert printed["result"].metadata["strict_analysis"]["fallback_guard_applied"] is True
+    assert printed["result"].metadata["strict_analysis_guard_reason"] == "fallback_disabled_for_strict_analysis"
 
 
 def test_deliberation_campaign_cli_text_summary(monkeypatch, tmp_path: Path) -> None:
@@ -3303,7 +3352,7 @@ def test_improve_cli_text_summary_includes_resilience_diagnostics(monkeypatch) -
     assert "Last Decision:" in loop_output
 
 
-def test_meeting_cli_smoke_falls_back_to_legacy_when_pydanticai_runtime_is_unavailable(monkeypatch) -> None:
+def test_meeting_cli_smoke_can_fall_back_to_legacy_when_strict_mode_is_disabled(monkeypatch) -> None:
     runner = CliRunner()
     calls = []
 
@@ -3335,6 +3384,8 @@ def test_meeting_cli_smoke_falls_back_to_legacy_when_pydanticai_runtime_is_unava
         [
             "meeting",
             "Choose the product launch approach",
+            "--no-strict-analysis",
+            "--allow-fallback",
             "--participant",
             "architect",
             "--participant",
@@ -3372,7 +3423,6 @@ def test_meeting_cli_no_fallback_surfaces_runtime_failure(monkeypatch) -> None:
         [
             "meeting",
             "Choose the product launch approach",
-            "--no-allow-fallback",
             "--json",
         ],
     )
@@ -3585,6 +3635,7 @@ def test_deliberate_cli_text_summary_includes_stability_and_comparability(monkey
     assert "runtime_id=claude-sonnet-4-6" in output
     assert "runtime=pydanticai" in output
     assert "engine=agentsociety" in output
+    assert "strict=yes" in output
     assert "Stability:" in output
     assert "runs=3" in output
     assert "guard=yes" in output

@@ -53,11 +53,15 @@ describe('api index prediction markets entries', () => {
     )
 
     const advise = entries.find((entry: { path: string }) => entry.path === '/api/prediction-markets/advise')
+    const predict = entries.find((entry: { path: string }) => entry.path === '/api/prediction-markets/predict')
+    const predictDeep = entries.find((entry: { path: string }) => entry.path === '/api/prediction-markets/predict-deep')
     const replay = entries.find((entry: { path: string }) => entry.path === '/api/prediction-markets/replay')
     const live = entries.find((entry: { path: string }) => entry.path === '/api/v1/prediction-markets/runs/:run_id/live')
     const runs = entries.find((entry: { path: string }) => entry.path === '/api/prediction-markets/runs')
 
     expect(advise).toMatchObject({ auth: 'operator' })
+    expect(predict).toMatchObject({ auth: 'operator' })
+    expect(predictDeep).toMatchObject({ auth: 'operator' })
     expect(replay).toMatchObject({ auth: 'operator' })
     expect(live).toMatchObject({ auth: 'operator', method: 'POST' })
     expect(runs).toMatchObject({ auth: 'viewer' })
@@ -74,6 +78,8 @@ describe('api index prediction markets entries', () => {
       { path: '/api/v1/prediction-markets/dashboard/live-intents/:intent_id', auth: 'viewer', method: 'GET' },
       { path: '/api/v1/prediction-markets/dashboard/live-intents/:intent_id/approve', auth: 'operator', method: 'POST' },
       { path: '/api/v1/prediction-markets/dashboard/live-intents/:intent_id/reject', auth: 'operator', method: 'POST' },
+      { path: '/api/v1/prediction-markets/predict', auth: 'operator', method: 'POST' },
+      { path: '/api/v1/prediction-markets/predict-deep', auth: 'operator', method: 'POST' },
     ]))
   })
 })

@@ -51,6 +51,11 @@ export type PredictionMarketStrategyLatencyState =
   | 'lagging'
   | 'stale'
 
+export type PredictionMarketStrategyMakerQuoteState =
+  | 'viable'
+  | 'guarded'
+  | 'blocked'
+
 export type PredictionMarketStrategyResolutionAnomalyKind =
   | 'policy_ambiguity'
   | 'policy_blocked'
@@ -123,6 +128,8 @@ export type PredictionMarketStrategyMarketRegime = {
   resolution_state: PredictionMarketStrategyResolutionState
   research_state: PredictionMarketStrategyResearchState
   latency_state: PredictionMarketStrategyLatencyState
+  maker_quote_state: PredictionMarketStrategyMakerQuoteState
+  maker_quote_freshness_budget_ms: number
   stress_level: 'low' | 'medium' | 'high' | 'critical'
   signal_strength: number
   confidence_score: number
@@ -858,6 +865,50 @@ function latencyGapFromReferences(references: readonly PredictionMarketStrategyL
   return best.freshness_gap_ms
 }
 
+function deriveMakerQuoteState(input: {
+  priceState: PredictionMarketStrategyPriceState
+  freshnessState: PredictionMarketStrategyFreshnessState
+  resolutionState: PredictionMarketStrategyResolutionState
+  latencyState: PredictionMarketStrategyLatencyState
+  hoursToResolution: number | null
+  microstructureSeverity: MicrostructureSeverity | null
+}): {
+  state: PredictionMarketStrategyMakerQuoteState
+  freshness_budget_ms: number
+} {
+  if (
+    input.resolutionState === 'anomalous' ||
+    input.freshnessState === 'stale' ||
+    input.latencyState === 'stale' ||
+    input.microstructureSeverity === 'critical' ||
+    (input.hoursToResolution != null && input.hoursToResolution <= 6)
+  ) {
+    return {
+      state: 'blocked',
+      freshness_budget_ms: 0,
+    }
+  }
+
+  if (
+    input.resolutionState === 'watch' ||
+    input.freshnessState === 'warm' ||
+    input.latencyState === 'lagging' ||
+    input.priceState === 'dislocated' ||
+    input.microstructureSeverity === 'high' ||
+    (input.hoursToResolution != null && input.hoursToResolution <= 24)
+  ) {
+    return {
+      state: 'guarded',
+      freshness_budget_ms: 15_000,
+    }
+  }
+
+  return {
+    state: 'viable',
+    freshness_budget_ms: 30_000,
+  }
+}
+
 function signalStrengthFromRegime(input: {
   spreadBps: number | null
   quoteAgeMs: number | null
@@ -989,6 +1040,14 @@ export function deriveMarketRegime(
   const crossVenueManualReviewCount = input.cross_venue_summary?.manual_review?.length ?? 0
   const crossVenueBlockingCount = input.cross_venue_summary?.blocking_reasons?.length ?? 0
   const microstructureSeverity: MicrostructureSeverity | null = input.microstructure_lab?.summary.worst_case_severity ?? null
+  const makerQuote = deriveMakerQuoteState({
+    priceState,
+    freshnessState,
+    resolutionState,
+    latencyState,
+    hoursToResolution,
+    microstructureSeverity,
+  })
 
   let disposition: PredictionMarketStrategyRegimeDisposition = 'calm'
   if (
@@ -1017,6 +1076,8 @@ export function deriveMarketRegime(
     `resolution_state:${resolutionState}`,
     `research_state:${researchState}`,
     `latency_state:${latencyState}`,
+    `maker_quote_state:${makerQuote.state}`,
+    `maker_quote_freshness_budget_ms:${makerQuote.freshness_budget_ms}`,
     hoursToResolution != null ? `hours_to_resolution:${hoursToResolution.toFixed(2)}` : null,
     microstructureSeverity ? `microstructure_severity:${microstructureSeverity}` : null,
     crossVenueManualReviewCount > 0 ? `cross_venue_manual_review:${crossVenueManualReviewCount}` : null,
@@ -1059,16 +1120,24 @@ export function deriveMarketRegime(
     `resolution=${resolutionState}`,
     `research=${researchState}`,
     `latency=${latencyState}`,
+    `maker_quote=${makerQuote.state}`,
   ].join('; ')
 
   const reasons = uniqueStrings([
+    ...(disposition === 'defense' ? ['regime_defense_active'] : []),
+    ...(disposition === 'watch' ? ['regime_watch_active'] : []),
+    ...(disposition === 'stress' ? ['regime_stress_active'] : []),
     ...(anomalies.length > 0 ? [`resolution_anomalies:${anomalies.length}`] : []),
     ...(latencyReferences.length > 0 ? [`latency_references:${latencyReferences.length}`] : []),
     ...(researchState === 'abstain' ? ['research_abstention'] : []),
     ...researchSummary.reasons,
+    ...(resolutionState === 'anomalous' ? ['resolution_defense_gate'] : []),
+    ...(freshnessState === 'stale' && latencyState === 'stale' ? ['freshness_defense_gate'] : []),
     ...(priceState === 'dislocated' ? ['price_dislocated'] : []),
     ...(freshnessState === 'stale' ? ['snapshot_stale'] : []),
     ...(crossVenueBlockingCount > 0 ? ['cross_venue_blocking_reasons'] : []),
+    `maker_quote_state:${makerQuote.state}`,
+    `maker_quote_freshness_budget_ms:${makerQuote.freshness_budget_ms}`,
   ])
 
   return {
@@ -1083,6 +1152,8 @@ export function deriveMarketRegime(
     resolution_state: resolutionState,
     research_state: researchState,
     latency_state: latencyState,
+    maker_quote_state: makerQuote.state,
+    maker_quote_freshness_budget_ms: makerQuote.freshness_budget_ms,
     stress_level,
     signal_strength: signalStrength,
     confidence_score: confidenceScore,

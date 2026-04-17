@@ -278,6 +278,7 @@ def _deliberation_comparability_line(result: DeliberationResult) -> str:
         ("fallback", comparability.get("fallback_used", result.fallback_used)),
         ("samples", comparability.get("stability_sample_count")),
         ("guard", comparability.get("stability_guard_applied")),
+        ("strict", comparability.get("strict_analysis")),
     )
 
 
@@ -5309,14 +5310,17 @@ def meeting(
     config_path: str = typer.Option("config.yaml", help="Path to the swarm config."),
     runtime: RuntimeBackend = typer.Option(RuntimeBackend.pydanticai, "--runtime", help="Preferred meeting runtime."),
     allow_fallback: bool = typer.Option(True, "--allow-fallback/--no-allow-fallback", help="Allow a legacy fallback if the preferred runtime is unavailable."),
+    strict_analysis: bool = typer.Option(True, "--strict-analysis/--no-strict-analysis", help="For analysis meetings, disable silent fallback so the requested runtime is either honored or fails explicitly."),
     json_output: bool = typer.Option(False, "--json", help="Print the meeting result as JSON."),
 ):
     """Run a multi-agent strategy meeting and synthesize a recommended strategy."""
     runtime, allow_fallback = _coerce_runtime_option(runtime, allow_fallback)
+    resolved_strict_analysis = True if isinstance(strict_analysis, OptionInfo) else bool(strict_analysis)
+    resolved_allow_fallback = False if resolved_strict_analysis and runtime != RuntimeBackend.legacy else allow_fallback
     resolved_participants = [] if isinstance(participants, OptionInfo) else participants
     resolved_config_path = "config.yaml" if isinstance(config_path, OptionInfo) else config_path
     if not json_output:
-        _print_runtime_banner(runtime, allow_fallback=allow_fallback, label="Meeting")
+        _print_runtime_banner(runtime, allow_fallback=resolved_allow_fallback, label="Meeting")
     result = run_strategy_meeting_runtime(
         topic=topic,
         objective=objective,
@@ -5326,7 +5330,18 @@ def meeting(
         persist=persist,
         config_path=config_path,
         runtime=runtime,
-        allow_fallback=allow_fallback,
+        allow_fallback=resolved_allow_fallback,
+    )
+    strict_analysis_metadata = result.metadata.get("strict_analysis")
+    if not isinstance(strict_analysis_metadata, dict):
+        strict_analysis_metadata = {"enabled": resolved_strict_analysis}
+        result.metadata["strict_analysis"] = strict_analysis_metadata
+    strict_analysis_metadata.setdefault("enabled", resolved_strict_analysis)
+    strict_analysis_metadata.setdefault("requested_allow_fallback", allow_fallback)
+    strict_analysis_metadata.setdefault("effective_allow_fallback", resolved_allow_fallback)
+    strict_analysis_metadata.setdefault(
+        "fallback_guard_applied",
+        bool(resolved_strict_analysis and runtime != RuntimeBackend.legacy and allow_fallback),
     )
     comparability = result.metadata.setdefault("comparability", {}) if isinstance(result.metadata, dict) else {}
     if isinstance(comparability, dict):
@@ -5341,6 +5356,9 @@ def meeting(
         )
         if runtime_id is not None:
             comparability.setdefault("runtime_id", runtime_id)
+        comparability.setdefault("strict_analysis", resolved_strict_analysis)
+        comparability.setdefault("strict_requested_allow_fallback", allow_fallback)
+        comparability.setdefault("strict_effective_allow_fallback", resolved_allow_fallback)
     _print_strategy_meeting_result(result, as_json=json_output)
 
 
@@ -5367,6 +5385,7 @@ def deliberate(
     timeout_seconds: int = typer.Option(1800, "--timeout-seconds", help="Timeout for simulation-backed modes."),
     benchmark_path: str = typer.Option(str(DEFAULT_DELIBERATION_BENCHMARK_SUITE_PATH), "--benchmark-path", help="Benchmark suite path for deliberation evaluation."),
     stability_runs: int = typer.Option(1, "--stability-runs", min=1, help="Repeat the same run and measure stability."),
+    strict_analysis: bool = typer.Option(True, "--strict-analysis/--no-strict-analysis", help="Disable silent round trimming and implicit fallback for analytical deliberation runs."),
     backend_mode: str | None = typer.Option(None, "--backend-mode", help="AgentSociety backend mode: live, surrogate, or disabled."),
     json_output: bool = typer.Option(False, "--json", help="Print the deliberation result as JSON."),
 ):
@@ -5395,9 +5414,11 @@ def deliberate(
         else benchmark_path
     )
     resolved_stability_runs = _resolve_stability_runs_option(stability_runs)
+    resolved_strict_analysis = True if isinstance(strict_analysis, OptionInfo) else bool(strict_analysis)
     resolved_backend_mode = None if isinstance(backend_mode, OptionInfo) else backend_mode
     stability_guard_applied = resolved_stability_runs > 1 and allow_fallback
-    resolved_allow_fallback = False if stability_guard_applied else allow_fallback
+    strict_analysis_guard_applied = resolved_strict_analysis and allow_fallback
+    resolved_allow_fallback = False if (stability_guard_applied or strict_analysis_guard_applied) else allow_fallback
     if not json_output:
         _print_runtime_banner(runtime, allow_fallback=resolved_allow_fallback, label="Deliberation")
     result = run_deliberation_runtime(
@@ -5422,6 +5443,7 @@ def deliberate(
         timeout_seconds=resolved_timeout_seconds,
         benchmark_path=resolved_benchmark_path,
         stability_runs=resolved_stability_runs,
+        strict_analysis=resolved_strict_analysis,
         backend_mode=resolved_backend_mode,
     )
     comparability = result.metadata.setdefault("comparability", {}) if isinstance(result.metadata, dict) else {}
@@ -5444,6 +5466,11 @@ def deliberate(
         comparability.setdefault("engine_used", result.engine_used)
         comparability.setdefault("stability_runs", resolved_stability_runs)
         comparability.setdefault("stability_guard_applied", stability_guard_applied)
+        comparability.setdefault("strict_analysis", resolved_strict_analysis)
+        comparability.setdefault("strict_fallback_guard_applied", strict_analysis_guard_applied)
+        comparability.setdefault("strict_requested_allow_fallback", allow_fallback)
+        comparability.setdefault("strict_effective_allow_fallback", resolved_allow_fallback)
+        comparability.setdefault("strict_rounds_requested", resolved_rounds if resolved_strict_analysis else None)
         stability_summary = getattr(result, "stability_summary", None)
         if stability_summary is not None:
             comparability.setdefault("stability_metric_name", stability_summary.metric_name)
@@ -5451,10 +5478,24 @@ def deliberate(
             comparability.setdefault("stability_sample_count", stability_summary.sample_count)
     result.metadata.setdefault("stability_runs", resolved_stability_runs)
     result.metadata.setdefault("stability_guard_applied", stability_guard_applied)
+    strict_analysis_metadata = result.metadata.get("strict_analysis")
+    if not isinstance(strict_analysis_metadata, dict):
+        strict_analysis_metadata = {"enabled": resolved_strict_analysis}
+        result.metadata["strict_analysis"] = strict_analysis_metadata
+    strict_analysis_metadata.setdefault("enabled", resolved_strict_analysis)
+    strict_analysis_metadata.setdefault("requested_rounds", resolved_rounds)
+    strict_analysis_metadata.setdefault("requested_allow_fallback", allow_fallback)
+    strict_analysis_metadata.setdefault("effective_allow_fallback", resolved_allow_fallback)
+    strict_analysis_metadata.setdefault("fallback_guard_applied", strict_analysis_guard_applied)
     if stability_guard_applied:
         result.metadata.setdefault(
             "stability_guard_reason",
             "fallback_disabled_for_repeated_stability_comparison",
+        )
+    if strict_analysis_guard_applied:
+        result.metadata.setdefault(
+            "strict_analysis_guard_reason",
+            "fallback_disabled_for_strict_analysis",
         )
     _print_deliberation_result(result, as_json=json_output)
 

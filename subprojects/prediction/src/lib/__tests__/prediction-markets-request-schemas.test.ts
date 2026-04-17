@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  approvalTradeTicketSchema,
   capitalLedgerSnapshotSchema,
   crossVenueMatchSchema,
   decisionPacketSchema,
   predictionMarketBudgetsSchema,
   predictionMarketPerformanceBudgetSchema,
+  predictionMarketResearchPipelineSummarySchema,
+  predictionMarketResearchPipelineStageSchema,
+  predictionMarketResearchPipelineTraceSchema,
   predictionMarketProvenanceBundleSchema,
   predictionMarketsAdviceRequestSchema,
   predictionMarketsQuerySchema,
@@ -55,6 +59,22 @@ describe('prediction markets request schemas', () => {
     })
   })
 
+  it('normalizes predict-deep request aliases and variant tags', () => {
+    const parsed = predictionMarketsAdviceRequestSchema.parse({
+      market_id: '12345',
+      request_mode: 'predict-deep',
+      response_variant: 'research-heavy',
+      variant_tags: ['polfish', 'supercompact'],
+    })
+
+    expect(parsed).toMatchObject({
+      market_id: '12345',
+      request_mode: 'predict_deep',
+      response_variant: 'research_heavy',
+      variant_tags: ['polfish', 'supercompact'],
+    })
+  })
+
   it('accepts optional research signals for sidecar-backed market research', () => {
     const parsed = predictionMarketsAdviceRequestSchema.parse({
       market_id: '12345',
@@ -75,6 +95,58 @@ describe('prediction markets request schemas', () => {
         message: 'New evidence may change the event timing.',
         published_at: '2026-04-08T10:30:00.000Z',
       },
+    ])
+  })
+
+  it('accepts TimesFM mode and lane options on advice requests', () => {
+    const parsed = predictionMarketsAdviceRequestSchema.parse({
+      market_id: '12345',
+      request_mode: 'predict-deep',
+      timesfm_mode: 'required',
+      timesfm_lanes: ['microstructure', 'event_probability'],
+    })
+
+    expect(parsed).toMatchObject({
+      market_id: '12345',
+      request_mode: 'predict_deep',
+      timesfm_mode: 'required',
+      timesfm_lanes: ['microstructure', 'event_probability'],
+    })
+  })
+
+  it('accepts optional evaluation history for local calibration replay', () => {
+    const parsed = predictionMarketsAdviceRequestSchema.parse({
+      market_id: '12345',
+      evaluation_history: [
+        {
+          evaluation_id: 'eval-001',
+          question_id: 'question-001',
+          market_id: 'BTC / Jun 2026',
+          venue: 'polymarket',
+          cutoff_at: '2026-04-01T00:00:00.000Z',
+          forecast_probability: 0.7,
+          market_baseline_probability: 0.6,
+          resolved_outcome: true,
+          brier_score: 0.09,
+          log_loss: 0.356675,
+          ece_bucket: '60_80',
+          abstain_flag: false,
+          basis: 'manual_thesis',
+          comparator_id: 'candidate_manual_thesis',
+          comparator_kind: 'candidate_model',
+          comparator_role: 'candidate',
+          pipeline_id: 'forecast-market',
+          pipeline_version: 'baseline-v0',
+        },
+      ],
+    })
+
+    expect(parsed.evaluation_history).toEqual([
+      expect.objectContaining({
+        evaluation_id: 'eval-001',
+        market_id: 'BTC / Jun 2026',
+        resolved_outcome: true,
+      }),
     ])
   })
 
@@ -248,6 +320,96 @@ describe('prediction markets request schemas', () => {
       kind: 'signal',
       label: 'watch signal',
     })
+  })
+
+  it('parses approval trade tickets and research pipeline traces', () => {
+    const approvalTicket = approvalTradeTicketSchema.parse({
+      ticket_id: 'ticket-123',
+      run_id: 'run-123',
+      venue: 'kalshi',
+      market_id: 'market-123',
+      workflow_stage: 'approval',
+      rationale: 'Ticket stays in approval until the second reviewer signs off.',
+      summary: 'Approval ticket for governed trade review.',
+      approval_state: {
+        status: 'pending',
+        requested_by: 'operator-a',
+        requested_at: '2026-04-08T00:00:00.000Z',
+        summary: 'Awaiting second approval.',
+      },
+      trade_intent_preview: {
+        intent_id: 'intent-123',
+        run_id: 'run-123',
+        venue: 'kalshi',
+        market_id: 'market-123',
+        side: 'yes',
+        size_usd: 50,
+        limit_price: 0.51,
+        max_slippage_bps: 25,
+        max_unhedged_leg_ms: 500,
+        forecast_ref: 'forecast-123',
+        risk_checks_passed: true,
+        created_at: '2026-04-08T00:00:00.000Z',
+      },
+      created_at: '2026-04-08T00:00:00.000Z',
+    })
+
+    const trace = predictionMarketResearchPipelineTraceSchema.parse({
+      trace_id: 'trace-123',
+      pipeline_id: 'research-pipeline-123',
+      pipeline_version: '2026.04.08',
+      run_id: 'run-123',
+      venue: 'polymarket',
+      market_id: 'market-123',
+      model_family: 'llm-superforecaster/oracle',
+      started_at: '2026-04-08T00:00:00.000Z',
+      stage_count: 2,
+      stages: [
+        predictionMarketResearchPipelineStageSchema.parse({
+          stage_id: 'ingestion',
+          stage_kind: 'ingestion',
+          status: 'complete',
+          summary: 'Collected signals.',
+        }),
+        predictionMarketResearchPipelineStageSchema.parse({
+          stage_id: 'forecast',
+          stage_kind: 'forecast',
+          status: 'complete',
+          probability_yes: 0.62,
+          confidence: 0.7,
+          summary: 'Produced a calibrated estimate.',
+        }),
+      ],
+      summary: 'Trace stays compact while retaining stage-by-stage auditability.',
+    })
+
+    const summary = predictionMarketResearchPipelineSummarySchema.parse({
+      summary_id: 'summary-123',
+      trace_id: trace.trace_id,
+      pipeline_id: trace.pipeline_id,
+      pipeline_version: trace.pipeline_version,
+      run_id: trace.run_id,
+      venue: trace.venue,
+      market_id: trace.market_id,
+      model_family: trace.model_family,
+      generated_at: '2026-04-08T00:00:05.000Z',
+      forecaster_count: 2,
+      contributor_count: 2,
+      signal_count: 2,
+      evidence_count: 2,
+      stage_count: trace.stage_count,
+      base_rate_probability_yes: 0.5,
+      forecast_probability_yes: 0.62,
+      abstention_recommended: false,
+      summary: 'Research summary remains parseable and operationally useful.',
+    })
+
+    expect(approvalTicket.approval_state.status).toBe('pending')
+    expect(approvalTicket.trade_intent_preview?.forecast_ref).toBe('forecast-123')
+    expect(trace.stages).toHaveLength(2)
+    expect(trace.stages[1]?.probability_yes).toBe(0.62)
+    expect(summary.trace_id).toBe(trace.trace_id)
+    expect(summary.forecast_probability_yes).toBe(0.62)
   })
 
   it('parses cross-venue, health, capital and trade-intent contracts', () => {

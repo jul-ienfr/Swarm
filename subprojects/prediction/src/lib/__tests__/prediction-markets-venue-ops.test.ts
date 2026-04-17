@@ -83,11 +83,28 @@ describe('prediction market venue ops', () => {
       manual_review_required: true,
       supported_order_types: ['limit'],
       planned_order_types: ['limit'],
+      metadata: {
+        p0_a_lineage: {
+          adapter_lineage: {
+            typescript_reference: 'Polymarket/clob-client',
+            python_reference: 'Polymarket/py-clob-client',
+            canonical_gate: 'execution_projection',
+          },
+          runtime_summary: {
+            active_profile_ids: ['polymarket-clob-client', 'polymarket-py-clob-client'],
+          },
+        },
+      },
     })
     expect(getVenueHealthSnapshotContract('polymarket')).toMatchObject({
       venue: 'polymarket',
       api_status: 'healthy',
       degraded_mode: 'normal',
+      metadata: {
+        p0_a_lineage: {
+          canonical_gate: 'execution_projection',
+        },
+      },
     })
     expect(getVenueFeedSurfaceContract('polymarket')).toMatchObject({
       venue: 'polymarket',
@@ -107,6 +124,21 @@ describe('prediction market venue ops', () => {
       market_websocket_status: 'operator_bound',
       user_feed_websocket_status: 'operator_bound',
       rtds_status: 'operator_bound',
+      metadata: {
+        p0_a_lineage: {
+          sidecars: {
+            tremor: {
+              runtime_mode: 'read_only_sidecar',
+            },
+            polymarket_mcp: {
+              runtime_mode: 'operator_wrapper',
+            },
+            polymarket_mcp_analytics: {
+              runtime_mode: 'operator_wrapper',
+            },
+          },
+        },
+      },
     })
     expect(getVenueBudgetsContract('polymarket')).toMatchObject({
       fetch_latency_budget_ms: 8000,
@@ -382,5 +414,60 @@ describe('prediction market venue ops', () => {
     expect(surface.rtds_status).toBe('operator_bound')
     expect(surface.metadata.backend_mode).toBe('read_only')
     expect(surface.metadata.supports_execution).toBe(false)
+    expect(surface.metadata.p0_a_lineage).toMatchObject({
+      adapter_lineage: {
+        typescript_reference: 'Polymarket/clob-client',
+        python_reference: 'Polymarket/py-clob-client',
+        canonical_gate: 'execution_projection',
+      },
+      sidecars: {
+        tremor: {
+          configured: false,
+          runtime_mode: 'read_only_sidecar',
+        },
+        polymarket_mcp: {
+          configured: false,
+          runtime_mode: 'operator_wrapper',
+        },
+        polymarket_mcp_analytics: {
+          configured: false,
+          runtime_mode: 'operator_wrapper',
+        },
+      },
+    })
+  })
+
+  it('marks optional P0-A sidecars as configured when operator endpoints are bound', () => {
+    process.env.PREDICTION_MARKETS_POLYMARKET_TREMOR_URL = 'https://ops.example.test/tremor'
+    process.env.PREDICTION_MARKETS_POLYMARKET_MCP_URL = 'https://ops.example.test/mcp'
+    process.env.PREDICTION_MARKETS_POLYMARKET_MCP_ANALYTICS_URL = 'https://ops.example.test/mcp-analytics'
+
+    try {
+      const capabilities = getVenueCapabilitiesContract('polymarket')
+      const health = getVenueHealthSnapshotContract('polymarket')
+      const feed = getVenueFeedSurfaceContract('polymarket')
+
+      expect(capabilities.metadata.p0_a_lineage.sidecars.tremor).toMatchObject({
+        configured: true,
+        endpoint: 'https://ops.example.test/tremor',
+      })
+      expect(health.metadata.p0_a_lineage.sidecars_configured).toMatchObject({
+        tremor: true,
+        polymarket_mcp: true,
+        polymarket_mcp_analytics: true,
+      })
+      expect(feed.metadata.p0_a_lineage.sidecars.polymarket_mcp).toMatchObject({
+        configured: true,
+        endpoint: 'https://ops.example.test/mcp',
+      })
+      expect(feed.metadata.p0_a_lineage.sidecars.polymarket_mcp_analytics).toMatchObject({
+        configured: true,
+        endpoint: 'https://ops.example.test/mcp-analytics',
+      })
+    } finally {
+      delete process.env.PREDICTION_MARKETS_POLYMARKET_TREMOR_URL
+      delete process.env.PREDICTION_MARKETS_POLYMARKET_MCP_URL
+      delete process.env.PREDICTION_MARKETS_POLYMARKET_MCP_ANALYTICS_URL
+    }
   })
 })

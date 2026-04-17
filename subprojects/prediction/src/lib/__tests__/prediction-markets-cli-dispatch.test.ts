@@ -30,6 +30,50 @@ function makeResearchHints() {
     research_promotion_gate_kind: 'preview_only',
     research_benchmark_gate_blockers: ['out_of_sample_unproven'],
     research_benchmark_gate_reasons: ['out_of_sample_unproven'],
+    approval_ticket: {
+      ticket_id: 'ticket-dispatch-001',
+      ticket_kind: 'approval_trade_ticket',
+      workflow_stage: 'approval',
+      market_id: 'run-dispatch-001-market',
+      venue: 'polymarket',
+      summary: 'Dispatch approval ticket is waiting for the second reviewer.',
+      approval_state: {
+        status: 'pending_second_approval',
+        requested_by: 'operator-a',
+        requested_at: '2026-04-08T00:00:00.000Z',
+        required_approvals: 2,
+        current: 1,
+        approvers: ['reviewer-a'],
+        rejections: [],
+        summary: 'Waiting for one more approval.',
+      },
+      trade_intent_preview: {
+        size_usd: 35,
+        limit_price: 0.48,
+        time_in_force: 'day',
+        max_slippage_bps: 30,
+      },
+    },
+    operator_thesis: {
+      probability_yes: 0.61,
+      confidence: 0.66,
+      source: 'oracle',
+      rationale: 'The dispatch preview is cautious because capital is unavailable.',
+      summary: 'Operator thesis leans yes, but execution remains capped by capital.',
+    },
+    research_pipeline_trace: {
+      trace_id: 'trace-dispatch-001',
+      pipeline_id: 'research-pipeline-runtime',
+      pipeline_version: 'v3',
+      model_family: 'llm-superforecaster/oracle',
+      stage_count: 2,
+      stages: [
+        { stage_id: 'retrieval', stage_kind: 'retrieval', status: 'complete' },
+        { stage_id: 'forecast', stage_kind: 'forecast', status: 'complete' },
+      ],
+      summary: 'Research pipeline trace confirms the aggregate mode stays preferred.',
+    },
+    dashboard_summary: 'Dispatch dashboard snapshot stays preflight-only and benchmark-gated.',
   }
 }
 
@@ -105,6 +149,12 @@ describe('prediction markets CLI dispatch', () => {
             max_slippage_bps: 30,
           },
           execution_projection_selected_preview_source: 'canonical_trade_intent_preview',
+          execution_projection_selected_edge_bucket: 'forecast_alpha',
+          execution_projection_selected_pre_trade_gate_verdict: 'pass',
+          execution_projection_selected_pre_trade_gate_summary:
+            'Hard no-trade gate pass. bucket=forecast_alpha gross=2200bps frictions=190bps net=2010bps minimum=380bps',
+          execution_projection_selected_path_net_edge_bps: 2010,
+          execution_projection_selected_path_minimum_net_edge_bps: 380,
           execution_projection_selected_path_canonical_size_usd: 35,
           execution_projection_selected_path_shadow_signal_present: false,
           execution_projection: {
@@ -210,6 +260,10 @@ describe('prediction markets CLI dispatch', () => {
         '--run-id',
         'run-dispatch-001',
         '--execution-pathways-summary',
+        '--approval-ticket-summary',
+        '--operator-thesis-summary',
+        '--research-pipeline-trace-summary',
+        '--live-dashboard-summary',
         '--url',
         baseUrl,
       ],
@@ -229,6 +283,10 @@ describe('prediction markets CLI dispatch', () => {
     )
     expect(result.stdout).toContain('research_origin: origin=research_driven abstention_effect=clear')
     expect(result.stdout).toContain('dispatch_surface: status=ready gate=execution_projection_dispatch preflight=yes run_id=run-dispatch-001 requested=live path_status=ready effective_mode=paper selected=paper research_mode=research_driven research_origin=research_driven blockers=0')
+    expect(result.stdout).toContain('approval_ticket: status=pending_second_approval workflow=approval ticket=ticket-dispatch-001 market=run-dispatch-001-market venue=polymarket')
+    expect(result.stdout).toContain('operator_thesis: probability=0.61 confidence=0.66 source=oracle')
+    expect(result.stdout).toContain('research_pipeline_trace: trace=trace-dispatch-001 pipeline=research-pipeline-runtime v=v3 model=llm-superforecaster/oracle stages=2 kinds=retrieval|forecast')
+    expect(result.stdout).toContain('live_dashboard_summary: live="Dispatch dashboard snapshot stays preflight-only and benchmark-gated." dashboard="Dispatch dashboard snapshot stays preflight-only and benchmark-gated."')
     expect(result.stdout).toContain(
       'benchmark: status=preview_only promotion=unproven ready=no uplift=1100bps blockers=out_of_sample_unproven reasons=out_of_sample_unproven',
     )
@@ -242,10 +300,12 @@ describe('prediction markets CLI dispatch', () => {
     expect(result.stdout).toContain('highest_safe=paper recommended=paper manual_review=yes')
     expect(result.stdout).toContain('basis=readiness,compliance capital=unavailable reconciliation=unavailable')
     expect(result.stdout).toContain('projected_paths=paper:ready')
-    expect(result.stdout).toContain('execution_projection selected preview: size=35')
-    expect(result.stdout).toContain('source=canonical_trade_intent_preview')
+    expect(result.stdout).toContain('execution_projection selected preview: size=35 via=runtime_hint source=canonical_trade_intent_preview')
     expect(result.stdout).toContain('limit=0.48 tif=day slip=30bps')
     expect(result.stdout).toContain('execution_projection preflight: gate=execution_projection verdict=downgraded requested=live selected=paper')
     expect(result.stdout).toContain('highest_safe=paper recommended=paper manual_review=yes ttl_ms=30000')
+    expect(result.stdout).toContain(
+      'execution_projection pre_trade: edge_bucket=forecast_alpha verdict=pass net=2010bps minimum=380bps',
+    )
   })
 })

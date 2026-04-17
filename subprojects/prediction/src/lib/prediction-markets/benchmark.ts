@@ -139,12 +139,16 @@ export type PredictionMarketsAsOfBenchmarkRun = {
 
 export type PredictionMarketsAsOfBenchmarkComparatorId =
   | 'market_only'
+  | 'timesfm_microstructure'
+  | 'timesfm_event_probability'
   | 'single_llm'
   | 'ensemble'
   | 'decision_packet_assisted'
 
 export type PredictionMarketsAsOfBenchmarkComparatorLabel =
   | 'market-only'
+  | 'TimesFM microstructure'
+  | 'TimesFM event probability'
   | 'single-LLM'
   | 'ensemble'
   | 'DecisionPacket-assisted'
@@ -391,6 +395,14 @@ const predictionMarketsAsOfComparatorCatalog: Array<{
     label: 'market-only',
   },
   {
+    comparator_id: 'timesfm_microstructure',
+    label: 'TimesFM microstructure',
+  },
+  {
+    comparator_id: 'timesfm_event_probability',
+    label: 'TimesFM event probability',
+  },
+  {
     comparator_id: 'single_llm',
     label: 'single-LLM',
   },
@@ -508,6 +520,77 @@ function buildAvailableComparator(input: {
         edge_bps: roundToBps(recommendation.edge_bps),
         evidence_ref_count: forecast.evidence_refs.length,
         notes: ['available now via deterministic local single-model proxy over the frozen candidate replay'],
+        source: 'local',
+        replay_mode: PREDICTION_MARKETS_AS_OF_BENCHMARK_REPLAY_MODE,
+        pipeline_id: PREDICTION_MARKETS_AS_OF_BENCHMARK_PIPELINE_ID,
+        pipeline_version: PREDICTION_MARKETS_AS_OF_BENCHMARK_PIPELINE_VERSION,
+      }
+    }
+    case 'timesfm_microstructure': {
+      const forecast = buildComparatorForecastPacket({
+        comparatorId: input.comparatorId,
+        fixture: input.fixture,
+        result: input.result,
+        basis: 'timesfm_microstructure',
+        probabilityYes: input.result.forecast.basis === 'timesfm_microstructure'
+          ? input.result.forecast.probability_yes
+          : input.result.forecast.probability_yes,
+        confidence: input.result.forecast.confidence,
+        evidenceRefs: candidateEvidenceRefs,
+        rationale: 'Local replay of the TimesFM microstructure candidate stored on the frozen candidate path.',
+        comparatorKind: 'candidate_model',
+      })
+      const recommendation = buildComparatorRecommendation({
+        fixture: input.fixture,
+        resolutionPolicy: input.result.resolutionPolicy,
+        forecast,
+      })
+
+      return {
+        comparator_id: input.comparatorId,
+        label: 'TimesFM microstructure',
+        status: 'available',
+        basis: forecast.basis,
+        probability_yes: forecast.probability_yes,
+        action: recommendation.action,
+        edge_bps: roundToBps(recommendation.edge_bps),
+        evidence_ref_count: forecast.evidence_refs.length,
+        notes: ['available now via the locally persisted TimesFM microstructure candidate replay'],
+        source: 'local',
+        replay_mode: PREDICTION_MARKETS_AS_OF_BENCHMARK_REPLAY_MODE,
+        pipeline_id: PREDICTION_MARKETS_AS_OF_BENCHMARK_PIPELINE_ID,
+        pipeline_version: PREDICTION_MARKETS_AS_OF_BENCHMARK_PIPELINE_VERSION,
+      }
+    }
+    case 'timesfm_event_probability': {
+      const probabilityYes = input.result.forecast.probability_yes
+      const forecast = buildComparatorForecastPacket({
+        comparatorId: input.comparatorId,
+        fixture: input.fixture,
+        result: input.result,
+        basis: 'timesfm_event_probability',
+        probabilityYes,
+        confidence: input.result.forecast.confidence,
+        evidenceRefs: candidateEvidenceRefs,
+        rationale: 'Bench-only replay surface for the TimesFM event probability lane.',
+        comparatorKind: 'candidate_model',
+      })
+      const recommendation = buildComparatorRecommendation({
+        fixture: input.fixture,
+        resolutionPolicy: input.result.resolutionPolicy,
+        forecast,
+      })
+
+      return {
+        comparator_id: input.comparatorId,
+        label: 'TimesFM event probability',
+        status: 'available',
+        basis: forecast.basis,
+        probability_yes: forecast.probability_yes,
+        action: recommendation.action,
+        edge_bps: roundToBps(recommendation.edge_bps),
+        evidence_ref_count: forecast.evidence_refs.length,
+        notes: ['bench-only comparator for the TimesFM event lane; fair value remains unchanged in v1'],
         source: 'local',
         replay_mode: PREDICTION_MARKETS_AS_OF_BENCHMARK_REPLAY_MODE,
         pipeline_id: PREDICTION_MARKETS_AS_OF_BENCHMARK_PIPELINE_ID,

@@ -61,6 +61,11 @@ from .adaptive_fidelity import AdaptiveFidelityPlanner, FidelityRequest
 from .cluster_diagnostics import diagnose_clusters
 from .cost_latency_control import BudgetLimits, BudgetRequest, CostLatencyController
 from .cross_platform_simulation import CrossPlatformSimulator
+from .cross_platform_runtime import (
+    CrossPlatformActionLog,
+    CrossPlatformOrchestrationPlan,
+    build_cross_platform_orchestration_report_from_simulation,
+)
 from .deliberation_visuals import build_deliberation_visuals
 from .deliberation_workbench_tasks import build_default_workbench_task_plan
 from .deliberation_workbench import (
@@ -83,6 +88,7 @@ from .run_health_monitor import RunHealthMonitor
 from .safety_policy import SafetyPolicyEngine, SafetyRequest
 from .scenario_judge import ScenarioCandidate, ScenarioJudge
 from .strategy_meeting import StrategyMeetingClusterSummary, StrategyMeetingResult, run_strategy_meeting_sync
+from .observability import ObservabilityEvent, ObservabilityEventStore, ObservabilityEventType
 
 
 DEFAULT_DELIBERATION_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "deliberations"
@@ -254,6 +260,7 @@ class DeliberationCoordinator:
         timeout_seconds: int = 1800,
         benchmark_path: str | None = None,
         stability_runs: int = 1,
+        strict_analysis: bool = False,
         client: Any | None = None,
     ) -> DeliberationResult:
         selected_mode = _normalize_mode(mode)
@@ -265,6 +272,11 @@ class DeliberationCoordinator:
         resolved_documents = [item for item in (documents or []) if item]
         resolved_entities = list(entities or [])
         resolved_interventions = [item for item in (interventions or []) if item]
+        strict_analysis = bool(strict_analysis)
+        requested_rounds = max(1, int(rounds))
+        requested_allow_fallback = bool(allow_fallback)
+        strict_fallback_guard_applied = strict_analysis and requested_allow_fallback
+        effective_allow_fallback = False if strict_fallback_guard_applied else requested_allow_fallback
         initial_population = _resolve_population_size(
             mode=selected_mode,
             population_size=population_size,
@@ -276,7 +288,7 @@ class DeliberationCoordinator:
             FidelityRequest(
                 goal=resolved_objective,
                 requested_population=initial_population,
-                requested_rounds=rounds,
+                requested_rounds=requested_rounds,
                 time_budget_seconds=float(timeout_seconds),
                 cost_budget_units=float(budget_max),
                 quality_priority=0.9 if selected_mode == DeliberationMode.hybrid else 0.7,
@@ -299,7 +311,9 @@ class DeliberationCoordinator:
             ),
         )
         resolved_population = budget_report.adjusted_agents
-        rounds = budget_report.adjusted_rounds
+        planner_rounds = int(budget_report.adjusted_rounds)
+        strict_rounds_guard_applied = strict_analysis and planner_rounds != requested_rounds
+        rounds = requested_rounds if strict_analysis else planner_rounds
         safety_result = SafetyPolicyEngine().evaluate(
             SafetyRequest(
                 topic=topic,
@@ -326,11 +340,17 @@ class DeliberationCoordinator:
             interventions=resolved_interventions,
             metadata={
                 "runtime": selected_runtime,
-                "allow_fallback": allow_fallback,
+                "allow_fallback": effective_allow_fallback,
+                "requested_allow_fallback": requested_allow_fallback,
                 "ensemble_engines": [engine.value for engine in selected_ensemble_engines],
                 "budget_max": budget_max,
                 "timeout_seconds": timeout_seconds,
                 "backend_mode": self.backend_mode,
+                "strict_analysis": strict_analysis,
+                "strict_analysis_requested_rounds": requested_rounds,
+                "strict_analysis_effective_rounds": rounds,
+                "strict_analysis_rounds_guard_applied": strict_rounds_guard_applied,
+                "strict_analysis_fallback_guard_applied": strict_fallback_guard_applied,
             },
         )
         manifest_seed = _build_manifest_seed(
@@ -362,29 +382,38 @@ class DeliberationCoordinator:
                 "rounds": rounds,
                 "time_horizon": time_horizon,
                 "runtime": selected_runtime,
-                "allow_fallback": allow_fallback,
+                "allow_fallback": effective_allow_fallback,
+                "requested_allow_fallback": requested_allow_fallback,
                 "engine_preference": selected_engine.value,
                 "ensemble_engines": [engine.value for engine in selected_ensemble_engines],
                 "budget_max": budget_max,
                 "timeout_seconds": timeout_seconds,
                 "backend_mode": self.backend_mode,
+                "strict_analysis": strict_analysis,
             },
             metadata={
                 "adaptive_fidelity": {
                     **fidelity_plan.to_dict(),
                     "requested_population_size": population_size,
+                    "requested_rounds": requested_rounds,
                     "resolved_population_size": resolved_population,
+                    "resolved_rounds": rounds,
                     "documents_count": len(resolved_documents),
+                    "strict_analysis": strict_analysis,
+                    "strict_analysis_rounds_guard_applied": strict_rounds_guard_applied,
                 },
                 "budget_control": {
                     "decision": budget_report.decision.value,
                     "allowed": budget_report.allowed,
+                    "requested_rounds": requested_rounds,
                     "adjusted_agents": budget_report.adjusted_agents,
                     "adjusted_rounds": budget_report.adjusted_rounds,
                     "adjusted_parallelism": budget_report.adjusted_parallelism,
                     "adjusted_cost_units": budget_report.adjusted_cost_units,
                     "adjusted_latency_seconds": budget_report.adjusted_latency_seconds,
                     "reasons": budget_report.reasons,
+                    "strict_analysis": strict_analysis,
+                    "strict_analysis_rounds_guard_applied": strict_rounds_guard_applied,
                 },
                 "safety_policy": {
                     "decision": safety_result.decision.value,
@@ -399,6 +428,17 @@ class DeliberationCoordinator:
                         for finding in safety_result.findings
                     ],
                 },
+                "strict_analysis": {
+                    "enabled": strict_analysis,
+                    "requested_rounds": requested_rounds,
+                    "planned_rounds": fidelity_plan.rounds,
+                    "budget_adjusted_rounds": budget_report.adjusted_rounds,
+                    "effective_rounds": rounds,
+                    "rounds_guard_applied": strict_rounds_guard_applied,
+                    "requested_allow_fallback": requested_allow_fallback,
+                    "effective_allow_fallback": effective_allow_fallback,
+                    "fallback_guard_applied": strict_fallback_guard_applied,
+                },
             },
         )
         replay = DeliberationReplayManifest(source_run_id=run_id, source_manifest_id=run_id)
@@ -408,6 +448,9 @@ class DeliberationCoordinator:
                 "mode": selected_mode.value,
                 "runtime_requested": selected_runtime,
                 "engine_requested": selected_engine.value,
+                "allow_fallback": effective_allow_fallback,
+                "requested_allow_fallback": requested_allow_fallback,
+                "strict_analysis": strict_analysis,
             },
         )
 
@@ -517,7 +560,7 @@ class DeliberationCoordinator:
                 max_agents=max_agents,
                 rounds=rounds,
                 runtime=selected_runtime,
-                allow_fallback=allow_fallback,
+                allow_fallback=effective_allow_fallback,
                 persist=False,
                 client=client,
             )
@@ -551,7 +594,7 @@ class DeliberationCoordinator:
                 rounds=rounds,
                 time_horizon=time_horizon,
                 runtime=selected_runtime,
-                allow_fallback=allow_fallback,
+                allow_fallback=effective_allow_fallback,
                 engine_preference=selected_engine,
                 ensemble_engines=selected_ensemble_engines,
                 budget_max=budget_max,
@@ -640,6 +683,7 @@ class DeliberationCoordinator:
             interventions=resolved_interventions,
             workbench_session=workbench_session,
         )
+        observability_store = ObservabilityEventStore(run_dir / "observability_events.jsonl")
         trace_report = CrossPlatformSimulator().simulate(
             topic=topic,
             summary=result.summary or result.final_strategy or topic,
@@ -647,6 +691,36 @@ class DeliberationCoordinator:
             platforms=_resolve_platforms(selected_mode, result.engine_used),
             rounds=max(1, rounds),
             interventions=resolved_interventions,
+        )
+        observability_store.append(
+            ObservabilityEvent(
+                event_type=ObservabilityEventType.round_boundary,
+                source="deliberation",
+                message="cross-platform simulation completed",
+                simulation_id=run_id,
+                data={
+                    "platforms": trace_report.platforms,
+                    "rounds": trace_report.rounds,
+                    "trace_count": len(trace_report.traces),
+                },
+            )
+        )
+        action_log = CrossPlatformActionLog(output_path=run_dir / "cross_platform_actions.jsonl")
+        cross_platform_plan = CrossPlatformOrchestrationPlan(
+            run_id=run_id,
+            topic=topic,
+            objective=resolved_objective,
+            platforms=trace_report.platforms,
+            rounds=max(1, trace_report.rounds),
+            market_keywords=[topic],
+            media_keywords=resolved_interventions[:4] if resolved_interventions else [],
+            metadata={"mode": selected_mode.value, "engine": result.engine_used},
+        )
+        cross_platform_report = build_cross_platform_orchestration_report_from_simulation(
+            cross_platform_plan,
+            trace_report,
+            beliefs=initial_belief_states,
+            action_log=action_log,
         )
         trace_rounds = _group_traces_by_round(trace_report.traces, rounds=max(1, trace_report.rounds))
         evolution = BeliefEvolutionEngine(run_id=run_id, metadata={"mode": selected_mode.value}).run(
@@ -667,6 +741,9 @@ class DeliberationCoordinator:
             "metrics": evolution.metrics,
             "summary": evolution.summary,
         }
+        result.metadata["cross_platform_runtime"] = cross_platform_report.model_dump(mode="json")
+        result.metadata["cross_platform_action_log_path"] = str(action_log.output_path) if action_log.output_path else None
+        result.metadata["cross_platform_action_summary"] = action_log.summary().model_dump(mode="json")
         result.profile_quality = profile_quality.to_dict()
         result.participant_profiles = [participant_profile_from_source(profile) for profile in workbench_session.profiles]
 
@@ -677,6 +754,21 @@ class DeliberationCoordinator:
         recorded_traces = trace_store.extend(trace_report.traces)
         trace_aggregate = trace_store.aggregate()
         result.social_trace_summary = trace_aggregate.model_dump(mode="json")
+        observability_store.append(
+            ObservabilityEvent(
+                event_type=ObservabilityEventType.agent_decision,
+                source="deliberation",
+                message="belief evolution and trace aggregation completed",
+                simulation_id=run_id,
+                data={
+                    "belief_count": len(result.belief_states),
+                    "trace_count": len(recorded_traces),
+                    "social_trace_summary": result.social_trace_summary,
+                },
+            )
+        )
+        result.metadata["observability_path"] = str(observability_store.path)
+        result.metadata["observability_stats"] = observability_store.stats().to_dict()
         result.social_trace_bundles = social_trace_bundles_from_traces(run_id=run_id, traces=recorded_traces)
         result.belief_state_snapshots = _belief_state_snapshots_from_evolution(run_id=run_id, evolution=evolution)
 
@@ -976,6 +1068,7 @@ class DeliberationCoordinator:
                 "budget_control": {
                     "decision": budget_report.decision.value,
                     "reasons": budget_report.reasons,
+                    "requested_rounds": requested_rounds,
                     "adjusted_agents": budget_report.adjusted_agents,
                     "adjusted_rounds": budget_report.adjusted_rounds,
                     "adjusted_parallelism": budget_report.adjusted_parallelism,
@@ -983,6 +1076,17 @@ class DeliberationCoordinator:
                 "safety_policy": {
                     "decision": safety_result.decision.value,
                     "allowed": safety_result.allowed,
+                },
+                "strict_analysis": {
+                    "enabled": strict_analysis,
+                    "requested_rounds": requested_rounds,
+                    "planned_rounds": fidelity_plan.rounds,
+                    "budget_adjusted_rounds": budget_report.adjusted_rounds,
+                    "effective_rounds": rounds,
+                    "rounds_guard_applied": strict_rounds_guard_applied,
+                    "requested_allow_fallback": requested_allow_fallback,
+                    "effective_allow_fallback": effective_allow_fallback,
+                    "fallback_guard_applied": strict_fallback_guard_applied,
                 },
                 "run_health": result.run_health,
                 "profile_quality": result.profile_quality,
@@ -1045,13 +1149,14 @@ class DeliberationCoordinator:
             time_horizon=str(payload.get("time_horizon", "7d")),
             persist=persist,
             runtime=str(payload.get("runtime", "pydanticai")),
-            allow_fallback=bool(payload.get("allow_fallback", True)),
+            allow_fallback=bool(payload.get("requested_allow_fallback", payload.get("allow_fallback", True))),
             engine_preference=str(payload.get("engine_preference", EnginePreference.agentsociety.value)),
             ensemble_engines=list(payload.get("ensemble_engines", [])),
             budget_max=float(payload.get("budget_max", 10.0) or 10.0),
             timeout_seconds=int(payload.get("timeout_seconds", 1800) or 1800),
             benchmark_path=None,
             stability_runs=1,
+            strict_analysis=bool(payload.get("strict_analysis", False)),
             client=client,
         )
 
@@ -1488,6 +1593,7 @@ def run_deliberation_sync(
     timeout_seconds: int = 1800,
     benchmark_path: str | None = None,
     stability_runs: int = 1,
+    strict_analysis: bool = False,
     output_dir: str | Path | None = None,
     backend_mode: str | None = None,
     client: Any | None = None,
@@ -1518,6 +1624,7 @@ def run_deliberation_sync(
         timeout_seconds=timeout_seconds,
         benchmark_path=benchmark_path,
         stability_runs=stability_runs,
+        strict_analysis=strict_analysis,
         client=client,
     )
 
@@ -2140,6 +2247,25 @@ def _build_comparability_metadata(
         "runtime_used": result.runtime_used,
         "runtime_match": bool(result.runtime_used is None or result.runtime_requested == result.runtime_used),
         "fallback_used": result.fallback_used,
+        "strict_analysis": bool(request_metadata.get("strict_analysis") or result.metadata.get("strict_analysis", {}).get("enabled")),
+        "strict_rounds_requested": request_metadata.get("strict_analysis_requested_rounds")
+        or result.metadata.get("strict_analysis", {}).get("requested_rounds"),
+        "strict_rounds_effective": request_metadata.get("strict_analysis_effective_rounds")
+        or result.metadata.get("strict_analysis", {}).get("effective_rounds"),
+        "strict_rounds_guard_applied": bool(
+            request_metadata.get("strict_analysis_rounds_guard_applied")
+            or result.metadata.get("strict_analysis", {}).get("rounds_guard_applied")
+        ),
+        "strict_fallback_guard_applied": bool(
+            request_metadata.get("strict_analysis_fallback_guard_applied")
+            or result.metadata.get("strict_analysis", {}).get("fallback_guard_applied")
+        ),
+        "strict_requested_allow_fallback": request_metadata.get("requested_allow_fallback")
+        if "requested_allow_fallback" in request_metadata
+        else result.metadata.get("strict_analysis", {}).get("requested_allow_fallback"),
+        "strict_effective_allow_fallback": request_metadata.get("allow_fallback")
+        if "allow_fallback" in request_metadata
+        else result.metadata.get("strict_analysis", {}).get("effective_allow_fallback"),
         "degraded_runtime_used": result.metadata.get("degraded_runtime_used"),
         "meeting_degraded_runtime_used": result.metadata.get("degraded_runtime_used"),
         "decision_degraded": bool(result.metadata.get("decision_degraded")),
@@ -2281,6 +2407,18 @@ def _build_quality_warnings(
     if result.fallback_used:
         warnings.append(
             f"runtime_fallback_used: requested={result.runtime_requested} used={result.runtime_used}"
+        )
+    if bool(comparability.get("strict_rounds_guard_applied")):
+        warnings.append(
+            "strict_analysis_rounds_locked: "
+            f"requested={comparability.get('strict_rounds_requested')} "
+            f"effective={comparability.get('strict_rounds_effective')}"
+        )
+    if bool(comparability.get("strict_fallback_guard_applied")):
+        warnings.append(
+            "strict_analysis_fallback_disabled: "
+            f"requested={comparability.get('strict_requested_allow_fallback')} "
+            f"effective={comparability.get('strict_effective_allow_fallback')}"
         )
     if result.runtime_requested and result.runtime_used and result.runtime_requested != result.runtime_used:
         warnings.append(

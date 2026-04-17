@@ -107,6 +107,76 @@ const ARTIFACT_LAYOUT_BY_TYPE: Record<PredictionMarketLayoutArtifactType, Artifa
     basename: 'research_sidecar',
     extension: 'json',
   },
+  timesfm_sidecar: {
+    bucket: 'evidence',
+    basename: 'timesfm_sidecar',
+    extension: 'json',
+  },
+  source_audit: {
+    bucket: 'evidence',
+    basename: 'source_audit',
+    extension: 'json',
+  },
+  rules_lineage: {
+    bucket: 'evidence',
+    basename: 'rules_lineage',
+    extension: 'json',
+  },
+  catalyst_timeline: {
+    bucket: 'evidence',
+    basename: 'catalyst_timeline',
+    extension: 'json',
+  },
+  world_state: {
+    bucket: 'runs',
+    basename: 'world_state',
+    extension: 'json',
+  },
+  ticket_payload: {
+    bucket: 'runs',
+    basename: 'ticket_payload',
+    extension: 'json',
+  },
+  quant_signal_bundle: {
+    bucket: 'runs',
+    basename: 'quant_signal_bundle',
+    extension: 'json',
+  },
+  decision_ledger: {
+    bucket: 'runs',
+    basename: 'decision_ledger',
+    extension: 'json',
+  },
+  calibration_report: {
+    bucket: 'runs',
+    basename: 'calibration_report',
+    extension: 'json',
+  },
+  resolved_history: {
+    bucket: 'runs',
+    basename: 'resolved_history',
+    extension: 'json',
+  },
+  cost_model_report: {
+    bucket: 'runs',
+    basename: 'cost_model_report',
+    extension: 'json',
+  },
+  walk_forward_report: {
+    bucket: 'runs',
+    basename: 'walk_forward_report',
+    extension: 'json',
+  },
+  autopilot_cycle_summary: {
+    bucket: 'runs',
+    basename: 'autopilot_cycle_summary',
+    extension: 'json',
+  },
+  research_memory_summary: {
+    bucket: 'runs',
+    basename: 'research_memory_summary',
+    extension: 'json',
+  },
   research_bridge: {
     bucket: 'evidence',
     basename: 'research_bridge',

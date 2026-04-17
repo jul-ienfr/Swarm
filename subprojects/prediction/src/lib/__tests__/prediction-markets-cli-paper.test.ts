@@ -108,6 +108,12 @@ describe('prediction markets CLI paper', () => {
           execution_projection_selected_path: 'shadow',
           execution_projection_selected_path_status: 'ready',
           execution_projection_selected_path_effective_mode: 'shadow',
+          execution_projection_selected_edge_bucket: 'forecast_alpha',
+          execution_projection_selected_pre_trade_gate_verdict: 'pass',
+          execution_projection_selected_pre_trade_gate_summary:
+            'Hard no-trade gate pass. bucket=forecast_alpha gross=1860bps frictions=220bps net=1640bps minimum=360bps',
+          execution_projection_selected_path_net_edge_bps: 1640,
+          execution_projection_selected_path_minimum_net_edge_bps: 360,
           execution_projection_verdict: 'downgraded',
           execution_projection_highest_safe_requested_mode: 'shadow',
           execution_projection_recommended_effective_mode: 'shadow',
@@ -214,6 +220,33 @@ describe('prediction markets CLI paper', () => {
               summary: 'Requested live; selected shadow.',
             },
             summary: 'requested live, selected shadow; gate execution_projection; preflight only.',
+            backtest_summary: {
+              summary: 'Backtest over 120 samples remains profitable after frictions.',
+              sample_count: 120,
+              win_rate: 0.61,
+              brier_score: 0.182,
+              log_loss: 0.491,
+              uplift_bps: 220,
+            },
+            walk_forward_summary: {
+              summary: 'Walk-forward split is stable across 8 windows.',
+              window_count: 8,
+              win_rate: 0.58,
+              brier_score: 0.191,
+              uplift_bps: 145,
+            },
+            monte_carlo_summary: {
+              summary: 'Monte Carlo drawdowns stay within guardrails.',
+              trial_count: 1000,
+              win_rate: 0.63,
+              uplift_bps: 175,
+            },
+            paper_validation_summary: {
+              summary: 'Paper captures the same directionality as backtest.',
+              sample_count: 80,
+              win_rate: 0.59,
+              uplift_bps: 130,
+            },
           },
         }))
         return
@@ -279,7 +312,13 @@ describe('prediction markets CLI paper', () => {
     expect(result.stdout).toContain(
       'benchmark_state: verdict=preview_only promotion_gate_kind=preview_only ready=no evidence_level=benchmark_preview promotion_blocker_summary=out_of_sample_unproven',
     )
+    expect(result.stdout).toContain(
+      'validation: backtest=samples=120|win_rate=61.0%|brier=0.182|log_loss=0.491|uplift=+220 bps|summary="Backtest over 120 samples remains profitable after frictions." walk_forward=windows=8|win_rate=58.0%|brier=0.191|uplift=+145 bps|summary="Walk-forward split is stable across 8 windows." monte_carlo=trials=1000|win_rate=63.0%|uplift=+175 bps|summary="Monte Carlo drawdowns stay within guardrails." paper=samples=80|win_rate=59.0%|uplift=+130 bps|summary="Paper captures the same directionality as backtest."',
+    )
     expect(result.stdout).toContain('execution_projection: requested=live selected=shadow verdict=downgraded')
+    expect(result.stdout).toContain(
+      'execution_projection pre_trade: edge_bucket=forecast_alpha verdict=pass net=1640bps minimum=360bps',
+    )
     expect(result.stdout).toContain('paper:ready|shadow:ready')
   })
 

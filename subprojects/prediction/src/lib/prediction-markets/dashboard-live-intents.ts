@@ -1,8 +1,14 @@
 import { PredictionMarketsError } from '@/lib/prediction-markets/errors'
 import {
+  executePredictionMarketRunLive,
   getPredictionMarketRunDetails,
   preparePredictionMarketRunLive,
 } from '@/lib/prediction-markets/service'
+import type {
+  PredictionMarketExecutionPathwaysApprovalTicket,
+  PredictionMarketExecutionPathwaysOperatorThesis,
+  PredictionMarketExecutionPathwaysResearchPipelineTrace,
+} from '@/lib/prediction-markets/execution-pathways'
 import type { PredictionMarketVenueId } from '@/lib/prediction-markets/venue-ops'
 import {
   publishPredictionDashboardEvent,
@@ -25,14 +31,21 @@ export type PredictionDashboardApprovalState = {
 }
 
 export type PredictionDashboardLiveIntentExecutionResult = {
-  status: 'executed_preflight' | 'execution_failed'
+  status: 'executed_live' | 'executed_preflight' | 'execution_failed'
   executed_at: string
-  transport_mode: 'dashboard_bounded_preflight'
-  performed_live: false
-  live_execution_status: 'attempted_live_not_performed' | 'attempted_live_failed'
+  transport_mode: string
+  performed_live: boolean
+  live_execution_status: string
   receipt_summary: string
   order_trace_audit: Record<string, unknown>
+  receipt: Record<string, unknown> | null
 }
+
+export type PredictionDashboardLiveIntentApprovalTicket = PredictionMarketExecutionPathwaysApprovalTicket
+
+export type PredictionDashboardLiveIntentOperatorThesis = PredictionMarketExecutionPathwaysOperatorThesis
+
+export type PredictionDashboardLiveIntentResearchPipelineTrace = PredictionMarketExecutionPathwaysResearchPipelineTrace
 
 export type PredictionDashboardLiveIntent = {
   intent_id: string
@@ -46,6 +59,7 @@ export type PredictionDashboardLiveIntent = {
     | 'pending_approval'
     | 'pending_second_approval'
     | 'rejected'
+    | 'executed_live'
     | 'executed_preflight'
     | 'execution_failed'
   summary: string
@@ -56,6 +70,9 @@ export type PredictionDashboardLiveIntent = {
   benchmark_gate_blocks_live: boolean
   benchmark_gate_live_block_reason: string | null
   live_blocking_reasons: string[]
+  approval_ticket: PredictionDashboardLiveIntentApprovalTicket | null
+  operator_thesis: PredictionDashboardLiveIntentOperatorThesis | null
+  research_pipeline_trace: PredictionDashboardLiveIntentResearchPipelineTrace | null
   selected_preview: Record<string, unknown> | null
   live_surface: Record<string, unknown>
   approval_state: PredictionDashboardApprovalState
@@ -123,15 +140,155 @@ function toRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
+function toStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+
+  for (const value of values) {
+    const normalized = String(value ?? '').trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    out.push(normalized)
+  }
+
+  return out
+}
+
+function firstDefined<T>(...values: Array<T | null | undefined>): T | undefined {
+  for (const value of values) {
+    if (value !== undefined && value !== null) return value
+  }
+  return undefined
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function recordString(record: Record<string, unknown> | null | undefined, key: string, fallback: string): string {
+  const value = record?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value : fallback
+}
+
+function recordBoolean(record: Record<string, unknown> | null | undefined, key: string): boolean {
+  return record?.[key] === true
+}
+
+function recordStringList(record: Record<string, unknown> | null | undefined, key: string): string[] {
+  const value = record?.[key]
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : []
+}
+
+function extractExecutionPathwaysArtifacts(input: {
+  liveSurface: Record<string, unknown> | null
+  details: Record<string, unknown> | null
+}): {
+  approval_ticket: PredictionDashboardLiveIntentApprovalTicket | null
+  operator_thesis: PredictionDashboardLiveIntentOperatorThesis | null
+  research_pipeline_trace: PredictionDashboardLiveIntentResearchPipelineTrace | null
+} {
+  const liveExecutionPathways = toRecord(input.liveSurface?.execution_pathways)
+  const detailExecutionPathways = toRecord(input.details?.execution_pathways)
+  const executionPathways = liveExecutionPathways ?? detailExecutionPathways
+
+  const approvalTicketRaw = toRecord(
+    executionPathways?.approval_ticket
+    ?? input.liveSurface?.approval_ticket
+    ?? input.details?.approval_ticket,
+  )
+  const operatorThesisRaw = toRecord(
+    executionPathways?.operator_thesis
+    ?? input.liveSurface?.operator_thesis
+    ?? input.details?.operator_thesis,
+  )
+  const researchPipelineTraceRaw = toRecord(
+    executionPathways?.research_pipeline_trace
+    ?? input.liveSurface?.research_pipeline_trace
+    ?? input.details?.research_pipeline_trace,
+  )
+
+  const approval_ticket = approvalTicketRaw
+    ? {
+      ticket_id: String(approvalTicketRaw.ticket_id ?? ''),
+      required: approvalTicketRaw.required === true,
+      status: String(approvalTicketRaw.status ?? 'blocked') as PredictionDashboardLiveIntentApprovalTicket['status'],
+      reasons: toStringList(approvalTicketRaw.reasons),
+      summary: String(approvalTicketRaw.summary ?? 'Approval ticket artifact is available.'),
+    }
+    : null
+
+  const operator_thesis = operatorThesisRaw
+    ? {
+      present: operatorThesisRaw.present === true,
+      source: String(operatorThesisRaw.source ?? 'none') as PredictionDashboardLiveIntentOperatorThesis['source'],
+      probability_yes: toNumberOrNull(operatorThesisRaw.probability_yes),
+      rationale: typeof operatorThesisRaw.rationale === 'string' && operatorThesisRaw.rationale.trim().length > 0
+        ? operatorThesisRaw.rationale.trim()
+        : null,
+      evidence_refs: toStringList(operatorThesisRaw.evidence_refs),
+      summary: String(operatorThesisRaw.summary ?? 'Operator thesis artifact is available.'),
+    }
+    : null
+
+  const research_pipeline_trace = researchPipelineTraceRaw
+    ? {
+      pipeline_id: typeof researchPipelineTraceRaw.pipeline_id === 'string' && researchPipelineTraceRaw.pipeline_id.trim().length > 0
+        ? researchPipelineTraceRaw.pipeline_id.trim()
+        : null,
+      pipeline_version: typeof researchPipelineTraceRaw.pipeline_version === 'string' && researchPipelineTraceRaw.pipeline_version.trim().length > 0
+        ? researchPipelineTraceRaw.pipeline_version.trim()
+        : null,
+      preferred_mode: String(researchPipelineTraceRaw.preferred_mode ?? 'unknown') as PredictionDashboardLiveIntentResearchPipelineTrace['preferred_mode'],
+      oracle_family: String(researchPipelineTraceRaw.oracle_family ?? 'unknown') as PredictionDashboardLiveIntentResearchPipelineTrace['oracle_family'],
+      forecaster_count: toNumberOrNull(researchPipelineTraceRaw.forecaster_count),
+      evidence_count: toNumberOrNull(researchPipelineTraceRaw.evidence_count),
+      source_refs: toStringList(researchPipelineTraceRaw.source_refs),
+      summary: String(researchPipelineTraceRaw.summary ?? 'Research pipeline trace artifact is available.'),
+    }
+    : null
+
+  return {
+    approval_ticket,
+    operator_thesis,
+    research_pipeline_trace,
+  }
+}
+
+function buildArtifactHintSummary(input: {
+  approval_ticket: PredictionDashboardLiveIntentApprovalTicket | null
+  operator_thesis: PredictionDashboardLiveIntentOperatorThesis | null
+  research_pipeline_trace: PredictionDashboardLiveIntentResearchPipelineTrace | null
+}): string | null {
+  return uniqueStrings([
+    input.approval_ticket ? `Approval ticket: ${input.approval_ticket.status}.` : null,
+    input.operator_thesis
+      ? input.operator_thesis.probability_yes != null
+        ? `Operator thesis: ${Math.round(input.operator_thesis.probability_yes * 100)}% yes via ${input.operator_thesis.source}.`
+        : `Operator thesis: ${input.operator_thesis.source}.`
+      : null,
+    input.research_pipeline_trace
+      ? `Research pipeline trace: ${input.research_pipeline_trace.preferred_mode}/${input.research_pipeline_trace.oracle_family}.`
+      : null,
+  ]).join(' ')
+}
+
 function snapshotLiveSurface(runId: string, workspaceId: number) {
   const liveSurface = preparePredictionMarketRunLive({
     runId,
     workspaceId,
   })
-  const details = getPredictionMarketRunDetails(runId, workspaceId)
+  const details = toRecord(getPredictionMarketRunDetails(runId, workspaceId))
 
   return {
-    liveSurface,
+    liveSurface: toRecord(liveSurface) ?? (liveSurface as Record<string, unknown>),
     details,
   }
 }
@@ -165,6 +322,21 @@ function emitLiveIntentEvent(
   })
 }
 
+function isIntentFinalized(intent: PredictionDashboardLiveIntent): boolean {
+  return intent.status === 'rejected'
+    || intent.status === 'executed_live'
+    || intent.status === 'executed_preflight'
+    || intent.status === 'execution_failed'
+}
+
+function approvalsForIntent(intent: PredictionDashboardLiveIntent): string[] {
+  return intent.approval_state.approvals.map((approval) => approval.actor)
+}
+
+function asLiveExecutionReceipt(value: unknown): Record<string, unknown> | null {
+  return toRecord(value)
+}
+
 export function listPredictionDashboardLiveIntents(input: {
   workspaceId: number
   runId?: string | null
@@ -193,8 +365,10 @@ export function createPredictionDashboardLiveIntent(
 ): PredictionDashboardLiveIntent {
   const actor = sanitizeActor(input.actor)
   const { liveSurface, details } = snapshotLiveSurface(input.runId, input.workspaceId)
+  const executionPathwayArtifacts = extractExecutionPathwaysArtifacts({ liveSurface, details })
+  const artifactSummary = buildArtifactHintSummary(executionPathwayArtifacts)
 
-  if (liveSurface.live_status !== 'ready' || liveSurface.live_route_allowed !== true) {
+  if (recordString(liveSurface, 'live_status', 'unknown') !== 'ready' || !recordBoolean(liveSurface, 'live_route_allowed')) {
     throw new PredictionMarketsError('Live intent cannot be created while the live surface is blocked', {
       status: 409,
       code: 'live_surface_blocked',
@@ -207,78 +381,104 @@ export function createPredictionDashboardLiveIntent(
   const intent: PredictionDashboardLiveIntent = {
     intent_id: intentId,
     workspace_id: input.workspaceId,
-    run_id: liveSurface.run_id,
-    venue: (details?.venue ?? liveSurface.venue_feed_surface?.venue ?? 'unknown') as PredictionMarketVenueId | 'unknown',
-    market_id: details?.market_id ?? liveSurface.run_id,
+    run_id: recordString(liveSurface, 'run_id', input.runId),
+    venue: (recordString(details, 'venue', recordString(toRecord(liveSurface.venue_feed_surface), 'venue', 'unknown')) ?? 'unknown') as PredictionMarketVenueId | 'unknown',
+    market_id: recordString(details, 'market_id', recordString(liveSurface, 'run_id', input.runId)),
     created_at: new Date().toISOString(),
     created_by: actor,
     status: 'pending_approval',
     summary: input.note?.trim()
       ? `Live intent created by ${actor}: ${input.note.trim()}`
-      : `Live intent created by ${actor} for ${liveSurface.run_id}.`,
-    selected_path: liveSurface.execution_projection_selected_path ?? liveSurface.live_path?.path ?? null,
-    live_status: liveSurface.live_status,
-    benchmark_promotion_ready: liveSurface.benchmark_promotion_ready === true,
-    benchmark_promotion_blockers: [...(liveSurface.benchmark_promotion_blockers ?? [])],
-    benchmark_gate_blocks_live: liveSurface.benchmark_gate_blocks_live === true,
-    benchmark_gate_live_block_reason: liveSurface.benchmark_gate_live_block_reason ?? null,
-    live_blocking_reasons: [...(liveSurface.live_blocking_reasons ?? [])],
+      : `Live intent created by ${actor} for ${recordString(liveSurface, 'run_id', input.runId)}.`,
+    selected_path: recordString(liveSurface, 'execution_projection_selected_path', recordString(toRecord(liveSurface.live_path), 'path', null)),
+    live_status: recordString(liveSurface, 'live_status', 'unknown'),
+    benchmark_promotion_ready: recordBoolean(liveSurface, 'benchmark_promotion_ready'),
+    benchmark_promotion_blockers: recordStringList(liveSurface, 'benchmark_promotion_blockers'),
+    benchmark_gate_blocks_live: recordBoolean(liveSurface, 'benchmark_gate_blocks_live'),
+    benchmark_gate_live_block_reason: recordString(liveSurface, 'benchmark_gate_live_block_reason', null),
+    live_blocking_reasons: recordStringList(liveSurface, 'live_blocking_reasons'),
+    approval_ticket: executionPathwayArtifacts.approval_ticket,
+    operator_thesis: executionPathwayArtifacts.operator_thesis,
+    research_pipeline_trace: executionPathwayArtifacts.research_pipeline_trace,
     selected_preview: toRecord(
-      liveSurface.live_trade_intent_preview
-      ?? liveSurface.execution_projection_selected_preview
-      ?? null,
+      firstDefined(
+        liveSurface.live_trade_intent_preview,
+        liveSurface.execution_projection_selected_preview,
+        null,
+      ),
     ),
     live_surface: liveSurface as unknown as Record<string, unknown>,
     approval_state: buildApprovalState(approvals, rejections),
     execution_result: null,
   }
+  const summaryParts = uniqueStrings([
+    intent.summary,
+    artifactSummary ? `Artifacts: ${artifactSummary}` : null,
+  ])
+  intent.summary = summaryParts.join(' ')
 
   intents.set(intent.intent_id, intent)
   emitLiveIntentEvent('live_intent_created', 'info', intent, intent.summary)
   return intent
 }
 
-function finalizeApprovedIntent(intent: PredictionDashboardLiveIntent): PredictionDashboardLiveIntent {
+function finalizeApprovedIntent(
+  intent: PredictionDashboardLiveIntent,
+  actor: string,
+): PredictionDashboardLiveIntent {
   const refreshed = snapshotLiveSurface(intent.run_id, intent.workspace_id).liveSurface
+  const refreshedArtifacts = extractExecutionPathwaysArtifacts({
+    liveSurface: refreshed,
+    details: toRecord(getPredictionMarketRunDetails(intent.run_id, intent.workspace_id)),
+  })
+  const artifactSummary = buildArtifactHintSummary(refreshedArtifacts)
   const executedAt = new Date().toISOString()
-  const stillReady = refreshed.live_status === 'ready' && refreshed.live_route_allowed === true
-  const refreshedRecord = refreshed as Record<string, unknown>
-  const orderTraceAudit = {
-    ...(toRecord(refreshedRecord.order_trace_audit) ?? {}),
-    transport_mode: 'dashboard_bounded_preflight',
-    live_execution_status: stillReady ? 'attempted_live_not_performed' : 'attempted_live_failed',
-    venue_order_status: stillReady ? 'approval_complete_preflight_only' : 'blocked_after_approval',
-    place_auditable: true,
-    cancel_auditable: false,
-    market_execution_status: stillReady ? 'attempted_live_not_performed' : 'attempted_live_failed',
-  }
+  const stillReady = recordString(refreshed, 'live_status', 'unknown') === 'ready'
+    && recordBoolean(refreshed, 'live_route_allowed')
 
   intent.live_surface = refreshed as unknown as Record<string, unknown>
-  intent.live_status = refreshed.live_status
-  intent.benchmark_promotion_ready = refreshed.benchmark_promotion_ready === true
-  intent.benchmark_promotion_blockers = [...(refreshed.benchmark_promotion_blockers ?? [])]
-  intent.benchmark_gate_blocks_live = refreshed.benchmark_gate_blocks_live === true
-  intent.benchmark_gate_live_block_reason = refreshed.benchmark_gate_live_block_reason ?? null
-  intent.live_blocking_reasons = [...(refreshed.live_blocking_reasons ?? [])]
-  intent.selected_preview = toRecord(
-    refreshed.live_trade_intent_preview
-    ?? refreshed.execution_projection_selected_preview
-    ?? null,
-  )
+  intent.approval_ticket = refreshedArtifacts.approval_ticket
+  intent.operator_thesis = refreshedArtifacts.operator_thesis
+  intent.research_pipeline_trace = refreshedArtifacts.research_pipeline_trace
+  intent.live_status = recordString(refreshed, 'live_status', 'unknown')
+  intent.benchmark_promotion_ready = recordBoolean(refreshed, 'benchmark_promotion_ready')
+  intent.benchmark_promotion_blockers = recordStringList(refreshed, 'benchmark_promotion_blockers')
+  intent.benchmark_gate_blocks_live = recordBoolean(refreshed, 'benchmark_gate_blocks_live')
+  intent.benchmark_gate_live_block_reason = recordString(refreshed, 'benchmark_gate_live_block_reason', null)
+  intent.live_blocking_reasons = recordStringList(refreshed, 'live_blocking_reasons')
+    intent.selected_preview = toRecord(
+      firstDefined(
+        refreshed.live_trade_intent_preview,
+        refreshed.execution_projection_selected_preview,
+        null,
+      ),
+    )
 
   if (!stillReady) {
     intent.status = 'execution_failed'
     intent.execution_result = {
       status: 'execution_failed',
       executed_at: executedAt,
-      transport_mode: 'dashboard_bounded_preflight',
+      transport_mode: 'dashboard_live_execution_blocked',
       performed_live: false,
       live_execution_status: 'attempted_live_failed',
       receipt_summary:
-        refreshed.summary
-        ?? refreshed.benchmark_gate_live_block_reason
+        recordString(refreshed, 'summary', null)
+        ?? recordString(refreshed, 'benchmark_gate_live_block_reason', null)
         ?? 'Live execution failed after approval because the canonical live surface is no longer ready.',
-      order_trace_audit: orderTraceAudit,
+      order_trace_audit: {
+        transport_mode: 'dashboard_live_execution_blocked',
+        live_execution_status: 'attempted_live_failed',
+        venue_order_status: 'blocked_after_approval',
+        place_auditable: true,
+        cancel_auditable: false,
+        market_execution_status: 'attempted_live_failed',
+      },
+      receipt: null,
+    }
+    intent.summary = intent.execution_result.receipt_summary
+    if (artifactSummary) {
+      intent.summary = `${intent.summary} Artifacts: ${artifactSummary}`
     }
     emitLiveIntentEvent(
       'live_intent_failed',
@@ -289,24 +489,114 @@ function finalizeApprovedIntent(intent: PredictionDashboardLiveIntent): Predicti
     return intent
   }
 
-  intent.status = 'executed_preflight'
-  intent.execution_result = {
-    status: 'executed_preflight',
-    executed_at: executedAt,
-    transport_mode: 'dashboard_bounded_preflight',
-    performed_live: false,
-    live_execution_status: 'attempted_live_not_performed',
-    receipt_summary:
-      'Double approval completed. The dashboard emitted a bounded preflight receipt from the canonical live surface, but venue transport remains preflight-only in this subproject.',
-    order_trace_audit: orderTraceAudit,
+  try {
+    const receipt = executePredictionMarketRunLive({
+      runId: intent.run_id,
+      workspaceId: intent.workspace_id,
+      actor,
+      approvedIntentId: intent.intent_id,
+      approvedBy: approvalsForIntent(intent),
+    }) as unknown as Record<string, unknown>
+    const receiptRecord = asLiveExecutionReceipt(receipt)
+    const receiptSurface = toRecord(receiptRecord?.preflight_surface) ?? (refreshed as unknown as Record<string, unknown>)
+    const orderTraceAudit = toRecord(receiptRecord?.order_trace_audit) ?? {}
+    const performedLive = receiptRecord?.performed_live === true
+
+    intent.live_surface = receiptSurface
+    intent.live_status = recordString(receiptSurface, 'live_status', recordString(refreshed, 'live_status', 'unknown'))
+    intent.benchmark_promotion_ready = recordBoolean(receiptSurface, 'benchmark_promotion_ready')
+    intent.benchmark_promotion_blockers = recordStringList(receiptSurface, 'benchmark_promotion_blockers').length > 0
+      ? recordStringList(receiptSurface, 'benchmark_promotion_blockers')
+      : recordStringList(refreshed, 'benchmark_promotion_blockers')
+    intent.benchmark_gate_blocks_live = recordBoolean(receiptSurface, 'benchmark_gate_blocks_live')
+    intent.benchmark_gate_live_block_reason =
+      recordString(receiptSurface, 'benchmark_gate_live_block_reason', recordString(refreshed, 'benchmark_gate_live_block_reason', ''))
+        || recordString(refreshed, 'benchmark_gate_live_block_reason', null)
+    intent.live_blocking_reasons = recordStringList(receiptSurface, 'live_blocking_reasons').length > 0
+      ? recordStringList(receiptSurface, 'live_blocking_reasons')
+      : recordStringList(refreshed, 'live_blocking_reasons')
+    intent.selected_preview = toRecord(
+      firstDefined(
+        receiptSurface.live_trade_intent_preview,
+        receiptSurface.execution_projection_selected_preview,
+        null,
+      ),
+    )
+
+    if (!performedLive) {
+      intent.status = 'execution_failed'
+      intent.execution_result = {
+        status: 'execution_failed',
+        executed_at: executedAt,
+        transport_mode: recordString(receiptRecord, 'transport_mode', 'live_transport_unbound'),
+        performed_live: false,
+        live_execution_status: recordString(receiptRecord, 'live_execution_status', 'attempted_live_not_performed'),
+        receipt_summary: recordString(
+          receiptRecord,
+          'receipt_summary',
+          'Live execution was attempted after approval, but the venue submission was not performed.',
+        ),
+        order_trace_audit: orderTraceAudit,
+        receipt: receiptRecord,
+      }
+      intent.summary = intent.execution_result.receipt_summary
+      emitLiveIntentEvent(
+        'live_intent_failed',
+        'error',
+        intent,
+        intent.execution_result.receipt_summary,
+      )
+      return intent
+    }
+
+    intent.status = 'executed_live'
+    intent.execution_result = {
+      status: 'executed_live',
+      executed_at: executedAt,
+      transport_mode: recordString(receiptRecord, 'transport_mode', 'live'),
+      performed_live: true,
+      live_execution_status: recordString(receiptRecord, 'live_execution_status', 'live_submission_performed'),
+      receipt_summary: recordString(
+        receiptRecord,
+        'receipt_summary',
+        'Live execution materialized from the approved live intent.',
+      ),
+      order_trace_audit: orderTraceAudit,
+      receipt: receiptRecord,
+    }
+    intent.summary = intent.execution_result.receipt_summary
+    emitLiveIntentEvent(
+      'live_intent_executed',
+      'warn',
+      intent,
+      intent.execution_result.receipt_summary,
+    )
+    return intent
+  } catch (error) {
+    intent.status = 'execution_failed'
+    intent.execution_result = {
+      status: 'execution_failed',
+      executed_at: executedAt,
+      transport_mode: 'live_execution_bridge_failed',
+      performed_live: false,
+      live_execution_status: 'attempted_live_failed',
+      receipt_summary: error instanceof Error ? error.message : 'Live execution failed after approval.',
+      order_trace_audit: {
+        transport_mode: 'live_execution_bridge_failed',
+        live_execution_status: 'attempted_live_failed',
+        venue_order_status: 'live_execution_bridge_failed',
+      },
+      receipt: null,
+    }
+    intent.summary = intent.execution_result.receipt_summary
+    emitLiveIntentEvent(
+      'live_intent_failed',
+      'error',
+      intent,
+      intent.execution_result.receipt_summary,
+    )
+    return intent
   }
-  emitLiveIntentEvent(
-    'live_intent_executed',
-    'warn',
-    intent,
-    intent.execution_result.receipt_summary,
-  )
-  return intent
 }
 
 export function approvePredictionDashboardLiveIntent(
@@ -323,7 +613,7 @@ export function approvePredictionDashboardLiveIntent(
     })
   }
 
-  if (intent.status === 'rejected' || intent.status === 'executed_preflight' || intent.status === 'execution_failed') {
+  if (isIntentFinalized(intent)) {
     throw new PredictionMarketsError('Live intent is already finalized', {
       status: 409,
       code: 'live_intent_finalized',
@@ -351,14 +641,30 @@ export function approvePredictionDashboardLiveIntent(
 
   if (approvals.length < intent.approval_state.required_approvals) {
     intent.status = 'pending_second_approval'
-    intent.summary = `Live intent approved by ${actor}; waiting for a second distinct approver.`
+    const artifactSummary = buildArtifactHintSummary({
+      approval_ticket: intent.approval_ticket,
+      operator_thesis: intent.operator_thesis,
+      research_pipeline_trace: intent.research_pipeline_trace,
+    })
+    intent.summary = uniqueStrings([
+      `Live intent approved by ${actor}; waiting for a second distinct approver.`,
+      artifactSummary ? `Artifacts: ${artifactSummary}` : null,
+    ]).join(' ')
     emitLiveIntentEvent('live_intent_approved', 'info', intent, intent.summary)
     return intent
   }
 
-  intent.summary = `Live intent approved by ${approvals.length} distinct operators; generating the live receipt.`
+  const artifactSummary = buildArtifactHintSummary({
+    approval_ticket: intent.approval_ticket,
+    operator_thesis: intent.operator_thesis,
+    research_pipeline_trace: intent.research_pipeline_trace,
+  })
+  intent.summary = uniqueStrings([
+    `Live intent approved by ${approvals.length} distinct operators; executing the governed live route.`,
+    artifactSummary ? `Artifacts: ${artifactSummary}` : null,
+  ]).join(' ')
   emitLiveIntentEvent('live_intent_approved', 'warn', intent, intent.summary)
-  return finalizeApprovedIntent(intent)
+  return finalizeApprovedIntent(intent, actor)
 }
 
 export function rejectPredictionDashboardLiveIntent(
@@ -375,7 +681,7 @@ export function rejectPredictionDashboardLiveIntent(
     })
   }
 
-  if (intent.status === 'rejected' || intent.status === 'executed_preflight' || intent.status === 'execution_failed') {
+  if (isIntentFinalized(intent)) {
     throw new PredictionMarketsError('Live intent is already finalized', {
       status: 409,
       code: 'live_intent_finalized',
@@ -386,7 +692,15 @@ export function rejectPredictionDashboardLiveIntent(
   const rejections = [...intent.approval_state.rejections, rejection]
   intent.approval_state = buildApprovalState(intent.approval_state.approvals, rejections)
   intent.status = 'rejected'
-  intent.summary = `Live intent rejected by ${rejection.actor}.`
+  const artifactSummary = buildArtifactHintSummary({
+    approval_ticket: intent.approval_ticket,
+    operator_thesis: intent.operator_thesis,
+    research_pipeline_trace: intent.research_pipeline_trace,
+  })
+  intent.summary = uniqueStrings([
+    `Live intent rejected by ${rejection.actor}.`,
+    artifactSummary ? `Artifacts: ${artifactSummary}` : null,
+  ]).join(' ')
   emitLiveIntentEvent('live_intent_rejected', 'warn', intent, intent.summary)
   return intent
 }

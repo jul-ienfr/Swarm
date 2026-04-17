@@ -26,6 +26,20 @@ import {
   type PredictionDashboardArbitrageSnapshot as ScannerPredictionDashboardArbitrageSnapshot,
   type PredictionDashboardArbitrageSnapshotInput as ScannerPredictionDashboardArbitrageSnapshotInput,
 } from '@/lib/prediction-markets/arbitrage-scanner'
+import {
+  getConversationScopedExternalCatalogSummary,
+  type PredictionMarketExternalIntegrationSummary,
+} from '@/lib/prediction-markets/external-source-profiles'
+import {
+  getPredictionMarketP0ARuntimeSummary,
+  getPredictionMarketP1ARuntimeSummary,
+  getPredictionMarketP1BRuntimeSummary,
+  getPredictionMarketP1CRuntimeSummary,
+  getPredictionMarketP2BRuntimeSummary,
+  getPredictionMarketP2CRuntimeSummary,
+} from '@/lib/prediction-markets/external-runtime'
+import { buildPredictionMarketCopReadModel } from '@/lib/prediction-markets/cop-read-models'
+import type { PredictionMarketWorldStateGeoContext } from '@/lib/prediction-markets/world-state'
 
 export type DashboardFreshness = 'fresh' | 'warm' | 'stale'
 
@@ -49,10 +63,16 @@ export type PredictionDashboardRunListItem = {
   selected_path: string | null
   selected_path_status: string | null
   selected_path_effective_mode: string | null
+  selected_edge_bucket: string | null
+  pre_trade_gate_verdict: string | null
+  pre_trade_gate_summary: string | null
+  selected_path_net_edge_bps: number | null
+  selected_path_minimum_net_edge_bps: number | null
   live_promotable: boolean
   research_origin: string | null
   execution_summary: string | null
   strategy: PredictionDashboardStrategySummary | null
+  validation: PredictionDashboardValidationSummary | null
   freshness: DashboardFreshness
   transport: 'polling'
 }
@@ -71,6 +91,33 @@ export type PredictionDashboardStrategySummary = {
   strategy_shadow_summary: string | null
   resolution_anomalies: string[]
   execution_intent_preview_kind: string | null
+  operator_summary: string | null
+}
+
+export type PredictionDashboardValidationSeries = {
+  summary: string | null
+  sample_count: number | null
+  window_count: number | null
+  trial_count: number | null
+  win_rate: number | null
+  brier_score: number | null
+  log_loss: number | null
+  uplift_bps: number | null
+  status?: string | null
+  promotion_ready?: boolean | null
+  source: string | null
+}
+
+export type PredictionDashboardValidationSummary = {
+  resolved_history: PredictionDashboardValidationSeries | null
+  cost_model: PredictionDashboardValidationSeries | null
+  backtest: PredictionDashboardValidationSeries | null
+  walk_forward: PredictionDashboardValidationSeries | null
+  monte_carlo: PredictionDashboardValidationSeries | null
+  paper: PredictionDashboardValidationSeries | null
+  replay: PredictionDashboardValidationSeries | null
+  blockers: string[]
+  blocker_summary: string | null
   operator_summary: string | null
 }
 
@@ -102,11 +149,21 @@ export type PredictionDashboardRunDetail = {
     weighted_probability_yes: number | null
     weighted_coverage: number | null
     abstention_blocks: boolean | null
+    timesfm_requested_mode: string | null
+    timesfm_effective_mode: string | null
+    timesfm_selected_lane: string | null
+    timesfm_health: string | null
+    timesfm_summary: string | null
   }
   execution: {
     selected_path: string | null
     selected_path_status: string | null
     selected_path_effective_mode: string | null
+    selected_edge_bucket: string | null
+    pre_trade_gate_verdict: string | null
+    pre_trade_gate_summary: string | null
+    selected_path_net_edge_bps: number | null
+    selected_path_minimum_net_edge_bps: number | null
     selected_preview_source: string | null
     selected_preview: unknown
     requested_path: string | null
@@ -117,6 +174,8 @@ export type PredictionDashboardRunDetail = {
     live_promotable: boolean
   }
   strategy: PredictionDashboardStrategySummary | null
+  validation: PredictionDashboardValidationSummary | null
+  external_integrations: PredictionDashboardExternalIntegrationSummary
   surfaces: {
     dispatch?: unknown
     paper?: unknown
@@ -201,11 +260,28 @@ export type PredictionDashboardOverview = {
   }
   alerts: PredictionDashboardRunDetail['alerts']
   strategy: PredictionDashboardStrategySummary | null
+  validation: PredictionDashboardValidationSummary | null
+  external_integrations: PredictionDashboardExternalIntegrationSummary
   runs: PredictionDashboardRunListItem[]
   benchmark: PredictionDashboardBenchmarkSnapshot | null
   venue_snapshot: PredictionDashboardVenueSnapshot
   recent_events: PredictionDashboardEvent[]
   live_intents: PredictionDashboardLiveIntent[]
+}
+
+export type PredictionDashboardExternalIntegrationSummary = {
+  source_scope: 'run_artifacts' | 'conversation_registry'
+  integration: PredictionMarketExternalIntegrationSummary
+  geo_context: PredictionMarketWorldStateGeoContext | null
+  runtime_batches?: {
+    p0_a: string
+    p1_a: string
+    p1_b: string
+    p1_c: string
+    p2_b: string
+    p2_c: string
+  }
+  summary: string
 }
 
 function freshnessFromAgeSeconds(ageSeconds: number): DashboardFreshness {
@@ -216,6 +292,56 @@ function freshnessFromAgeSeconds(ageSeconds: number): DashboardFreshness {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function artifactPayload<T>(artifact: unknown): T | null {
+  const payload = (artifact as { payload?: unknown } | null | undefined)?.payload
+  return payload && typeof payload === 'object' ? payload as T : null
+}
+
+function buildDashboardExternalIntegrations(
+  detail: Awaited<ReturnType<typeof getPredictionMarketRunDetails>> | null,
+): PredictionDashboardExternalIntegrationSummary {
+  const sourceAudit = artifactPayload<{
+    external_integration?: PredictionMarketExternalIntegrationSummary
+  }>(detail?.source_audit_artifact ?? null)
+  const worldState = artifactPayload<{
+    external_integration?: PredictionMarketExternalIntegrationSummary
+    geo_context?: PredictionMarketWorldStateGeoContext | null
+  }>(detail?.world_state_artifact ?? null)
+  const integration = worldState?.external_integration
+    ?? sourceAudit?.external_integration
+    ?? getConversationScopedExternalCatalogSummary()
+  const geoContext = worldState?.geo_context ?? null
+  const p0a = getPredictionMarketP0ARuntimeSummary()
+  const p1a = getPredictionMarketP1ARuntimeSummary({ external_profile_ids: integration.profile_ids })
+  const p1b = getPredictionMarketP1BRuntimeSummary({
+    operator_thesis_present: Boolean((detail as { operator_thesis_present?: unknown } | null | undefined)?.operator_thesis_present),
+    research_pipeline_trace_present: Boolean((detail as { research_pipeline_trace_summary?: unknown } | null | undefined)?.research_pipeline_trace_summary),
+  })
+  const p1c = getPredictionMarketP1CRuntimeSummary({ geo_context_present: geoContext != null })
+  const p2b = getPredictionMarketP2BRuntimeSummary()
+  const p2c = getPredictionMarketP2CRuntimeSummary()
+  const sourceScope = worldState?.external_integration || sourceAudit?.external_integration
+    ? 'run_artifacts'
+    : 'conversation_registry'
+
+  return {
+    source_scope: sourceScope,
+    integration,
+    geo_context: geoContext,
+    runtime_batches: {
+      p0_a: p0a.summary,
+      p1_a: p1a.summary,
+      p1_b: p1b.summary,
+      p1_c: p1c.summary,
+      p2_b: p2b.summary,
+      p2_c: p2c.summary,
+    },
+    summary: sourceScope === 'run_artifacts'
+      ? `${integration.summary} | ${p1a.summary} | ${buildPredictionMarketCopReadModel({ geo_context: geoContext }).summary}`
+      : `Catalog baseline: ${integration.summary} | ${p0a.summary} | ${buildPredictionMarketCopReadModel({ geo_context: geoContext }).summary}`,
+  }
 }
 
 function asString(value: unknown): string | null {
@@ -237,6 +363,13 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
+function firstDefined<T>(...values: Array<T | null | undefined>): T | undefined {
+  for (const value of values) {
+    if (value !== undefined && value !== null) return value
+  }
+  return undefined
+}
+
 function getArtifactPayload(
   input: Record<string, unknown> | null | undefined,
   artifactType: string,
@@ -251,6 +384,50 @@ function getArtifactPayload(
   }
 
   return null
+}
+
+function resolveExecutionProjectionSelection(input: {
+  source: Record<string, unknown>
+  executionProjection: Record<string, unknown> | null
+  selectedPath?: string | null
+}) {
+  const selectedPath =
+    input.selectedPath ??
+    asString(firstDefined(input.source.execution_projection_selected_path, input.executionProjection?.selected_path))
+  const preflightSummary = asRecord(input.executionProjection?.preflight_summary)
+  const projectedPaths = asRecord(input.executionProjection?.projected_paths)
+  const selectedPathData = selectedPath ? asRecord(projectedPaths?.[selectedPath]) : null
+  const selectedPreTradeGate = asRecord(firstDefined(
+    input.source.execution_projection_selected_pre_trade_gate,
+    input.executionProjection?.selected_pre_trade_gate,
+    preflightSummary?.selected_pre_trade_gate,
+    selectedPathData?.pre_trade_gate,
+  ))
+
+  return {
+    selected_edge_bucket: asString(firstDefined(
+      input.source.execution_projection_selected_edge_bucket,
+      input.executionProjection?.selected_edge_bucket,
+      preflightSummary?.selected_edge_bucket,
+      selectedPathData?.edge_bucket,
+    )),
+    pre_trade_gate_verdict: asString(firstDefined(
+      input.source.execution_projection_selected_pre_trade_gate_verdict,
+      selectedPreTradeGate?.verdict,
+    )),
+    pre_trade_gate_summary: asString(firstDefined(
+      input.source.execution_projection_selected_pre_trade_gate_summary,
+      selectedPreTradeGate?.summary,
+    )),
+    selected_path_net_edge_bps: asNumber(firstDefined(
+      input.source.execution_projection_selected_path_net_edge_bps,
+      selectedPreTradeGate?.net_edge_bps,
+    )),
+    selected_path_minimum_net_edge_bps: asNumber(firstDefined(
+      input.source.execution_projection_selected_path_minimum_net_edge_bps,
+      selectedPreTradeGate?.minimum_net_edge_bps,
+    )),
+  }
 }
 
 function uniqueStringArray(values: Array<string | null | undefined>): string[] {
@@ -315,6 +492,264 @@ function buildShadowSummary(
     `Hedge success is ${formatPercentValue(asNumber(summary.hedge_success_probability))}.`,
     summary.worst_case_kind ? `Worst case is ${summary.worst_case_kind}.` : null,
   ]).join(' ')
+}
+
+function buildValidationSeries(
+  input: Record<string, unknown> | null | undefined,
+  sourceLabel: string,
+): PredictionDashboardValidationSeries | null {
+  if (!input) return null
+
+  const summary = asString(input.summary) ?? asString(input.note) ?? asString(input.description)
+  const sampleCount = asNumber(firstDefined(input.sample_count, input.samples, input.observations))
+  const windowCount = asNumber(firstDefined(input.window_count, input.windows, input.folds))
+  const trialCount = asNumber(firstDefined(input.trial_count, input.trials, input.simulations, input.iterations))
+  const winRate = asNumber(firstDefined(input.win_rate, input.hit_rate, input.success_rate, input.positive_rate))
+  const brierScore = asNumber(firstDefined(input.brier_score, input.brier))
+  const logLoss = asNumber(firstDefined(input.log_loss, input.logloss))
+  const upliftBps = asNumber(firstDefined(input.uplift_bps, input.delta_bps, input.edge_bps, input.excess_bps))
+  const rawStatus = asString(firstDefined(input.status, input.state))
+  const rawPromotionReady = firstDefined(input.promotion_ready, input.ready)
+  const promotionReady = typeof rawPromotionReady === 'boolean' ? rawPromotionReady : null
+
+  const hasUsefulField =
+    summary != null ||
+    sampleCount != null ||
+    windowCount != null ||
+    trialCount != null ||
+    winRate != null ||
+    brierScore != null ||
+    logLoss != null ||
+    upliftBps != null ||
+    rawStatus != null ||
+    promotionReady != null
+
+  if (!hasUsefulField) return null
+
+  return {
+    summary,
+    sample_count: sampleCount,
+    window_count: windowCount,
+    trial_count: trialCount,
+    win_rate: winRate,
+    brier_score: brierScore,
+    log_loss: logLoss,
+    uplift_bps: upliftBps,
+    status: rawStatus,
+    promotion_ready: promotionReady,
+    source: sourceLabel,
+  }
+}
+
+const RESOLVED_HISTORY_READY_POINTS = 12
+
+function formatValidationPercent(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${(value * 100).toFixed(1)}%`
+    : 'n/a'
+}
+
+function formatValidationBps(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toFixed(0)}bps`
+    : 'n/a'
+}
+
+function deriveValidationBlockers(input: {
+  resolved_history: PredictionDashboardValidationSeries | null
+  cost_model: PredictionDashboardValidationSeries | null
+  walk_forward: PredictionDashboardValidationSeries | null
+}): string[] {
+  const blockers: string[] = []
+
+  if (input.resolved_history == null) {
+    blockers.push('resolved history unavailable')
+  } else if (input.resolved_history.status === 'thin') {
+    blockers.push(
+      `resolved history thin (${String(input.resolved_history.sample_count ?? 0)} < ${String(RESOLVED_HISTORY_READY_POINTS)} samples)`,
+    )
+  }
+
+  if (input.cost_model == null) {
+    blockers.push('cost model unavailable')
+  } else if (input.cost_model.promotion_ready !== true) {
+    if ((input.cost_model.sample_count ?? 0) <= 0) {
+      blockers.push('cost model has no resolved points')
+    } else {
+      if (typeof input.cost_model.win_rate === 'number' && input.cost_model.win_rate < 0.5) {
+        blockers.push(`cost model viable rate ${formatValidationPercent(input.cost_model.win_rate)} < 50.0%`)
+      }
+      if (typeof input.cost_model.uplift_bps === 'number' && input.cost_model.uplift_bps <= 0) {
+        blockers.push(`cost model mean net edge ${formatValidationBps(input.cost_model.uplift_bps)} <= 0bps`)
+      }
+      if (
+        (typeof input.cost_model.win_rate !== 'number' || input.cost_model.win_rate >= 0.5) &&
+        (typeof input.cost_model.uplift_bps !== 'number' || input.cost_model.uplift_bps > 0)
+      ) {
+        blockers.push('cost model preview only')
+      }
+    }
+  }
+
+  if (input.walk_forward == null) {
+    blockers.push('walk-forward unavailable')
+  } else if (input.walk_forward.promotion_ready !== true) {
+    if ((input.walk_forward.window_count ?? 0) <= 0) {
+      blockers.push('walk-forward has no train/test windows')
+    } else if ((input.walk_forward.window_count ?? 0) < 2) {
+      blockers.push(`walk-forward only ${String(input.walk_forward.window_count)} window`)
+    } else {
+      if (typeof input.walk_forward.win_rate === 'number' && input.walk_forward.win_rate < 0.5) {
+        blockers.push(`walk-forward stable rate ${formatValidationPercent(input.walk_forward.win_rate)} < 50.0%`)
+      }
+      if (typeof input.walk_forward.uplift_bps === 'number' && input.walk_forward.uplift_bps < 0) {
+        blockers.push(`walk-forward mean net edge ${formatValidationBps(input.walk_forward.uplift_bps)} < 0bps`)
+      }
+      if (
+        (typeof input.walk_forward.win_rate !== 'number' || input.walk_forward.win_rate >= 0.5) &&
+        (typeof input.walk_forward.uplift_bps !== 'number' || input.walk_forward.uplift_bps >= 0)
+      ) {
+        blockers.push('walk-forward preview only')
+      }
+    }
+  }
+
+  return blockers
+}
+
+function buildValidationSummary(input: Record<string, unknown> | null | undefined): PredictionDashboardValidationSummary | null {
+  if (!input) return null
+
+  const validation = asRecord(firstDefined(input.validation, input.validation_summary))
+  const paperSurface = asRecord(firstDefined(input.paper_surface, input.paperSurface))
+  const replaySurface = asRecord(firstDefined(input.replay_surface, input.replaySurface))
+  const costModelSampleCount = asNumber(input.cost_model_total_points)
+  const costModelViablePointRate = asNumber(input.cost_model_viable_point_rate)
+  const costModelAverageNetEdgeBps = asNumber(input.cost_model_average_net_edge_bps)
+  const resolvedHistory = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.resolved_history,
+      {
+        summary: asString(firstDefined(input.resolved_history_source_summary, input.resolved_history_summary)),
+        note: asString(input.resolved_history_summary),
+        sample_count: asNumber(input.resolved_history_points),
+        status:
+          typeof input.resolved_history_points === 'number'
+            ? input.resolved_history_points >= RESOLVED_HISTORY_READY_POINTS
+              ? 'ready'
+              : input.resolved_history_points > 0
+                ? 'thin'
+                : null
+            : null,
+      },
+    )),
+    'resolved_history',
+  )
+  const costModel = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.cost_model,
+      {
+        summary: asString(input.cost_model_summary),
+        sample_count: costModelSampleCount,
+        win_rate: costModelViablePointRate,
+        uplift_bps: costModelAverageNetEdgeBps,
+        ready:
+          costModelSampleCount != null &&
+          costModelSampleCount > 0 &&
+          costModelViablePointRate != null &&
+          costModelViablePointRate >= 0.5 &&
+          costModelAverageNetEdgeBps != null &&
+          costModelAverageNetEdgeBps > 0,
+      },
+    )),
+    'cost_model',
+  )
+
+  const backtest = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.backtest,
+      input.backtest_summary,
+      input.backtest_stats,
+      paperSurface?.backtest_summary,
+      paperSurface?.backtest_stats,
+      replaySurface?.backtest_summary,
+      replaySurface?.backtest_stats,
+    )),
+    'backtest',
+  )
+  const walkForward = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.walk_forward,
+      input.walk_forward_summary,
+      input.walk_forward_stats,
+      paperSurface?.walk_forward_summary,
+      paperSurface?.walk_forward_stats,
+      replaySurface?.walk_forward_summary,
+      replaySurface?.walk_forward_stats,
+    )),
+    'walk_forward',
+  )
+  const monteCarlo = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.monte_carlo,
+      input.monte_carlo_summary,
+      input.monte_carlo_stats,
+      paperSurface?.monte_carlo_summary,
+      paperSurface?.monte_carlo_stats,
+      replaySurface?.monte_carlo_summary,
+      replaySurface?.monte_carlo_stats,
+    )),
+    'monte_carlo',
+  )
+  const paper = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.paper,
+      input.paper_validation_summary,
+      paperSurface?.validation_summary,
+      paperSurface?.validation,
+    )),
+    'paper',
+  )
+  const replay = buildValidationSeries(
+    asRecord(firstDefined(
+      validation?.replay,
+      input.replay_validation_summary,
+      replaySurface?.validation_summary,
+      replaySurface?.validation,
+    )),
+    'replay',
+  )
+
+  const pieces = [
+    resolvedHistory ? `resolved_history:${resolvedHistory.summary ?? resolvedHistory.source ?? 'available'}` : null,
+    costModel ? `cost_model:${costModel.summary ?? costModel.source ?? 'available'}` : null,
+    backtest ? `backtest:${backtest.summary ?? backtest.source ?? 'available'}` : null,
+    walkForward ? `walk_forward:${walkForward.summary ?? walkForward.source ?? 'available'}` : null,
+    monteCarlo ? `monte_carlo:${monteCarlo.summary ?? monteCarlo.source ?? 'available'}` : null,
+    paper ? `paper:${paper.summary ?? paper.source ?? 'available'}` : null,
+    replay ? `replay:${replay.summary ?? replay.source ?? 'available'}` : null,
+  ].filter(Boolean)
+
+  if (pieces.length === 0) return null
+
+  const blockers = deriveValidationBlockers({
+    resolved_history: resolvedHistory,
+    cost_model: costModel,
+    walk_forward: walkForward,
+  })
+
+  return {
+    resolved_history: resolvedHistory,
+    cost_model: costModel,
+    backtest,
+    walk_forward: walkForward,
+    monte_carlo: monteCarlo,
+    paper,
+    replay,
+    blockers,
+    blocker_summary: blockers.length > 0 ? blockers.join('; ') : null,
+    operator_summary: pieces.join(' | '),
+  }
 }
 
 function buildStrategySummary(input: Record<string, unknown> | null | undefined): PredictionDashboardStrategySummary | null {
@@ -393,6 +828,7 @@ function buildStrategySummary(input: Record<string, unknown> | null | undefined)
     asString(input.strategy_shadow_summary) ??
     asString(input.shadow_summary) ??
     buildShadowSummary(shadowArbitrage)
+  const validation = buildValidationSummary(input)
 
   const hasStrategyArtifacts =
     hiddenPrimaryStrategy != null ||
@@ -408,7 +844,9 @@ function buildStrategySummary(input: Record<string, unknown> | null | undefined)
     multiVenueExecution != null ||
     tradeIntentGuard != null
 
-  if (!hasStrategyArtifacts) return null
+  const hasValidationArtifacts = validation != null
+
+  if (!hasStrategyArtifacts && !hasValidationArtifacts) return null
 
   const operatorSummary = uniqueStringArray([
     hiddenPrimaryStrategy ? `Primary strategy: ${hiddenPrimaryStrategy}.` : null,
@@ -419,6 +857,7 @@ function buildStrategySummary(input: Record<string, unknown> | null | undefined)
     resolutionAnomalies.length > 0
       ? `Resolution anomalies: ${resolutionAnomalies.slice(0, 3).join('; ')}.`
       : null,
+    validation?.operator_summary ? `Validation: ${validation.operator_summary}` : null,
   ]).join(' ')
 
   return {
@@ -455,6 +894,7 @@ function summarizeBenchmark(detail: NonNullable<Awaited<ReturnType<typeof getPre
 }
 
 function summarizeExecution(detail: NonNullable<Awaited<ReturnType<typeof getPredictionMarketRunDetails>>>) {
+  const detailRecord = detail as Record<string, unknown>
   const executionProjection = detail.execution_projection as Record<string, unknown> | null
   const selectedPath = detail.execution_projection_selected_path ?? asString(executionProjection?.selected_path) ?? null
   const selectedPathStatus = detail.execution_projection_selected_path_status ?? asString(executionProjection?.selected_path_status) ?? null
@@ -463,6 +903,11 @@ function summarizeExecution(detail: NonNullable<Awaited<ReturnType<typeof getPre
     detail.execution_projection_recommended_effective_mode ??
     asString(executionProjection?.recommended_effective_mode) ??
     null
+  const selection = resolveExecutionProjectionSelection({
+    source: detailRecord,
+    executionProjection,
+    selectedPath,
+  })
   const blockers = [
     ...asStringArray(executionProjection?.blocking_reasons),
     ...(detail.trade_intent_guard?.blocked_reasons ?? []),
@@ -472,6 +917,11 @@ function summarizeExecution(detail: NonNullable<Awaited<ReturnType<typeof getPre
     selected_path: selectedPath,
     selected_path_status: selectedPathStatus,
     selected_path_effective_mode: selectedPathEffectiveMode,
+    selected_edge_bucket: selection.selected_edge_bucket,
+    pre_trade_gate_verdict: selection.pre_trade_gate_verdict,
+    pre_trade_gate_summary: selection.pre_trade_gate_summary,
+    selected_path_net_edge_bps: selection.selected_path_net_edge_bps,
+    selected_path_minimum_net_edge_bps: selection.selected_path_minimum_net_edge_bps,
     selected_preview_source: detail.execution_projection_selected_preview_source ?? null,
     selected_preview: detail.execution_projection_selected_preview ?? null,
     requested_path: detail.execution_projection_requested_path ?? asString(executionProjection?.requested_path) ?? null,
@@ -497,6 +947,11 @@ function mapRunListItem(run: ReturnType<typeof listPredictionMarketRuns>[number]
     run.execution_projection_recommended_effective_mode ??
     asString(executionProjection?.recommended_effective_mode) ??
     null
+  const selection = resolveExecutionProjectionSelection({
+    source: runRecord,
+    executionProjection,
+    selectedPath,
+  })
 
   return {
     run_id: run.run_id,
@@ -527,6 +982,11 @@ function mapRunListItem(run: ReturnType<typeof listPredictionMarketRuns>[number]
     selected_path: selectedPath,
     selected_path_status: selectedPathStatus,
     selected_path_effective_mode: selectedPathEffectiveMode,
+    selected_edge_bucket: selection.selected_edge_bucket,
+    pre_trade_gate_verdict: selection.pre_trade_gate_verdict,
+    pre_trade_gate_summary: selection.pre_trade_gate_summary,
+    selected_path_net_edge_bps: selection.selected_path_net_edge_bps,
+    selected_path_minimum_net_edge_bps: selection.selected_path_minimum_net_edge_bps,
     live_promotable:
       selectedPath === 'live' &&
       run.benchmark_promotion_ready === true &&
@@ -537,6 +997,7 @@ function mapRunListItem(run: ReturnType<typeof listPredictionMarketRuns>[number]
       ?? asString((run.execution_projection_preflight_summary as Record<string, unknown> | undefined)?.summary)
       ?? null,
     strategy: buildStrategySummary(runRecord),
+    validation: buildValidationSummary(runRecord),
     freshness: freshnessFromAgeSeconds(Math.max(0, Math.floor(Date.now() / 1000) - run.updated_at)),
     transport: 'polling',
   }
@@ -580,6 +1041,17 @@ function buildAlerts(detail: PredictionDashboardRunDetail | null, venue: Predict
     })
   }
 
+  if (detail?.execution.pre_trade_gate_verdict === 'fail') {
+    alerts.push({
+      code: 'pre_trade_gate_failed',
+      severity: 'high',
+      title: 'Pre-trade gate failed',
+      summary:
+        detail.execution.pre_trade_gate_summary
+        ?? 'Net edge does not clear the hard no-trade threshold.',
+    })
+  }
+
   return alerts
 }
 
@@ -593,6 +1065,7 @@ export function buildPredictionDashboardRunDetail(
   const benchmark = summarizeBenchmark(detail)
   const execution = summarizeExecution(detail)
   const strategy = buildStrategySummary(detail)
+  const validation = buildValidationSummary(detail)
   const liveIntents = listDashboardLiveIntents(runId, workspaceId)
   const generatedAt = new Date().toISOString()
 
@@ -617,9 +1090,16 @@ export function buildPredictionDashboardRunDetail(
       weighted_probability_yes: detail.research_weighted_probability_yes ?? null,
       weighted_coverage: detail.research_weighted_coverage ?? null,
       abstention_blocks: detail.research_abstention_policy_blocks_forecast ?? null,
+      timesfm_requested_mode: detail.timesfm_requested_mode ?? null,
+      timesfm_effective_mode: detail.timesfm_effective_mode ?? null,
+      timesfm_selected_lane: detail.timesfm_selected_lane ?? null,
+      timesfm_health: detail.timesfm_health ?? null,
+      timesfm_summary: detail.timesfm_summary ?? null,
     },
     execution,
     strategy,
+    validation,
+    external_integrations: buildDashboardExternalIntegrations(detail),
     surfaces: {
       dispatch: detail.trade_intent_guard ?? null,
       paper: detail.paper_surface ?? null,
@@ -779,6 +1259,7 @@ export function buildPredictionDashboardOverview(
   const benchmarkSnapshot = buildPredictionDashboardBenchmarkSnapshot(workspaceId, venue, runs.items[0]?.run_id)
   const detail = runs.items[0]?.run_id ? buildPredictionDashboardRunDetail(workspaceId, runs.items[0].run_id) : null
   const strategy = detail?.strategy ?? runs.items[0]?.strategy ?? null
+  const validation = detail?.validation ?? runs.items[0]?.validation ?? null
   const liveIntents = listDashboardLiveIntents(undefined, workspaceId)
   const recentEvents = listRecentPredictionDashboardEvents(25)
   const metrics = {
@@ -808,11 +1289,13 @@ export function buildPredictionDashboardOverview(
     metrics,
     alerts: detail?.alerts ?? buildAlerts(detail, venueSnapshot),
     strategy,
+    external_integrations: detail?.external_integrations ?? buildDashboardExternalIntegrations(null),
     runs: runs.items,
     benchmark: benchmarkSnapshot,
     venue_snapshot: venueSnapshot,
     recent_events: recentEvents,
     live_intents: liveIntents,
+    validation,
   }
 }
 

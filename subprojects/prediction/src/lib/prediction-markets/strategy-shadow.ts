@@ -50,6 +50,31 @@ export type PredictionMarketShadowStrategyWatchSummary = {
   reasons: string[]
 }
 
+export type PredictionMarketShadowStrategyDefenseSummary = {
+  read_only: true
+  market_id: string
+  venue: PredictionMarketStrategyMarketRegime['venue']
+  generated_at: string
+  regime_id: string
+  disposition: PredictionMarketShadowStrategyDisposition
+  freshness_state: PredictionMarketStrategyMarketRegime['freshness_state']
+  resolution_state: PredictionMarketStrategyMarketRegime['resolution_state']
+  latency_state: PredictionMarketStrategyMarketRegime['latency_state']
+  watch_count: number
+  defense_count: number
+  attack_watch_count: number
+  sniping_watch_count: number
+  latency_reference_count: number
+  best_latency_reference_id: string | null
+  best_latency_reference_gap_ms: number | null
+  severity: PredictionMarketShadowStrategyWatch['severity']
+  summary: string
+  reasons: string[]
+  watch_conditions: string[]
+  defensive_controls: string[]
+  evidence_refs: string[]
+}
+
 export type PredictionMarketShadowStrategyInput = PredictionMarketStrategyRegimeInput & {
   regime?: PredictionMarketStrategyMarketRegime | null
   resolution_anomalies?: readonly PredictionMarketStrategyResolutionAnomaly[]
@@ -116,6 +141,24 @@ function watchSeverityFromResolutionState(state: PredictionMarketStrategyResolut
   }
 }
 
+function bestLatencyReference(
+  latencyReferences: readonly PredictionMarketStrategyLatencyReference[],
+): PredictionMarketStrategyLatencyReference | null {
+  return [...latencyReferences]
+    .sort((left, right) => {
+      if (right.reference_score !== left.reference_score) {
+        return right.reference_score - left.reference_score
+      }
+      const leftFreshness = left.freshness_gap_ms ?? Number.MAX_SAFE_INTEGER
+      const rightFreshness = right.freshness_gap_ms ?? Number.MAX_SAFE_INTEGER
+      if (leftFreshness !== rightFreshness) return leftFreshness - rightFreshness
+      const leftQuoteAge = left.quote_age_ms ?? Number.MAX_SAFE_INTEGER
+      const rightQuoteAge = right.quote_age_ms ?? Number.MAX_SAFE_INTEGER
+      if (leftQuoteAge !== rightQuoteAge) return leftQuoteAge - rightQuoteAge
+      return left.reference_id.localeCompare(right.reference_id)
+    })[0] ?? null
+}
+
 function mapResolutionAnomalyToWatchKind(
   anomaly: PredictionMarketStrategyResolutionAnomaly,
 ): PredictionMarketShadowStrategyKind | null {
@@ -179,6 +222,7 @@ function makeAttackWatch(input: {
       'prefer_primary_resolution_sources',
       'avoid_autonomous_execution',
       'preserve_read_only_monitoring',
+      ...(input.regime.maker_quote_state !== 'viable' ? ['avoid_quote_fade_entry'] : []),
     ]),
     evidence_refs: uniqueStrings([
       ...(input.anomaly?.signal_refs ?? []),
@@ -189,6 +233,7 @@ function makeAttackWatch(input: {
       anomaly_id: input.anomaly?.anomaly_id ?? null,
       resolution_state: input.regime.resolution_state,
       disposition: input.regime.disposition,
+      maker_quote_state: input.regime.maker_quote_state,
     },
   }
 }
@@ -222,12 +267,17 @@ function makeSnipingWatch(input: {
     read_only: true,
     watch_id: buildShadowWatchId('resolution_sniping_watch', input.marketId, bestReference?.reference_id ?? 'none'),
     kind: 'resolution_sniping_watch',
-    disposition: 'watch',
+    disposition: 'defense',
     market_id: input.marketId,
     venue: input.venue,
     severity,
     signal_score: round(signalScore),
-    summary: `Resolution sniping watch for ${input.marketId} near the endgame window.`,
+    summary: [
+      `Defense watch for resolution sniping pressure on ${input.marketId}.`,
+      bestReference
+        ? `best_reference=${bestReference.reference_id} freshness_gap_ms=${freshnessGapMs ?? 'n/a'}`
+        : null,
+    ].filter(Boolean).join(' '),
     reasons: uniqueStrings([
       ...(input.anomaly?.reasons ?? []),
       ...input.reasons,
@@ -243,6 +293,7 @@ function makeSnipingWatch(input: {
       'prefer_fresh_quotes',
       'require_resolution_source_check',
       'monitor_quote_age',
+      ...(input.regime.maker_quote_state !== 'viable' ? ['avoid_quote_fade_entry'] : []),
     ]),
     evidence_refs: uniqueStrings([
       ...(input.anomaly?.signal_refs ?? []),
@@ -255,6 +306,7 @@ function makeSnipingWatch(input: {
       freshness_gap_ms: freshnessGapMs,
       hours_to_resolution: input.regime.hours_to_resolution,
       disposition: input.regime.disposition,
+      maker_quote_state: input.regime.maker_quote_state,
     },
   }
 }
@@ -266,8 +318,8 @@ function watchSummaryFromCounts(input: {
   snipingCount: number
 }): string {
   return [
-    `shadow watchlist contains ${input.watchCount} watch signals`,
-    `${input.defenseCount} defense signals`,
+    `shadow defense watchlist contains ${input.defenseCount} defense signals`,
+    `${input.watchCount} passive watch signals`,
     `${input.attackCount} attack-watch items`,
     `${input.snipingCount} sniping-watch items`,
   ].join('; ')
@@ -363,6 +415,90 @@ export function buildShadowStrategyWatchlist(
       if (right.signal_score !== left.signal_score) return right.signal_score - left.signal_score
       return left.watch_id.localeCompare(right.watch_id)
     })
+}
+
+export function buildShadowStrategyDefenseSummary(
+  input: PredictionMarketShadowStrategyInput,
+): PredictionMarketShadowStrategyDefenseSummary {
+  const regime = input.regime ?? deriveMarketRegime(input)
+  const anomalies = normalizeAnomalies(input.resolution_anomalies ?? deriveResolutionAnomalies(input))
+  const latencyReferences = input.latency_references ?? deriveLatencyReferences(input)
+  const watches = buildShadowStrategyWatchlist({
+    ...input,
+    regime,
+    resolution_anomalies: anomalies,
+    latency_references: latencyReferences,
+  })
+  const counts = summarizeShadowStrategyWatchlist(watches)
+  const topWatch = [...watches]
+    .sort((left, right) => {
+      const bySeverity = severityRank(right.severity) - severityRank(left.severity)
+      if (bySeverity !== 0) return bySeverity
+      if (right.signal_score !== left.signal_score) return right.signal_score - left.signal_score
+      return left.watch_id.localeCompare(right.watch_id)
+    })[0] ?? null
+  const topLatencyReference = bestLatencyReference(latencyReferences)
+
+  const summary = [
+    `shadow defense summary for ${regime.market_id}`,
+    `regime=${regime.disposition}/${regime.resolution_state}/${regime.latency_state}`,
+    `maker_quote=${regime.maker_quote_state}`,
+    `watches=${counts.total}`,
+    `defense=${counts.defense_count}`,
+    `attack=${counts.attack_watch_count}`,
+    `sniping=${counts.sniping_watch_count}`,
+    topLatencyReference
+      ? `best_reference=${topLatencyReference.reference_id} gap_ms=${topLatencyReference.freshness_gap_ms ?? 'n/a'}`
+      : null,
+  ].filter(Boolean).join('; ')
+
+  return {
+    read_only: true,
+    market_id: regime.market_id,
+    venue: regime.venue,
+    generated_at: regime.generated_at,
+    regime_id: regime.regime_id,
+    disposition: counts.defense_count > 0 || regime.disposition === 'defense' ? 'defense' : 'watch',
+    freshness_state: regime.freshness_state,
+    resolution_state: regime.resolution_state,
+    latency_state: regime.latency_state,
+    watch_count: counts.watch_count,
+    defense_count: counts.defense_count,
+    attack_watch_count: counts.attack_watch_count,
+    sniping_watch_count: counts.sniping_watch_count,
+    latency_reference_count: latencyReferences.length,
+    best_latency_reference_id: topLatencyReference?.reference_id ?? null,
+    best_latency_reference_gap_ms: topLatencyReference?.freshness_gap_ms ?? null,
+    severity: topWatch?.severity ?? watchSeverityFromResolutionState(regime.resolution_state),
+    summary,
+    reasons: uniqueStrings([
+      ...counts.reasons,
+      'defense_only',
+      latencyReferences.length > 0 ? `latency_references:${latencyReferences.length}` : null,
+      regime.latency_state !== 'fresh' ? `latency_state:${regime.latency_state}` : null,
+      regime.resolution_state !== 'clear' ? `resolution_state:${regime.resolution_state}` : null,
+      `maker_quote_state:${regime.maker_quote_state}`,
+      `maker_quote_freshness_budget_ms:${regime.maker_quote_freshness_budget_ms}`,
+      topWatch?.kind ? `top_watch_kind:${topWatch.kind}` : null,
+    ]),
+    watch_conditions: uniqueStrings([
+      'manual_review_required',
+      'resolution_policy_check',
+      'freshness_gate_enforced',
+      regime.latency_state === 'stale' ? 'prefer_wait_over_action' : null,
+      regime.maker_quote_state !== 'viable' ? 'maker_quote_guard_active' : null,
+    ]),
+    defensive_controls: uniqueStrings([
+      ...watches.flatMap((watch) => watch.defensive_controls),
+      'route_to_manual_review',
+      'preserve_read_only_monitoring',
+      ...(regime.maker_quote_state !== 'viable' ? ['avoid_quote_fade_entry'] : []),
+    ]),
+    evidence_refs: uniqueStrings([
+      ...watches.flatMap((watch) => watch.evidence_refs),
+      topLatencyReference?.reference_id ?? null,
+    ]),
+  }
 }
 
 export function summarizeShadowStrategyWatchlist(

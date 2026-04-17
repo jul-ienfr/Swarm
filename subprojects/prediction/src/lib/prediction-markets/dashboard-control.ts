@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 
 import { PredictionMarketsError } from '@/lib/prediction-markets/errors'
+import { getPolymarketOperatorSidecarSurface } from '@/lib/prediction-markets/polymarket-operator-sidecars'
 import {
   getPredictionMarketRunDetails,
   preparePredictionMarketRunLive,
@@ -292,6 +293,9 @@ export function createDashboardLiveIntent(input: {
       venue: detail.venue,
       requested_by: input.actor,
       benchmark_state: intent.benchmark_state,
+      operator_sidecars: detail.venue === 'polymarket'
+        ? getPolymarketOperatorSidecarSurface()
+        : null,
     },
   })
 

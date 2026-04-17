@@ -77,7 +77,27 @@ const endpoints = [
     method: 'POST',
   },
   {
+    path: '/api/prediction-markets/predict',
+    auth: 'operator',
+    method: 'POST',
+  },
+  {
+    path: '/api/prediction-markets/predict-deep',
+    auth: 'operator',
+    method: 'POST',
+  },
+  {
     path: '/api/prediction-markets/replay',
+    auth: 'operator',
+    method: 'POST',
+  },
+  {
+    path: '/api/v1/prediction-markets/predict',
+    auth: 'operator',
+    method: 'POST',
+  },
+  {
+    path: '/api/v1/prediction-markets/predict-deep',
     auth: 'operator',
     method: 'POST',
   },

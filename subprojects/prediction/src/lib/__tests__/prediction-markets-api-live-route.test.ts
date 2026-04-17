@@ -322,6 +322,19 @@ describe('prediction markets v1 live route', () => {
       method: 'POST',
       body: JSON.stringify({
         execution_mode: 'live',
+        decision_packet: {
+          correlation_id: 'decision-live-1',
+          probability_estimate: 0.68,
+          topic: 'live execution validation',
+          objective: 'preserve governance context',
+          mode_used: 'hybrid',
+          engine_used: 'agentsociety',
+          runtime_used: 'structured',
+        },
+        research_runtime_summary: 'research: mode=research_driven pipeline=polymarket-research-pipeline',
+        research_benchmark_gate_summary: 'benchmark gate: ready',
+        research_benchmark_live_block_reason: 'research stale blocker',
+        governance_note: 'approved under canonical live gate',
       }),
       headers: {
         'content-type': 'application/json',
@@ -353,7 +366,118 @@ describe('prediction markets v1 live route', () => {
       live_execution: {
         execution_id: 'live-exec-1',
       },
+      request_context: {
+        decision_packet: {
+          correlation_id: 'decision-live-1',
+          probability_estimate: 0.68,
+          topic: 'live execution validation',
+          objective: 'preserve governance context',
+          mode_used: 'hybrid',
+          engine_used: 'agentsociety',
+          runtime_used: 'structured',
+        },
+        research_runtime_summary: 'research: mode=research_driven pipeline=polymarket-research-pipeline',
+        research_benchmark_gate_summary: 'benchmark gate: ready',
+        research_benchmark_live_block_reason: 'research stale blocker',
+        governance_note: 'approved under canonical live gate',
+      },
     })
+  })
+
+  it('reuses the stored executed_live receipt instead of executing the same live intent twice', async () => {
+    mocks.listDashboardLiveIntents.mockReturnValue([
+      {
+        intent_id: 'intent-live-1',
+        workspace_id: 7,
+        run_id: 'run-live-1',
+        status: 'executed_live',
+        approval_state: {
+          approvals: [{ actor: 'reviewer-a' }, { actor: 'reviewer-b' }],
+          required_approvals: 2,
+        },
+        execution_result: {
+          status: 'executed_live',
+          receipt: {
+            gate_name: 'execution_projection_live_materialization',
+            execution_mode: 'live',
+            source_run_id: 'run-live-1',
+            materialized_run_id: 'run-live-1__live_cached',
+            approved_intent_id: 'intent-live-1',
+            approved_by: ['reviewer-a', 'reviewer-b'],
+            transport_mode: 'live',
+            performed_live: true,
+            live_execution_status: 'filled',
+            receipt_summary: 'Stored live receipt should win.',
+          },
+        },
+      },
+    ])
+
+    const { POST } = await import('../../app/api/v1/prediction-markets/runs/[run_id]/live/route')
+    const request = new NextRequest('http://localhost/api/v1/prediction-markets/runs/run-live-1/live', {
+      method: 'POST',
+      body: JSON.stringify({
+        execution_mode: 'live',
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+    })
+
+    const response = await POST(request, {
+      params: Promise.resolve({ run_id: 'run-live-1' }),
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(mocks.executePredictionMarketRunLive).not.toHaveBeenCalled()
+    expect(body).toMatchObject({
+      materialized_run_id: 'run-live-1__live_cached',
+      receipt_summary: 'Stored live receipt should win.',
+      performed_live: true,
+    })
+  })
+
+  it('does not treat failed live intents as approved execution authority', async () => {
+    mocks.listDashboardLiveIntents.mockReturnValue([
+      {
+        intent_id: 'intent-live-1',
+        workspace_id: 7,
+        run_id: 'run-live-1',
+        status: 'execution_failed',
+        approval_state: {
+          approvals: [{ actor: 'reviewer-a' }, { actor: 'reviewer-b' }],
+          required_approvals: 2,
+        },
+        execution_result: {
+          status: 'execution_failed',
+          receipt: null,
+        },
+      },
+    ])
+
+    const { POST } = await import('../../app/api/v1/prediction-markets/runs/[run_id]/live/route')
+    const request = new NextRequest('http://localhost/api/v1/prediction-markets/runs/run-live-1/live', {
+      method: 'POST',
+      body: JSON.stringify({
+        execution_mode: 'live',
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+    })
+
+    const response = await POST(request, {
+      params: Promise.resolve({ run_id: 'run-live-1' }),
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body).toMatchObject({
+      error: 'Live intent approval required',
+      code: 'live_intent_required',
+    })
+    expect(mocks.executePredictionMarketRunLive).not.toHaveBeenCalled()
   })
 
   it('rejects live preparation when no approved live intent exists', async () => {

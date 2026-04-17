@@ -295,4 +295,123 @@ describe('prediction markets arbitrage scanner', () => {
       resetPredictionDashboardArbitrageStateForTests()
     }
   })
+
+  it('ranks candidates by quality and actionability signals', async () => {
+    const { getPredictionDashboardArbitrageSnapshot, resetPredictionDashboardArbitrageStateForTests } = await import('@/lib/prediction-markets/arbitrage-scanner')
+
+    const weakEvaluation = makeEvaluation({
+      canonical_event_id: 'eth-2026',
+      canonical_event_key: 'eth-2026',
+      confidence_score: 0.54,
+      arbitrage_candidate: {
+        candidate_type: 'yes_yes_spread',
+        opportunity_type: 'true_arbitrage',
+        canonical_event_id: 'eth-2026',
+        canonical_event_key: 'eth-2026',
+        buy_ref: { venue: 'polymarket', market_id: 'poly-eth' },
+        sell_ref: { venue: 'kalshi', market_id: 'kal-eth' },
+        buy_price_yes: 0.44,
+        sell_price_yes: 0.47,
+        gross_spread_bps: 300,
+        net_spread_bps: 18,
+        confidence_score: 0.54,
+        executable: false,
+        executable_edge: {
+          executable_edge_bps: 12,
+          notes: ['thin edge'],
+        },
+        market_equivalence_proof: {
+          proof_status: 'proven',
+          manual_review_required: true,
+        },
+        arb_plan: {
+          arb_plan_id: 'arb:eth-2026',
+          canonical_event_id: 'eth-2026',
+          opportunity_type: 'true_arbitrage',
+          executable_edge: {
+            executable_edge_bps: 12,
+          },
+          legs: [],
+          required_capital_usd: 100,
+          break_even_after_fees_bps: 14,
+          max_unhedged_leg_ms: 4_000,
+          exit_policy: 'shadow-only',
+          manual_review_required: true,
+          notes: [],
+        },
+        reasons: ['thin_edge', 'manual_review_required'],
+      },
+    })
+
+    mocks.findCrossVenueMatches.mockImplementation(() => [makeEvaluation(), weakEvaluation])
+    mocks.summarizeCrossVenueIntelligence.mockImplementation((evaluations: Array<ReturnType<typeof makeEvaluation>>) => ({
+      total_pairs: 2,
+      opportunity_type_counts: {
+        comparison_only: 0,
+        relative_value: 0,
+        cross_venue_signal: 0,
+        true_arbitrage: 2,
+      },
+      compatible: evaluations,
+      manual_review: [evaluations[1]],
+      comparison_only: [],
+      blocking_reasons: [],
+      highest_confidence_candidate: evaluations[0]?.arbitrage_candidate ?? null,
+    }))
+    let shadowCall = 0
+    mocks.buildShadowArbitrageSimulation.mockImplementation(() => {
+      shadowCall += 1
+      return shadowCall % 2 === 1
+        ? {
+            summary: {
+              shadow_edge_bps: 80,
+              recommended_size_usd: 240,
+              hedge_success_probability: 0.95,
+              hedge_success_expected: true,
+              estimated_net_pnl_bps: 58,
+              estimated_net_pnl_usd: 14,
+              notes: ['good shadow'],
+            },
+          }
+        : {
+            summary: {
+              shadow_edge_bps: 8,
+              recommended_size_usd: 60,
+              hedge_success_probability: 0.68,
+              hedge_success_expected: false,
+              estimated_net_pnl_bps: 3,
+              estimated_net_pnl_usd: 1,
+              notes: ['weak shadow'],
+            },
+          }
+    })
+
+    try {
+      const full = await getPredictionDashboardArbitrageSnapshot({
+        workspaceId: 7,
+        limitPerVenue: 2,
+        maxPairs: 10,
+        minArbitrageSpreadBps: 25,
+        shadowCandidateLimit: 4,
+        forceRefresh: true,
+      })
+
+      expect(full.candidates[0]?.candidate_id).toBe('arb:btc-2026')
+      expect(full.candidates[0]?.ranking_score).toBeGreaterThan(full.candidates[1]?.ranking_score ?? 0)
+      expect(full.overview.best_quality_score).toBe(full.candidates[0]?.quality_score ?? null)
+      expect(full.overview.best_actionability_score).toBe(full.candidates[0]?.actionability_score ?? null)
+      expect(full.candidates[0]?.quality_signals).toEqual(expect.arrayContaining([
+        'executable_edge_bps:88',
+        'shadow_edge_bps:80',
+      ]))
+      expect(full.candidates[0]?.actionability_signals).toEqual(expect.arrayContaining([
+        'shadow_ready',
+        'manual_review_clear',
+      ]))
+      expect(full.overview.actionable_candidate_count).toBe(1)
+      expect(full.candidates[0]?.actionability_score).toBeGreaterThan(full.candidates[1]?.actionability_score ?? 0)
+    } finally {
+      resetPredictionDashboardArbitrageStateForTests()
+    }
+  })
 })

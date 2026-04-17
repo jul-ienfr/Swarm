@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Swarm Dashboards</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #08111f;
+        --panel: #101c2e;
+        --panel-alt: #16253b;
+        --text: #e9f0fb;
+        --muted: #9fb3cf;
+        --accent: #86d7ff;
+        --accent-2: #ffd37a;
+        --border: rgba(255, 255, 255, 0.09);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(134, 215, 255, 0.18), transparent 30%),
+          linear-gradient(160deg, var(--bg), #050a12 70%);
+        color: var(--text);
+      }
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(2rem, 4vw, 3.5rem);
+      }
+      p.lead {
+        max-width: 780px;
+        margin: 0 0 32px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: linear-gradient(180deg, var(--panel), var(--panel-alt));
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+      }
+      .eyebrow {
+        display: inline-block;
+        margin-bottom: 12px;
+        color: var(--accent);
+        font-size: 0.82rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h2 {
+        margin: 0 0 10px;
+        font-size: 1.3rem;
+      }
+      .card p {
+        margin: 0 0 14px;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      ul {
+        margin: 0 0 16px;
+        padding-left: 18px;
+        color: var(--muted);
+      }
+      a.button {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(134, 215, 255, 0.14);
+        border: 1px solid rgba(134, 215, 255, 0.3);
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      a.button.alt {
+        background: rgba(255, 211, 122, 0.12);
+        border-color: rgba(255, 211, 122, 0.28);
+      }
+      code {
+        color: var(--accent-2);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Swarm Dashboards</h1>
+      <p class="lead">
+        Point d'entree local pour les dashboards copies directement depuis les repos externes.
+        Le but est de rendre visibles les frontends vendores sans les noyer dans l'arbre du repo.
+      </p>
+      <section class="grid">
+        <article class="card">
+          <span class="eyebrow">Primary</span>
+          <h2>Swarm UI</h2>
+          <p>Transplant direct de <code>MiroShark/frontend</code>, garde comme workspace frontend separé.</p>
+          <ul>
+            <li>Path: <code>dashboard/swarm-ui/</code></li>
+            <li>Entrypoint: <code>dashboard/swarm-ui/index.html</code></li>
+            <li>Stack: Vite + Vue</li>
+          </ul>
+          <a class="button" href="./swarm-ui/index.html">Open Swarm UI</a>
+        </article>
+        <article class="card">
+          <span class="eyebrow">Alternate</span>
+          <h2>Swarm UI Alt</h2>
+          <p>Transplant direct de <code>AI-Swarm/frontend</code>, utile comme variante UX/patterns.</p>
+          <ul>
+            <li>Path: <code>dashboard/swarm-ui-alt/</code></li>
+            <li>Entrypoint: <code>dashboard/swarm-ui-alt/index.html</code></li>
+            <li>Stack: Vite + Vue</li>
+          </ul>
+          <a class="button alt" href="./swarm-ui-alt/index.html">Open Alt UI</a>
+        </article>
+        <article class="card">
+          <span class="eyebrow">Prediction</span>
+          <h2>Prediction Dashboards</h2>
+          <p>Le sous-projet prediction a son dashboard operateur existant, plus un frontend vendorise et plusieurs references statiques.</p>
+          <ul>
+            <li>Dashboard operateur: <code>subprojects/prediction/dashboard/index.html</code></li>
+            <li>Frontend vendorise: <code>subprojects/prediction/dashboard-ui/</code></li>
+            <li>References: <code>subprojects/prediction/dashboard-vendor/</code></li>
+          </ul>
+          <a class="button" href="../subprojects/prediction/dashboard/index.html">Open Prediction Dashboard</a>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

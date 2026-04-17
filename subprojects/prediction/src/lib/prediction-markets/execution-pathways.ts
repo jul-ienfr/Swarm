@@ -18,6 +18,7 @@ import type { MicrostructureLabReport } from '@/lib/prediction-markets/microstru
 import {
   buildPredictionMarketCanonicalTradeIntentPreview,
   buildPredictionMarketExecutionSizingSummary,
+  buildPredictionMarketNoTradeBaselineSummary,
   buildPredictionMarketStrategyNotes,
   buildPredictionMarketStrategySummary,
   type PredictionMarketExecutionSizingSummary,
@@ -26,6 +27,12 @@ import {
   buildShadowArbitrageSimulation,
   type ShadowArbitrageSimulationReport,
 } from '@/lib/prediction-markets/shadow-arbitrage'
+import {
+  buildPredictionMarketPreTradeGate,
+  type PredictionMarketPreTradeEdgeBucket,
+  type PredictionMarketPreTradeGate,
+} from '@/lib/prediction-markets/pre-trade-gate'
+import { getPredictionMarketP1BRuntimeSummary } from '@/lib/prediction-markets/external-runtime'
 
 export type PredictionMarketExecutionPathwayMode = 'paper' | 'shadow' | 'live'
 export type PredictionMarketExecutionPathwayStatus = 'inactive' | 'ready' | 'degraded' | 'blocked'
@@ -50,6 +57,9 @@ export type PredictionMarketExecutionPathway = {
   market_regime_summary?: string | null
   primary_strategy_summary?: string | null
   strategy_summary?: string | null
+  no_trade_baseline_summary?: string | null
+  edge_bucket?: PredictionMarketPreTradeEdgeBucket | null
+  pre_trade_gate?: PredictionMarketPreTradeGate | null
 }
 
 export type PredictionMarketExecutionPathwaySizingSignal = {
@@ -83,6 +93,34 @@ export type PredictionMarketExecutionPathwayShadowArbitrageSignal = {
   failure_case_count: number
 }
 
+export type PredictionMarketExecutionPathwaysOperatorThesis = {
+  present: boolean
+  source: 'manual_thesis' | 'decision_packet' | 'research_bridge' | 'none'
+  probability_yes: number | null
+  rationale: string | null
+  evidence_refs: string[]
+  summary: string
+}
+
+export type PredictionMarketExecutionPathwaysResearchPipelineTrace = {
+  pipeline_id: string | null
+  pipeline_version: string | null
+  preferred_mode: 'market_only' | 'aggregate' | 'abstention' | 'unknown'
+  oracle_family: 'llm_superforecaster' | 'llm_oracle' | 'manual_only' | 'unknown'
+  forecaster_count: number | null
+  evidence_count: number | null
+  source_refs: string[]
+  summary: string
+}
+
+export type PredictionMarketExecutionPathwaysApprovalTicket = {
+  ticket_id: string
+  required: boolean
+  status: 'not_required' | 'paper_only' | 'shadow_only' | 'pending_live_approval' | 'blocked'
+  reasons: string[]
+  summary: string
+}
+
 export type PredictionMarketExecutionPathways = {
   venue: MarketSnapshot['venue']
   market_id: string
@@ -90,9 +128,16 @@ export type PredictionMarketExecutionPathways = {
   recommendation_side: MarketRecommendationPacket['side']
   highest_actionable_mode: PredictionMarketExecutionPathwayMode | null
   pathways: PredictionMarketExecutionPathway[]
+  approval_ticket?: PredictionMarketExecutionPathwaysApprovalTicket | null
+  operator_thesis?: PredictionMarketExecutionPathwaysOperatorThesis | null
+  research_pipeline_trace?: PredictionMarketExecutionPathwaysResearchPipelineTrace | null
   market_regime_summary?: string | null
   primary_strategy_summary?: string | null
   strategy_summary?: string | null
+  no_trade_baseline_summary?: string | null
+  selected_edge_bucket?: PredictionMarketPreTradeEdgeBucket | null
+  selected_pre_trade_gate?: PredictionMarketPreTradeGate | null
+  external_governance_summary?: string | null
   summary: string
 }
 
@@ -104,6 +149,7 @@ type ExecutionPathwaysReadinessInput = PredictionMarketExecutionReadinessReport 
   market_regime_summary?: string | null
   primary_strategy_summary?: string | null
   strategy_summary?: string | null
+  no_trade_baseline_summary?: string | null
   strategy_name?: string | null
   strategy_trade_intent_preview?: TradeIntent | null
   strategy_canonical_trade_intent_preview?: TradeIntent | null
@@ -170,6 +216,17 @@ function buildStrategyNotes(input: {
   return buildPredictionMarketStrategyNotes(input)
 }
 
+function buildNoTradeBaselineSummary(input: {
+  recommendation_action: MarketRecommendationPacket['action']
+  strategy_name?: string | null
+  market_regime_summary?: string | null
+  primary_strategy_summary?: string | null
+  strategy_summary?: string | null
+  blocking_reasons?: Array<string | null | undefined>
+}): string | null {
+  return buildPredictionMarketNoTradeBaselineSummary(input)
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
@@ -184,6 +241,133 @@ function rankMode(mode: PredictionMarketExecutionPathwayMode | null): number {
       return 3
     default:
       return 0
+  }
+}
+
+function staleQuoteRiskFromAge(
+  quoteAgeMs: number,
+  freshnessBudgetMs: number,
+): 'low' | 'medium' | 'high' {
+  if (quoteAgeMs <= 0) return 'low'
+  if (freshnessBudgetMs <= 0) return quoteAgeMs > 0 ? 'high' : 'low'
+
+  const ratio = quoteAgeMs / freshnessBudgetMs
+  if (ratio >= 1.5) return 'high'
+  if (ratio >= 0.5) return 'medium'
+  return 'low'
+}
+
+function bumpStaleQuoteRisk(
+  risk: 'low' | 'medium' | 'high',
+  steps: number,
+): 'low' | 'medium' | 'high' {
+  const order: Array<'low' | 'medium' | 'high'> = ['low', 'medium', 'high']
+  const current = order.indexOf(risk)
+  return order[Math.min(order.length - 1, Math.max(0, current + steps))]
+}
+
+function estimatePreTradeSimulation(input: {
+  mode: PredictionMarketExecutionPathwayMode
+  recommendation: MarketRecommendationPacket
+  readiness: ExecutionPathwaysReadinessInput
+  tradeIntentPreview: TradeIntent | null
+}): {
+  expected_slippage_bps: number
+  stale_quote_risk: 'low' | 'medium' | 'high'
+} {
+  const quoteAgeMs = Math.max(0, Math.round(input.readiness.health.staleness_ms ?? 0))
+  const freshnessBudgetMs = Math.max(0, Math.round(input.readiness.budgets.snapshot_freshness_budget_ms ?? 0))
+  const baseRisk = staleQuoteRiskFromAge(quoteAgeMs, freshnessBudgetMs)
+  const staleQuoteRisk = input.mode === 'paper'
+    ? baseRisk
+    : input.mode === 'shadow'
+      ? bumpStaleQuoteRisk(baseRisk, 1)
+      : bumpStaleQuoteRisk(baseRisk, 2)
+  const expectedSlippageBps = Math.max(
+    0,
+    Math.round(
+      input.tradeIntentPreview?.max_slippage_bps
+      ?? input.recommendation.spread_bps
+      ?? 0,
+    ),
+  )
+
+  return {
+    expected_slippage_bps: expectedSlippageBps,
+    stale_quote_risk: staleQuoteRisk,
+  }
+}
+
+function makerExecutionFreshnessBudgetMs(snapshotFreshnessBudgetMs: number): number {
+  if (snapshotFreshnessBudgetMs > 0) {
+    return Math.max(1_000, Math.min(15_000, Math.round(snapshotFreshnessBudgetMs)))
+  }
+
+  return 15_000
+}
+
+function parseMakerQuoteState(
+  summary: string | null | undefined,
+): 'viable' | 'guarded' | 'blocked' | null {
+  const normalized = String(summary ?? '').toLowerCase()
+  if (normalized.includes('maker_quote=blocked') || normalized.includes('maker_quote_state:blocked')) return 'blocked'
+  if (normalized.includes('maker_quote=guarded') || normalized.includes('maker_quote_state:guarded')) return 'guarded'
+  if (normalized.includes('maker_quote=viable') || normalized.includes('maker_quote_state:viable')) return 'viable'
+  return null
+}
+
+function buildStrategyExecutionGuardSignals(input: {
+  mode: PredictionMarketExecutionPathwayMode
+  strategyName?: string | null
+  marketRegimeSummary?: string | null
+  readiness: ExecutionPathwaysReadinessInput
+}): { blockers: string[]; warnings: string[] } {
+  if (input.strategyName !== 'maker_spread_capture') {
+    return { blockers: [], warnings: [] }
+  }
+
+  const makerQuoteState = parseMakerQuoteState(input.marketRegimeSummary)
+  const quoteAgeMs = Math.max(0, Math.round(input.readiness.health.staleness_ms ?? 0))
+  const freshnessBudgetMs = makerExecutionFreshnessBudgetMs(
+    Math.max(0, Math.round(input.readiness.budgets.snapshot_freshness_budget_ms ?? 0)),
+  )
+  const warnings = [
+    `maker_quote_freshness_budget_ms:${freshnessBudgetMs}`,
+  ]
+  if (makerQuoteState) {
+    warnings.push(`maker_quote_state:${makerQuoteState}`)
+  }
+
+  if (input.mode === 'paper') {
+    if (quoteAgeMs > freshnessBudgetMs) {
+      warnings.push('maker_quote_stale_for_shadow_live')
+    }
+
+    return {
+      blockers: [],
+      warnings,
+    }
+  }
+
+  const blockers: string[] = []
+  if (makerQuoteState === 'blocked') {
+    blockers.push('maker_quote_regime_blocked')
+  }
+  if (makerQuoteState === 'guarded' && input.mode === 'live') {
+    blockers.push('maker_quote_guarded_live_only_shadow')
+  }
+  if (input.readiness.capabilities.supports_websocket !== true) {
+    blockers.push('maker_streaming_unavailable')
+  }
+  if (quoteAgeMs > freshnessBudgetMs) {
+    blockers.push('maker_quote_stale_for_execution')
+  } else if (quoteAgeMs >= Math.round(freshnessBudgetMs * 0.5)) {
+    warnings.push('maker_quote_age_near_budget')
+  }
+
+  return {
+    blockers,
+    warnings,
   }
 }
 
@@ -368,6 +552,70 @@ function buildSizingSignal(input: {
   }
 }
 
+function buildApprovalTicket(input: {
+  runId: string
+  recommendation: MarketRecommendationPacket
+  highestActionableMode: PredictionMarketExecutionPathwayMode | null
+  operatorThesis?: PredictionMarketExecutionPathwaysOperatorThesis | null
+  researchPipelineTrace?: PredictionMarketExecutionPathwaysResearchPipelineTrace | null
+}): PredictionMarketExecutionPathwaysApprovalTicket {
+  const operatorSource = input.operatorThesis?.source ?? 'none'
+  const preferredMode = input.researchPipelineTrace?.preferred_mode ?? 'unknown'
+  const reasons = uniqueStrings([
+    `operator_thesis_source:${operatorSource}`,
+    `research_preferred_mode:${preferredMode}`,
+    input.highestActionableMode ? `highest_actionable_mode:${input.highestActionableMode}` : 'highest_actionable_mode:none',
+  ])
+
+  if (input.recommendation.action !== 'bet' || !input.recommendation.side) {
+    return {
+      ticket_id: `${input.runId}:approval_ticket`,
+      required: false,
+      status: 'not_required',
+      reasons,
+      summary: 'No governed live approval ticket is required because the recommendation is not an executable bet.',
+    }
+  }
+
+  if (input.highestActionableMode === 'live') {
+    return {
+      ticket_id: `${input.runId}:approval_ticket`,
+      required: true,
+      status: 'pending_live_approval',
+      reasons,
+      summary: 'Governed live execution requires an approval ticket before the live pathway can be materialized.',
+    }
+  }
+
+  if (input.highestActionableMode === 'shadow') {
+    return {
+      ticket_id: `${input.runId}:approval_ticket`,
+      required: false,
+      status: 'shadow_only',
+      reasons,
+      summary: 'No live approval ticket is issued because execution remains shadow-only under the current strategy and research guardrails.',
+    }
+  }
+
+  if (input.highestActionableMode === 'paper') {
+    return {
+      ticket_id: `${input.runId}:approval_ticket`,
+      required: false,
+      status: 'paper_only',
+      reasons,
+      summary: 'No live approval ticket is issued because execution remains paper-only under the current readiness and research state.',
+    }
+  }
+
+  return {
+    ticket_id: `${input.runId}:approval_ticket`,
+    required: false,
+    status: 'blocked',
+    reasons,
+    summary: 'No approval ticket can be issued because no execution pathway is currently actionable.',
+  }
+}
+
 export function buildPredictionMarketExecutionPathways(input: {
   runId: string
   snapshot: MarketSnapshot
@@ -384,7 +632,13 @@ export function buildPredictionMarketExecutionPathways(input: {
   strategy_shadow_arbitrage?: ShadowArbitrageSimulationReport | null
   strategy_shadow_summary?: string | null
   strategy_shadow_signal?: PredictionMarketExecutionPathwayShadowArbitrageSignal | null
+  operator_thesis?: PredictionMarketExecutionPathwaysOperatorThesis | null
+  research_pipeline_trace?: PredictionMarketExecutionPathwaysResearchPipelineTrace | null
 }): PredictionMarketExecutionPathways {
+  const p1bRuntime = getPredictionMarketP1BRuntimeSummary({
+    operator_thesis_present: input.operator_thesis?.present ?? false,
+    research_pipeline_trace_present: input.research_pipeline_trace != null,
+  })
   const strategySummary = buildStrategySummary({
     strategy_name: input.strategy_name ?? null,
     market_regime_summary: input.market_regime_summary ?? null,
@@ -397,17 +651,36 @@ export function buildPredictionMarketExecutionPathways(input: {
     primary_strategy_summary: input.primary_strategy_summary ?? null,
     strategy_summary: input.strategy_summary ?? null,
   })
+  const noTradeBaselineSummary = buildNoTradeBaselineSummary({
+    recommendation_action: input.recommendation.action,
+    strategy_name: input.strategy_name ?? null,
+    market_regime_summary: input.market_regime_summary ?? null,
+    primary_strategy_summary: input.primary_strategy_summary ?? null,
+    strategy_summary: input.strategy_summary ?? null,
+    blocking_reasons: [],
+  })
 
   if (input.recommendation.action !== 'bet' || !input.recommendation.side) {
+    const approvalTicket = buildApprovalTicket({
+      runId: input.runId,
+      recommendation: input.recommendation,
+      highestActionableMode: null,
+      operatorThesis: input.operator_thesis ?? null,
+      researchPipelineTrace: input.research_pipeline_trace ?? null,
+    })
     return {
       venue: input.snapshot.venue,
       market_id: input.snapshot.market.market_id,
       recommendation_action: input.recommendation.action,
       recommendation_side: input.recommendation.side,
       highest_actionable_mode: null,
+      approval_ticket: approvalTicket,
+      operator_thesis: input.operator_thesis ?? null,
+      research_pipeline_trace: input.research_pipeline_trace ?? null,
       market_regime_summary: input.market_regime_summary ?? null,
       primary_strategy_summary: input.primary_strategy_summary ?? null,
       strategy_summary: strategySummary,
+      no_trade_baseline_summary: noTradeBaselineSummary,
       pathways: EXECUTION_PATHWAY_MODES.map((mode) => ({
         mode,
         effective_mode: mode,
@@ -417,6 +690,7 @@ export function buildPredictionMarketExecutionPathways(input: {
         warnings: [],
         reason_summary: uniqueStrings([
           `Current recommendation is ${input.recommendation.action}; no execution pathway is actionable.`,
+          noTradeBaselineSummary,
           ...strategyNotes,
         ]).join(' '),
         sizing_summary: null,
@@ -431,10 +705,45 @@ export function buildPredictionMarketExecutionPathways(input: {
         market_regime_summary: input.market_regime_summary ?? null,
         primary_strategy_summary: input.primary_strategy_summary ?? null,
         strategy_summary: strategySummary,
+        no_trade_baseline_summary: noTradeBaselineSummary,
+        edge_bucket: 'no_trade',
+        pre_trade_gate: buildPredictionMarketPreTradeGate({
+          mode,
+          recommendation: input.recommendation,
+          readiness: input.executionReadiness,
+          simulation: {
+            expected_slippage_bps: 0,
+            stale_quote_risk: 'low',
+          },
+          strategyName: input.strategy_name ?? null,
+          marketRegimeSummary: input.market_regime_summary ?? null,
+          strategySummary,
+          shadowArbitrage: input.strategy_shadow_arbitrage ?? null,
+        }),
       })),
+      selected_edge_bucket: 'no_trade',
+      selected_pre_trade_gate: buildPredictionMarketPreTradeGate({
+        mode: 'paper',
+        recommendation: input.recommendation,
+        readiness: input.executionReadiness,
+        simulation: {
+          expected_slippage_bps: 0,
+          stale_quote_risk: 'low',
+        },
+        strategyName: input.strategy_name ?? null,
+        marketRegimeSummary: input.market_regime_summary ?? null,
+        strategySummary,
+        shadowArbitrage: input.strategy_shadow_arbitrage ?? null,
+      }),
+      external_governance_summary: p1bRuntime.summary,
       summary: uniqueStrings([
         `Current recommendation is ${input.recommendation.action}; execution pathways remain inactive.`,
+        noTradeBaselineSummary ? `Baseline: ${noTradeBaselineSummary}` : null,
         strategySummary ? `Strategy context: ${strategySummary}.` : null,
+        `External governance: ${p1bRuntime.summary}.`,
+        input.operator_thesis?.summary ? `Operator thesis: ${input.operator_thesis.summary}.` : null,
+        input.research_pipeline_trace?.summary ? `Research trace: ${input.research_pipeline_trace.summary}.` : null,
+        approvalTicket.summary,
       ]).join(' '),
     }
   }
@@ -486,23 +795,34 @@ export function buildPredictionMarketExecutionPathways(input: {
     })
     blockers.push(...microstructureSignals.blockers)
     warnings.push(...microstructureSignals.warnings)
+    const strategyExecutionGuards = buildStrategyExecutionGuardSignals({
+      mode,
+      strategyName: input.strategy_name ?? null,
+      marketRegimeSummary: input.market_regime_summary ?? null,
+      readiness: input.executionReadiness,
+    })
+    blockers.push(...strategyExecutionGuards.blockers)
+    warnings.push(...strategyExecutionGuards.warnings)
 
     const dedupedBlockers = uniqueStrings(blockers)
     const dedupedWarnings = uniqueStrings(warnings)
-    const actionable = dedupedBlockers.length === 0
-    const status: PredictionMarketExecutionPathwayStatus = actionable
-      ? readiness?.verdict === 'degraded'
-        ? 'degraded'
-        : 'ready'
-      : 'blocked'
+    const preTradeActionable = dedupedBlockers.length === 0
 
-    const reasonSummary = actionable
+    const initialReasonSummary = preTradeActionable
       ? uniqueStrings([
         readiness?.summary ?? `${mode} mode is actionable.`,
         ...strategyNotes,
         ...microstructureSignals.warnings,
       ]).join(' ')
       : dedupedBlockers[0] ?? `${mode} mode is blocked.`
+    const noTradeBaselineSummaryForPath = buildNoTradeBaselineSummary({
+      recommendation_action: input.recommendation.action,
+      strategy_name: input.strategy_name ?? null,
+      market_regime_summary: input.market_regime_summary ?? null,
+      primary_strategy_summary: input.primary_strategy_summary ?? null,
+      strategy_summary: input.strategy_summary ?? null,
+      blocking_reasons: dedupedBlockers,
+    })
 
     const sizingSummary = buildPredictionMarketExecutionSizingSummary({
       mode,
@@ -512,7 +832,7 @@ export function buildPredictionMarketExecutionPathways(input: {
       readiness: input.executionReadiness,
     })
 
-    const tradeIntentPreview = actionable
+    const tradeIntentPreview = preTradeActionable
       ? buildTradeIntentPreview({
         mode,
         runId: input.runId,
@@ -529,10 +849,37 @@ export function buildPredictionMarketExecutionPathways(input: {
       mode,
       recommendation: input.recommendation,
       readiness: input.executionReadiness,
-      actionable,
+      actionable: preTradeActionable,
       tradeIntentPreview: selectedTradeIntentPreview,
       strategyShadowArbitrage: input.strategy_shadow_arbitrage ?? null,
     })
+    const preTradeSimulation = estimatePreTradeSimulation({
+      mode,
+      recommendation: input.recommendation,
+      readiness: input.executionReadiness,
+      tradeIntentPreview: selectedTradeIntentPreview,
+    })
+    const preTradeGate = buildPredictionMarketPreTradeGate({
+      mode,
+      recommendation: input.recommendation,
+      readiness: input.executionReadiness,
+      simulation: preTradeSimulation,
+      strategyName: input.strategy_name ?? null,
+      marketRegimeSummary: input.market_regime_summary ?? null,
+      strategySummary,
+      shadowArbitrage,
+    })
+    const finalBlockers = [...dedupedBlockers]
+    if (preTradeGate.verdict === 'fail') {
+      finalBlockers.push('pre_trade_gate:net_edge_below_conservative_threshold')
+    }
+    const normalizedFinalBlockers = uniqueStrings(finalBlockers)
+    const actionable = normalizedFinalBlockers.length === 0
+    const status: PredictionMarketExecutionPathwayStatus = actionable
+      ? readiness?.verdict === 'degraded'
+        ? 'degraded'
+        : 'ready'
+      : 'blocked'
     const shadowArbitrageSignal = buildShadowArbitrageSignal(shadowArbitrage)
     const strategyShadowSignal = input.strategy_shadow_signal ?? buildShadowArbitrageSignal(input.strategy_shadow_arbitrage ?? null)
     const strategyShadowSummary = buildStrategyShadowSummary(input.strategy_shadow_arbitrage ?? null, input.strategy_shadow_summary)
@@ -546,6 +893,7 @@ export function buildPredictionMarketExecutionPathways(input: {
         ...tradeIntentPreview,
         notes: uniqueStrings([
           tradeIntentPreview.notes,
+          preTradeGate.summary,
           ...strategyNotes,
           ...microstructureSignals.notes,
         ]).join(' '),
@@ -556,6 +904,7 @@ export function buildPredictionMarketExecutionPathways(input: {
         ...strategyTradeIntentPreview,
         notes: uniqueStrings([
           strategyTradeIntentPreview.notes,
+          preTradeGate.summary,
           ...strategyNotes,
           ...microstructureSignals.notes,
         ]).join(' '),
@@ -573,36 +922,71 @@ export function buildPredictionMarketExecutionPathways(input: {
       effective_mode: effectiveMode,
       status,
       actionable,
-      blockers: dedupedBlockers,
+      blockers: normalizedFinalBlockers,
       warnings: dedupedWarnings,
-      reason_summary: reasonSummary,
+      reason_summary: actionable
+        ? uniqueStrings([
+          initialReasonSummary,
+          preTradeGate.summary,
+        ]).join(' ')
+        : uniqueStrings([
+          preTradeGate.verdict === 'fail' ? preTradeGate.summary : null,
+          normalizedFinalBlockers[0] ?? initialReasonSummary,
+        ]).join(' '),
       sizing_summary: sizingSummary,
-      trade_intent_preview: normalizedTradeIntentPreview ?? normalizedStrategyTradeIntentPreview,
-      canonical_trade_intent_preview: canonicalTradeIntentPreview,
+      trade_intent_preview:
+        preTradeGate.verdict === 'fail'
+          ? null
+          : normalizedTradeIntentPreview ?? normalizedStrategyTradeIntentPreview,
+      canonical_trade_intent_preview:
+        preTradeGate.verdict === 'fail'
+          ? null
+          : canonicalTradeIntentPreview,
       strategy_trade_intent_preview: normalizedStrategyTradeIntentPreview,
       strategy_canonical_trade_intent_preview: canonicalStrategyTradeIntentPreview,
-      sizing_signal: sizingSignal,
+      sizing_signal: preTradeGate.verdict === 'fail' ? null : sizingSignal,
       shadow_arbitrage_signal: shadowArbitrageSignal,
       strategy_shadow_summary: strategyShadowSummary,
       strategy_shadow_signal: strategyShadowSignal,
       market_regime_summary: input.market_regime_summary ?? null,
       primary_strategy_summary: input.primary_strategy_summary ?? null,
       strategy_summary: strategySummary,
+      no_trade_baseline_summary: noTradeBaselineSummaryForPath,
+      edge_bucket: preTradeGate.edge_bucket,
+      pre_trade_gate: preTradeGate,
     }
   })
 
   const highestActionableMode = pathways
     .filter((pathway) => pathway.actionable)
     .sort((left, right) => rankMode(right.mode) - rankMode(left.mode))[0]?.mode ?? null
+  const selectedPathway = highestActionableMode == null
+    ? pathways.find((pathway) => pathway.mode === 'paper') ?? pathways[0] ?? null
+    : pathways.find((pathway) => pathway.mode === highestActionableMode) ?? null
+  const approvalTicket = buildApprovalTicket({
+    runId: input.runId,
+    recommendation: input.recommendation,
+    highestActionableMode,
+    operatorThesis: input.operator_thesis ?? null,
+    researchPipelineTrace: input.research_pipeline_trace ?? null,
+  })
 
   const summary = highestActionableMode
     ? uniqueStrings([
       `${highestActionableMode} is currently the highest actionable execution pathway.`,
+      selectedPathway?.pre_trade_gate?.summary ?? null,
       strategySummary ? `Strategy context: ${strategySummary}.` : null,
+      input.operator_thesis?.summary ? `Operator thesis: ${input.operator_thesis.summary}.` : null,
+      input.research_pipeline_trace?.summary ? `Research trace: ${input.research_pipeline_trace.summary}.` : null,
+      approvalTicket.summary,
     ]).join(' ')
     : uniqueStrings([
       `No execution pathway is actionable; ${pathways[0]?.reason_summary ?? 'manual review is still required.'}`,
+      selectedPathway?.pre_trade_gate?.summary ?? null,
       strategySummary ? `Strategy context: ${strategySummary}.` : null,
+      input.operator_thesis?.summary ? `Operator thesis: ${input.operator_thesis.summary}.` : null,
+      input.research_pipeline_trace?.summary ? `Research trace: ${input.research_pipeline_trace.summary}.` : null,
+      approvalTicket.summary,
     ]).join(' ')
 
   return {
@@ -612,9 +996,16 @@ export function buildPredictionMarketExecutionPathways(input: {
     recommendation_side: input.recommendation.side,
     highest_actionable_mode: highestActionableMode,
     pathways,
+    approval_ticket: approvalTicket,
+    operator_thesis: input.operator_thesis ?? null,
+    research_pipeline_trace: input.research_pipeline_trace ?? null,
     market_regime_summary: input.market_regime_summary ?? null,
     primary_strategy_summary: input.primary_strategy_summary ?? null,
     strategy_summary: strategySummary,
+    no_trade_baseline_summary: noTradeBaselineSummary,
+    selected_edge_bucket: selectedPathway?.edge_bucket ?? null,
+    selected_pre_trade_gate: selectedPathway?.pre_trade_gate ?? null,
+    external_governance_summary: p1bRuntime.summary,
     summary,
   }
 }

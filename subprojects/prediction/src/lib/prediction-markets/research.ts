@@ -8,8 +8,39 @@ import {
   type MarketSnapshot,
   type PredictionMarketVenue,
 } from '@/lib/prediction-markets/schemas'
+import {
+  buildResearchPipelineTrace,
+  type PredictionMarketResearchPipelineTrace,
+} from './research-pipeline-trace'
+import {
+  buildPredictionMarketResearchSupercompactContext,
+  type PredictionMarketResearchSupercompactContext,
+} from './research-compaction'
+import {
+  getPredictionMarketTimesFMLane,
+  type PredictionMarketTimesFMSidecar,
+} from './timesfm'
+import {
+  buildPredictionMarketExternalIntegrationSummary,
+  matchConversationScopedExternalSourceProfiles,
+  type PredictionMarketExternalIntegrationSummary,
+  type PredictionMarketExternalSourceProfileSummary,
+} from './external-source-profiles'
+import {
+  getPredictionMarketP1ARuntimeSummary,
+  getPredictionMarketP2BRuntimeSummary,
+  getPredictionMarketP2CRuntimeSummary,
+} from './external-runtime'
+export { buildResearchPipelineTrace } from './research-pipeline-trace'
+export {
+  buildPredictionMarketResearchSupercompactContext,
+} from './research-compaction'
 
 type RawJson = Record<string, unknown>
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))]
+}
 
 export type PredictionMarketResearchPipelineVersionMetadata = {
   pipeline_id: string
@@ -48,6 +79,7 @@ export type PredictionMarketResearchSignal = {
   severity: 'low' | 'medium' | 'high' | 'critical' | null
   thesis_probability?: number
   thesis_rationale?: string
+  external_profiles: PredictionMarketExternalSourceProfileSummary[]
   payload?: RawJson
 }
 
@@ -112,6 +144,8 @@ export type PredictionMarketResearchRetrievalSummary = {
   latest_signal_at?: string
   counts_by_kind: Record<PredictionMarketResearchSignalKind, number>
   counts_by_stance: Record<PredictionMarketResearchSignalStance, number>
+  external_profiles: PredictionMarketExternalSourceProfileSummary[]
+  external_integration: PredictionMarketExternalIntegrationSummary
   supportive_signal_ids: string[]
   contradictory_signal_ids: string[]
   neutral_signal_ids: string[]
@@ -119,6 +153,11 @@ export type PredictionMarketResearchRetrievalSummary = {
   missing_signal_kinds: PredictionMarketResearchSignalKind[]
   health_status: MarketResearchSidecarHealthStatus
   health_issues: string[]
+  external_runtime?: {
+    p1_a: string
+    p2_b: string
+    p2_c: string
+  }
 }
 
 export type PredictionMarketResearchAbstentionSummary = {
@@ -149,6 +188,8 @@ export type PredictionMarketResearchForecasterCandidateKind =
   | 'market_base_rate'
   | 'manual_thesis'
   | 'external_reference'
+  | 'timesfm_microstructure'
+  | 'timesfm_event_probability'
 
 export type PredictionMarketResearchForecasterCandidateRole = 'baseline' | 'candidate' | 'comparator'
 
@@ -239,6 +280,7 @@ export type PredictionMarketResearchComparativeReport = {
   forecast: PredictionMarketResearchForecastComparativeSummary
   abstention: PredictionMarketResearchAbstentionComparativeSummary
   summary: string
+  preferred_mode: 'market_only' | 'aggregate' | 'abstention'
 }
 
 export type PredictionMarketResearchCalibrationSnapshot = {
@@ -257,6 +299,16 @@ export type PredictionMarketResearchCalibrationSnapshot = {
   sharpness: number
   coverage: number
   notes: string[]
+  benchmark_preferred_mode: 'market_only' | 'aggregate' | 'abstention'
+  benchmark_summary: string
+  benchmark_blockers: string[]
+  benchmark_out_of_sample_ready: boolean
+  validation_state: 'ready' | 'guarded' | 'blocked'
+  validation_summary: string
+  validation_blockers: string[]
+  calibration_quality: 'tight' | 'moderate' | 'wide' | 'unknown'
+  calibration_bias: 'balanced' | 'yes_upward' | 'yes_downward' | 'unknown'
+  calibration_summary: string
 }
 
 export type MarketResearchSynthesis = {
@@ -270,6 +322,8 @@ export type MarketResearchSynthesis = {
   signal_kinds: PredictionMarketResearchSignalKind[]
   counts_by_kind: Record<PredictionMarketResearchSignalKind, number>
   counts_by_stance: Record<PredictionMarketResearchSignalStance, number>
+  external_profiles: PredictionMarketExternalSourceProfileSummary[]
+  external_integration: PredictionMarketExternalIntegrationSummary
   top_tags: string[]
   latest_signal_at?: string
   retrieval_summary: PredictionMarketResearchRetrievalSummary
@@ -288,6 +342,7 @@ export type MarketResearchSynthesis = {
   evidence_refs: string[]
   external_reference_count: number
   external_references: PredictionMarketExternalReference[]
+  timesfm_sidecar?: PredictionMarketTimesFMSidecar | null
   market_probability_yes_hint: number
   forecast_probability_yes_hint: number | null
   market_delta_bps: number | null
@@ -298,6 +353,8 @@ export type MarketResearchSynthesis = {
   comparative_report: PredictionMarketResearchComparativeReport
   calibration_snapshot: PredictionMarketResearchCalibrationSnapshot
   abstention_policy: PredictionMarketResearchAbstentionPolicy
+  pipeline_trace: PredictionMarketResearchPipelineTrace
+  supercompact_context: PredictionMarketResearchSupercompactContext
   health?: MarketResearchSidecarHealth
 }
 
@@ -719,6 +776,109 @@ function probabilityToBps(value: number | null, baseline: number): number | null
   return Number(((value - baseline) * 10_000).toFixed(2))
 }
 
+function calibrationQualityFromSnapshot(input: {
+  coverage: number
+  meanAbsShiftBps: number | null
+}): 'tight' | 'moderate' | 'wide' | 'unknown' {
+  if (input.meanAbsShiftBps == null) return 'unknown'
+  if (input.coverage >= 0.75 && input.meanAbsShiftBps <= 50) return 'tight'
+  if (input.coverage >= 0.5 && input.meanAbsShiftBps <= 150) return 'moderate'
+  return 'wide'
+}
+
+function calibrationBiasFromSnapshot(input: {
+  calibrationGapBps: number | null
+  weightedProbabilityYes: number | null
+  baseRateProbabilityYes: number
+}): 'balanced' | 'yes_upward' | 'yes_downward' | 'unknown' {
+  if (input.calibrationGapBps == null || input.weightedProbabilityYes == null) return 'unknown'
+  if (Math.abs(input.calibrationGapBps) <= 50) return 'balanced'
+  return input.weightedProbabilityYes >= input.baseRateProbabilityYes ? 'yes_upward' : 'yes_downward'
+}
+
+function buildResearchValidationBlockers(input: {
+  health: MarketResearchSidecarHealth
+  weightedAggregatePreview: PredictionMarketResearchWeightedAggregatePreview
+  comparativeReport: PredictionMarketResearchComparativeReport
+  abstentionPolicy: PredictionMarketResearchAbstentionPolicy
+}): string[] {
+  const blockers = new Set<string>()
+
+  if (input.health.status === 'blocked') {
+    blockers.add('research_health_blocked')
+  }
+
+  for (const issue of input.health.issues) {
+    blockers.add(issue)
+  }
+
+  if (input.weightedAggregatePreview.weighted_probability_yes == null) {
+    blockers.add('no_usable_forecaster_outputs')
+  }
+
+  if (input.weightedAggregatePreview.coverage < input.abstentionPolicy.thresholds.minimum_contributor_coverage) {
+    blockers.add('low_contributor_coverage')
+  }
+
+  if (input.abstentionPolicy.blocks_forecast) {
+    blockers.add('forecast_blocked_by_policy')
+  }
+
+  if (input.comparativeReport.preferred_mode === 'abstention') {
+    blockers.add('preferred_mode_abstention')
+  }
+
+  for (const code of input.abstentionPolicy.trigger_codes) {
+    blockers.add(code)
+  }
+
+  return [...blockers]
+}
+
+function buildResearchValidationState(input: {
+  blockers: string[]
+  health: MarketResearchSidecarHealth
+  abstentionPolicy: PredictionMarketResearchAbstentionPolicy
+}): 'ready' | 'guarded' | 'blocked' {
+  if (input.health.status === 'blocked' || input.abstentionPolicy.blocks_forecast) {
+    return 'blocked'
+  }
+
+  if (input.blockers.length > 0) {
+    return 'guarded'
+  }
+
+  return 'ready'
+}
+
+function buildResearchCalibrationSummary(input: {
+  calibrationQuality: 'tight' | 'moderate' | 'wide' | 'unknown'
+  calibrationBias: 'balanced' | 'yes_upward' | 'yes_downward' | 'unknown'
+  calibrationGapBps: number | null
+  meanAbsShiftBps: number | null
+  coverage: number
+}): string {
+  return [
+    `Calibration ${input.calibrationQuality}`,
+    `bias ${input.calibrationBias}`,
+    `gap ${formatBps(input.calibrationGapBps)}`,
+    `mean abs shift ${formatBps(input.meanAbsShiftBps)}`,
+    `coverage ${Math.round(input.coverage * 1000) / 10}%`,
+  ].join(', ')
+}
+
+function buildResearchBenchmarkSummary(input: {
+  preferredMode: 'market_only' | 'aggregate' | 'abstention'
+  comparativeSummary: string
+  validationState: 'ready' | 'guarded' | 'blocked'
+  blockers: string[]
+}): string {
+  const blockerSummary = input.blockers.length > 0
+    ? ` Blockers: ${input.blockers.slice(0, 3).join(', ')}.`
+    : ' No validation blockers.'
+  return `${input.comparativeSummary} Validation state: ${input.validationState}. Preferred mode: ${input.preferredMode}.${blockerSummary}`
+}
+
 function calibrateProbability(input: {
   probability_yes: number
   forecaster_kind: PredictionMarketResearchForecasterCandidateKind
@@ -745,6 +905,10 @@ function weightForForecasterCandidate(input: {
       return 0.35
     case 'external_reference':
       return input.externalReferenceCount > 0 ? 0.25 / input.externalReferenceCount : 0.25
+    case 'timesfm_microstructure':
+      return 0.2
+    case 'timesfm_event_probability':
+      return 0
   }
 }
 
@@ -882,9 +1046,15 @@ export function buildWeightedAggregatePreview(input: {
 export function buildCalibrationSnapshot(input: {
   baseRateResearch: PredictionMarketBaseRateResearch
   weightedAggregatePreview: PredictionMarketResearchWeightedAggregatePreview
-  independentForecasterOutputs: PredictionMarketResearchIndependentForecasterOutput[]
+  independentForecasterOutputs: PredictionMarketResearchIndependentForecasterOutput[] | null | undefined
+  comparativeReport: PredictionMarketResearchComparativeReport
+  health: MarketResearchSidecarHealth
+  abstentionPolicy: PredictionMarketResearchAbstentionPolicy
 }): PredictionMarketResearchCalibrationSnapshot {
-  const usableOutputs = input.independentForecasterOutputs.filter((output) => output.calibrated_probability_yes != null)
+  const independentForecasterOutputs = Array.isArray(input.independentForecasterOutputs)
+    ? input.independentForecasterOutputs
+    : []
+  const usableOutputs = independentForecasterOutputs.filter((output) => output.calibrated_probability_yes != null)
   const meanAbsShiftBps = averageNullable(
     usableOutputs.map((output) => Math.abs(output.calibration_shift_bps ?? 0)),
   )
@@ -892,13 +1062,33 @@ export function buildCalibrationSnapshot(input: {
     input.weightedAggregatePreview.weighted_probability_yes,
     input.weightedAggregatePreview.base_rate_probability_yes,
   )
-  const coverage = input.independentForecasterOutputs.length === 0
+  const coverage = independentForecasterOutputs.length === 0
     ? 0
-    : Number((usableOutputs.length / input.independentForecasterOutputs.length).toFixed(4))
+    : Number((usableOutputs.length / independentForecasterOutputs.length).toFixed(4))
   const spreadBps = input.weightedAggregatePreview.spread_bps
   const sharpness = spreadBps == null
     ? 0
     : Number(clamp(1 - (spreadBps / 10_000), 0, 1).toFixed(4))
+  const benchmarkBlockers = buildResearchValidationBlockers({
+    health: input.health,
+    weightedAggregatePreview: input.weightedAggregatePreview,
+    comparativeReport: input.comparativeReport,
+    abstentionPolicy: input.abstentionPolicy,
+  })
+  const validationState = buildResearchValidationState({
+    blockers: benchmarkBlockers,
+    health: input.health,
+    abstentionPolicy: input.abstentionPolicy,
+  })
+  const calibrationQuality = calibrationQualityFromSnapshot({
+    coverage,
+    meanAbsShiftBps,
+  })
+  const calibrationBias = calibrationBiasFromSnapshot({
+    calibrationGapBps,
+    weightedProbabilityYes: input.weightedAggregatePreview.weighted_probability_yes,
+    baseRateProbabilityYes: input.baseRateResearch.base_rate_probability_hint,
+  })
 
   return {
     snapshot_id: hashText(stableSerialize({
@@ -907,14 +1097,14 @@ export function buildCalibrationSnapshot(input: {
       base_rate_probability_yes: input.baseRateResearch.base_rate_probability_hint,
       weighted_probability_yes: input.weightedAggregatePreview.weighted_probability_yes,
       weighted_probability_yes_raw: input.weightedAggregatePreview.weighted_probability_yes_raw,
-      contributor_count: input.independentForecasterOutputs.length,
+      contributor_count: independentForecasterOutputs.length,
       usable_contributor_count: usableOutputs.length,
     })).slice(0, 16),
     snapshot_version: input.baseRateResearch.pipeline_version_metadata.calibration_version,
     pipeline_version: input.baseRateResearch.pipeline_version_metadata.pipeline_version,
     calibration_version: input.baseRateResearch.pipeline_version_metadata.calibration_version,
     abstention_policy_version: input.baseRateResearch.pipeline_version_metadata.abstention_policy_version,
-    sample_size: input.independentForecasterOutputs.length,
+    sample_size: independentForecasterOutputs.length,
     usable_contributor_count: usableOutputs.length,
     base_rate_probability_yes: input.baseRateResearch.base_rate_probability_hint,
     weighted_probability_yes: input.weightedAggregatePreview.weighted_probability_yes,
@@ -928,6 +1118,27 @@ export function buildCalibrationSnapshot(input: {
       `Calibration version ${input.baseRateResearch.pipeline_version_metadata.calibration_version}.`,
       `Coverage ${Math.round(coverage * 1000) / 10}%.`,
     ],
+    benchmark_preferred_mode: input.comparativeReport.preferred_mode,
+    benchmark_summary: input.comparativeReport.summary,
+    benchmark_blockers: benchmarkBlockers,
+    benchmark_out_of_sample_ready: validationState === 'ready',
+    validation_state: validationState,
+    validation_summary: buildResearchBenchmarkSummary({
+      preferredMode: input.comparativeReport.preferred_mode,
+      comparativeSummary: input.comparativeReport.summary,
+      validationState,
+      blockers: benchmarkBlockers,
+    }),
+    validation_blockers: benchmarkBlockers,
+    calibration_quality: calibrationQuality,
+    calibration_bias: calibrationBias,
+    calibration_summary: buildResearchCalibrationSummary({
+      calibrationQuality,
+      calibrationBias,
+      calibrationGapBps,
+      meanAbsShiftBps,
+      coverage,
+    }),
   }
 }
 
@@ -956,7 +1167,7 @@ function buildComparativeReport(input: {
       ? 'aggregate'
       : 'market_only'
 
-  return predictionMarketResearchComparativeReportSchema.parse({
+  const parsed = predictionMarketResearchComparativeReportSchema.parse({
     market_only: {
       probability_yes: marketOnlyProbabilityYes,
       delta_bps_vs_market_only: 0,
@@ -986,15 +1197,25 @@ function buildComparativeReport(input: {
     },
     summary: `Market-only ${formatProbabilityPercent(marketOnlyProbabilityYes)}, aggregate ${formatProbabilityPercent(aggregateProbabilityYes)} (${formatBps(aggregateDeltaBps)} vs market-only), forecast ${formatProbabilityPercent(forecastProbabilityYes)} (${formatBps(forecastDeltaBpsVsMarketOnly)} vs market-only, ${formatBps(forecastDeltaBpsVsAggregate)} vs aggregate), abstention ${input.abstentionPolicy.recommended ? 'recommended' : 'not recommended'}${input.abstentionPolicy.blocks_forecast ? ' and blocks forecast' : ''}. Preferred mode: ${preferredMode}.`,
   }) as PredictionMarketResearchComparativeReport
+
+  return {
+    ...parsed,
+    preferred_mode: preferredMode,
+  }
 }
 
 export function buildAbstentionPolicy(input: {
-  abstentionSummary: PredictionMarketResearchAbstentionSummary
+  abstentionSummary?: PredictionMarketResearchAbstentionSummary | null
   health: MarketResearchSidecarHealth
   weightedAggregatePreview?: PredictionMarketResearchWeightedAggregatePreview
   pipelineVersionMetadata?: PredictionMarketResearchPipelineVersionMetadata
 }): PredictionMarketResearchAbstentionPolicy {
-  const triggerCodes = new Set(input.abstentionSummary.reason_codes)
+  const abstentionSummary = input.abstentionSummary ?? {
+    recommended: false,
+    reason_codes: [],
+    reasons: ['Structured abstention summary is unavailable on this stored sidecar.'],
+  }
+  const triggerCodes = new Set(abstentionSummary.reason_codes)
 
   if (input.weightedAggregatePreview?.weighted_delta_bps != null && Math.abs(input.weightedAggregatePreview.weighted_delta_bps) < 150) {
     triggerCodes.add('low_weighted_edge')
@@ -1012,16 +1233,16 @@ export function buildAbstentionPolicy(input: {
     policy_id: RESEARCH_ABSTENTION_POLICY_ID,
     policy_version: input.pipelineVersionMetadata?.abstention_policy_version
       ?? RESEARCH_PIPELINE_VERSION_METADATA.abstention_policy_version,
-    recommended: input.abstentionSummary.recommended,
+    recommended: abstentionSummary.recommended,
     blocks_forecast:
-      input.abstentionSummary.recommended ||
+      abstentionSummary.recommended ||
       input.health.status === 'blocked' ||
       (input.weightedAggregatePreview?.weighted_probability_yes == null),
     manual_review_required:
-      input.abstentionSummary.recommended ||
+      abstentionSummary.recommended ||
       input.health.status !== 'healthy',
     trigger_codes: [...triggerCodes],
-    rationale: input.abstentionSummary.reasons.join(' ') || 'Structured abstention policy inherited from the base-rate summary.',
+    rationale: abstentionSummary.reasons.join(' ') || 'Structured abstention policy inherited from the base-rate summary.',
     thresholds: {
       minimum_signal_count: 1,
       minimum_supportive_margin_bps: 150,
@@ -1036,14 +1257,26 @@ export function normalizeResearchSignal(input: PredictionMarketResearchSignalInp
   const thesisProbability = normalizeConfidence(
     readValue(input, 'thesis_probability') ?? readValue(input, 'probability_yes'),
   )
+  const sourceName = asString(readValue(input, 'source_name') ?? readValue(input, 'source'))
+  const sourceUrl = maybeUrl(readValue(input, 'source_url') ?? readValue(input, 'url') ?? readValue(input, 'link'))
+  const title = titleText(input)
+  const summary = summarizeText(input)
+  const external_profiles = matchConversationScopedExternalSourceProfiles({
+    sourceId: asString(readValue(input, 'signal_id') ?? readValue(input, 'id')),
+    sourceName,
+    title,
+    sourceUrl,
+    sourceRefs: normalizeTags(readValue(input, 'tags')),
+    notes: [summary],
+  })
 
   return {
     signal_id: buildSignalId(input, kind),
     kind,
-    title: titleText(input),
-    summary: summarizeText(input),
-    source_name: asString(readValue(input, 'source_name') ?? readValue(input, 'source')),
-    source_url: maybeUrl(readValue(input, 'source_url') ?? readValue(input, 'url') ?? readValue(input, 'link')),
+    title,
+    summary,
+    source_name: sourceName,
+    source_url: sourceUrl,
     captured_at: normalizeCapturedAt(input),
     tags: normalizeTags(readValue(input, 'tags')),
     stance: normalizeStance(readValue(input, 'stance')),
@@ -1053,6 +1286,7 @@ export function normalizeResearchSignal(input: PredictionMarketResearchSignalInp
     thesis_rationale: kind === 'manual_note'
       ? asString(readValue(input, 'thesis_rationale') ?? readValue(input, 'rationale'))
       : undefined,
+    external_profiles,
     payload: normalizePayload(input),
   }
 }
@@ -1104,6 +1338,8 @@ export function buildResearchEvidencePacket(input: {
     severity: signal.severity,
     thesis_probability: signal.thesis_probability,
     thesis_rationale: signal.thesis_rationale,
+    external_profiles: signal.external_profiles,
+    external_profile_ids: signal.external_profiles.map((profile) => profile.profile_id),
     payload: signal.payload,
   }
 
@@ -1217,6 +1453,25 @@ function buildSidecarHealth(input: {
   }
 }
 
+function reconcileTimesFMSidecarHealth(
+  health: MarketResearchSidecarHealth,
+  timesfmSidecar: PredictionMarketTimesFMSidecar | null | undefined,
+): MarketResearchSidecarHealth {
+  const microstructure = getPredictionMarketTimesFMLane(timesfmSidecar, 'microstructure')
+  const eventProbability = getPredictionMarketTimesFMLane(timesfmSidecar, 'event_probability')
+  const hasReadyTimesFM = microstructure?.status === 'ready' || eventProbability?.status === 'ready'
+  if (!hasReadyTimesFM || health.status !== 'blocked') return health
+  return {
+    ...health,
+    status: 'degraded',
+    completeness_score: Number(Math.max(health.completeness_score, 0.35).toFixed(4)),
+    issues: uniqueStrings([
+      ...health.issues.filter((issue) => issue !== 'no_signals'),
+      'timesfm_sidecar_only',
+    ]),
+  }
+}
+
 function countByKind(signals: PredictionMarketResearchSignal[]): Record<PredictionMarketResearchSignalKind, number> {
   return {
     worldmonitor: signals.filter((signal) => signal.kind === 'worldmonitor').length,
@@ -1224,6 +1479,18 @@ function countByKind(signals: PredictionMarketResearchSignal[]): Record<Predicti
     alert: signals.filter((signal) => signal.kind === 'alert').length,
     manual_note: signals.filter((signal) => signal.kind === 'manual_note').length,
   }
+}
+
+function collectExternalProfiles(signals: PredictionMarketResearchSignal[]): PredictionMarketExternalSourceProfileSummary[] {
+  const profiles: PredictionMarketExternalSourceProfileSummary[] = []
+  for (const signal of signals) {
+    for (const profile of signal.external_profiles) {
+      if (!profiles.some((candidate) => candidate.profile_id === profile.profile_id)) {
+        profiles.push(profile)
+      }
+    }
+  }
+  return profiles
 }
 
 function countByStance(signals: PredictionMarketResearchSignal[]): Record<PredictionMarketResearchSignalStance, number> {
@@ -1278,6 +1545,13 @@ function buildRetrievalSummary(input: {
   const signals = sortSignals(input.signals)
   const countsByKind = countByKind(signals)
   const countsByStance = countByStance(signals)
+  const externalProfiles = collectExternalProfiles(signals)
+  const externalIntegration = buildPredictionMarketExternalIntegrationSummary(externalProfiles)
+  const p1aRuntime = getPredictionMarketP1ARuntimeSummary({
+    external_profile_ids: externalProfiles.map((profile) => profile.profile_id),
+  })
+  const p2bRuntime = getPredictionMarketP2BRuntimeSummary()
+  const p2cRuntime = getPredictionMarketP2CRuntimeSummary()
   const signalKinds: PredictionMarketResearchSignalKind[] = ['worldmonitor', 'news', 'alert', 'manual_note']
 
   return {
@@ -1288,6 +1562,8 @@ function buildRetrievalSummary(input: {
     latest_signal_at: signals[0]?.captured_at,
     counts_by_kind: countsByKind,
     counts_by_stance: countsByStance,
+    external_profiles: externalProfiles,
+    external_integration: externalIntegration,
     supportive_signal_ids: signals
       .filter((signal) => signal.stance === 'supportive')
       .map((signal) => signal.signal_id),
@@ -1303,6 +1579,11 @@ function buildRetrievalSummary(input: {
     missing_signal_kinds: signalKinds.filter((kind) => countsByKind[kind] === 0),
     health_status: input.health.status,
     health_issues: input.health.issues,
+    external_runtime: {
+      p1_a: p1aRuntime.summary,
+      p2_b: p2bRuntime.summary,
+      p2_c: p2cRuntime.summary,
+    },
   }
 }
 
@@ -1357,6 +1638,7 @@ function buildForecasterCandidates(input: {
   signals: PredictionMarketResearchSignal[]
   baseRateResearch: PredictionMarketBaseRateResearch
   externalReferences: PredictionMarketExternalReference[]
+  timesfmSidecar?: PredictionMarketTimesFMSidecar | null
 }): PredictionMarketResearchForecasterCandidate[] {
   const candidates: PredictionMarketResearchForecasterCandidate[] = [
     {
@@ -1405,6 +1687,36 @@ function buildForecasterCandidates(input: {
       input_signal_ids: [reference.signal_id],
       source_name: reference.source_name,
       source_url: reference.source_url,
+    })
+  }
+
+  const timesfmMicrostructure = getPredictionMarketTimesFMLane(input.timesfmSidecar, 'microstructure')
+  if (timesfmMicrostructure?.status === 'ready') {
+    candidates.push({
+      forecaster_id: 'timesfm_microstructure',
+      forecaster_kind: 'timesfm_microstructure',
+      role: timesfmMicrostructure.influences_research_aggregate ? 'candidate' : 'comparator',
+      status: timesfmMicrostructure.probability_yes == null ? 'partial' : 'ready',
+      label: 'TimesFM microstructure',
+      probability_yes: timesfmMicrostructure.probability_yes,
+      rationale: timesfmMicrostructure.summary,
+      input_signal_ids: [],
+      source_name: 'TimesFM',
+    })
+  }
+
+  const timesfmEventProbability = getPredictionMarketTimesFMLane(input.timesfmSidecar, 'event_probability')
+  if (timesfmEventProbability?.status === 'ready') {
+    candidates.push({
+      forecaster_id: 'timesfm_event_probability',
+      forecaster_kind: 'timesfm_event_probability',
+      role: 'comparator',
+      status: timesfmEventProbability.probability_yes == null ? 'partial' : 'ready',
+      label: 'TimesFM event probability',
+      probability_yes: timesfmEventProbability.probability_yes,
+      rationale: timesfmEventProbability.summary,
+      input_signal_ids: [],
+      source_name: 'TimesFM',
     })
   }
 
@@ -1528,8 +1840,9 @@ function buildSynthesisSummary(input: {
   countsByKind: Record<PredictionMarketResearchSignalKind, number>
   countsByStance: Record<PredictionMarketResearchSignalStance, number>
   baseRateResearch: PredictionMarketBaseRateResearch
+  externalIntegration: PredictionMarketExternalIntegrationSummary
 }): string {
-  const { countsByKind, countsByStance, signals, baseRateResearch } = input
+  const { countsByKind, countsByStance, signals, baseRateResearch, externalIntegration } = input
   const fragments = [
     `${signals.length} external research signal${signals.length === 1 ? '' : 's'}`,
     `${countsByKind.worldmonitor} worldmonitor`,
@@ -1548,7 +1861,14 @@ function buildSynthesisSummary(input: {
     ? 'Abstention is recommended until stronger exogenous evidence appears.'
     : 'Abstention is not mandatory on the current signal mix.'
 
-  return `Research sidecar for "${input.market.question}": ${fragments.join(', ')}. Signal stance mix: ${stanceFragments.join(', ')}. Base rate anchor: ${Math.round(baseRateResearch.base_rate_probability_hint * 1000) / 10}%. ${abstentionFragment}`
+  const profileFragment = externalIntegration.total_profiles > 0
+    ? `External source families: ${externalIntegration.profile_ids.join(', ')}.`
+    : ''
+  const p1aRuntime = getPredictionMarketP1ARuntimeSummary({
+    external_profile_ids: externalIntegration.profile_ids,
+  })
+
+  return `Research sidecar for "${input.market.question}": ${fragments.join(', ')}. Signal stance mix: ${stanceFragments.join(', ')}. Base rate anchor: ${Math.round(baseRateResearch.base_rate_probability_hint * 1000) / 10}%. ${abstentionFragment} ${profileFragment} ${p1aRuntime.summary}`.trim()
 }
 
 export function buildMarketResearchSynthesis(input: {
@@ -1558,6 +1878,7 @@ export function buildMarketResearchSynthesis(input: {
   signals: PredictionMarketResearchSignalInput[]
   evidencePackets?: EvidencePacket[]
   health?: MarketResearchSidecarHealth
+  timesfmSidecar?: PredictionMarketTimesFMSidecar | null
 }): MarketResearchSynthesis {
   const normalizedSignals = input.signals.map((signal) => normalizeResearchSignal(signal))
   const dedupedSignals = dedupeSignals(normalizedSignals)
@@ -1568,11 +1889,18 @@ export function buildMarketResearchSynthesis(input: {
   })
   const countsByKind = countByKind(signals)
   const countsByStance = countByStance(signals)
+  const externalProfiles = collectExternalProfiles(signals)
+  const externalIntegration = buildPredictionMarketExternalIntegrationSummary(externalProfiles)
+  const p1aRuntime = getPredictionMarketP1ARuntimeSummary({
+    external_profile_ids: externalProfiles.map((profile) => profile.profile_id),
+  })
+  const p2bRuntime = getPredictionMarketP2BRuntimeSummary()
+  const p2cRuntime = getPredictionMarketP2CRuntimeSummary()
   const manualHint = manualThesisHint(signals)
-  const health = input.health ?? buildSidecarHealth({
+  const health = reconcileTimesFMSidecarHealth(input.health ?? buildSidecarHealth({
     signals,
     duplicateSignalCount: dedupedSignals.duplicateSignalCount,
-  })
+  }), input.timesfmSidecar)
   const pipelineVersionMetadata = buildResearchPipelineVersionMetadata()
   const marketProbabilityYesHint = Number(
     clamp(
@@ -1597,6 +1925,7 @@ export function buildMarketResearchSynthesis(input: {
     signals,
     baseRateResearch,
     externalReferences,
+    timesfmSidecar: input.timesfmSidecar,
   })
   const independentForecasterOutputs = buildIndependentForecasterOutputs({
     baseRateResearch,
@@ -1605,11 +1934,6 @@ export function buildMarketResearchSynthesis(input: {
   })
   const weightedAggregatePreview = buildWeightedAggregatePreview({
     baseRateResearch,
-    independentForecasterOutputs,
-  })
-  const calibrationSnapshot = buildCalibrationSnapshot({
-    baseRateResearch,
-    weightedAggregatePreview,
     independentForecasterOutputs,
   })
   const abstentionPolicy = buildAbstentionPolicy({
@@ -1625,6 +1949,81 @@ export function buildMarketResearchSynthesis(input: {
     abstentionPolicy,
     forecastProbabilityYes: input.forecast_probability_yes ?? null,
   })
+  const calibrationSnapshot = buildCalibrationSnapshot({
+    baseRateResearch,
+    weightedAggregatePreview,
+    independentForecasterOutputs,
+    comparativeReport,
+    health,
+    abstentionPolicy,
+  })
+  const pipelineTraceMarket = {
+    market_id: input.market.market_id ?? baseRateResearch.market_id,
+    venue: input.market.venue ?? baseRateResearch.venue,
+    question: input.market.question ?? 'n/a',
+    slug: input.market.slug ?? null,
+  }
+  const pipelineTrace = buildResearchPipelineTrace({
+    market: pipelineTraceMarket,
+    snapshot: null,
+    forecast_probability_yes: input.forecast_probability_yes ?? null,
+    signals,
+    evidencePackets,
+    health,
+    baseRateResearch,
+    forecasterCandidates,
+    independentForecasterOutputs,
+    weightedAggregatePreview,
+    comparativeReport,
+  })
+  const supercompactContext = buildPredictionMarketResearchSupercompactContext({
+    market: input.market,
+    signals,
+    evidence_packets: evidencePackets,
+    retrieval_summary: baseRateResearch.retrieval_summary,
+    weighted_aggregate_preview: weightedAggregatePreview,
+    comparative_report: comparativeReport,
+    abstention_policy: abstentionPolicy,
+    external_references: externalReferences,
+    key_factors: baseRateResearch.key_factors,
+    counterarguments: baseRateResearch.counterarguments,
+    no_trade_hints: baseRateResearch.no_trade_hints,
+  })
+  const timesfmMicrostructure = getPredictionMarketTimesFMLane(input.timesfmSidecar, 'microstructure')
+  const timesfmEventProbability = getPredictionMarketTimesFMLane(input.timesfmSidecar, 'event_probability')
+  const keyFactors = uniqueStrings([
+    ...baseRateResearch.key_factors,
+    p1aRuntime.active_profile_ids.length > 0
+      ? `P1-A active discovery profiles: ${p1aRuntime.active_profile_ids.join(', ')}.`
+      : null,
+    timesfmMicrostructure?.status === 'ready'
+      ? `TimesFM microstructure lane at ${formatProbabilityPercent(timesfmMicrostructure.probability_yes)} (${formatProbabilityPercent(timesfmMicrostructure.confidence)} confidence).`
+      : null,
+    timesfmEventProbability?.status === 'ready'
+      ? `TimesFM event lane available bench-only at ${formatProbabilityPercent(timesfmEventProbability.probability_yes)}.`
+      : null,
+  ])
+  const noTradeHints = uniqueStrings([
+    ...baseRateResearch.no_trade_hints,
+    p2bRuntime.watchlist_profile_ids.length > 0
+      ? `Watchlist diff-only remains non-canonical until local diff/bench evidence exists: ${p2bRuntime.watchlist_profile_ids.join(', ')}.`
+      : null,
+    p2cRuntime.configured_profile_ids.length > 0
+      ? `Source discovery backlog stays read-only and non-runtime-critical: ${p2cRuntime.configured_profile_ids.join(', ')}.`
+      : null,
+    timesfmMicrostructure?.status === 'abstained'
+      ? `TimesFM microstructure abstained: ${timesfmMicrostructure.reasons.join(', ')}.`
+      : null,
+    timesfmEventProbability?.status === 'abstained'
+      ? `TimesFM event lane abstained: ${timesfmEventProbability.reasons.join(', ')}.`
+      : null,
+    timesfmMicrostructure?.status === 'ineligible'
+      ? `TimesFM microstructure is ineligible: ${timesfmMicrostructure.reasons.join(', ')}.`
+      : null,
+    timesfmEventProbability?.status === 'ineligible'
+      ? `TimesFM event lane is ineligible: ${timesfmEventProbability.reasons.join(', ')}.`
+      : null,
+  ])
 
   return {
     market_id: input.market.market_id,
@@ -1637,6 +2036,8 @@ export function buildMarketResearchSynthesis(input: {
     signal_kinds: [...new Set(signals.map((signal) => signal.kind))],
     counts_by_kind: countsByKind,
     counts_by_stance: countsByStance,
+    external_profiles: externalProfiles,
+    external_integration: externalIntegration,
     top_tags: topTags(signals),
     latest_signal_at: signals[0]?.captured_at,
     retrieval_summary: baseRateResearch.retrieval_summary,
@@ -1646,9 +2047,9 @@ export function buildMarketResearchSynthesis(input: {
     base_rate_rationale_hint: baseRateResearch.base_rate_rationale_hint,
     base_rate_source: baseRateResearch.base_rate_source,
     abstention_summary: baseRateResearch.abstention_summary,
-    key_factors: baseRateResearch.key_factors,
+    key_factors: keyFactors,
     counterarguments: baseRateResearch.counterarguments,
-    no_trade_hints: baseRateResearch.no_trade_hints,
+    no_trade_hints: noTradeHints,
     abstention_recommended: baseRateResearch.abstention_recommended,
     summary: buildSynthesisSummary({
       market: input.market,
@@ -1656,11 +2057,13 @@ export function buildMarketResearchSynthesis(input: {
       countsByKind,
       countsByStance,
       baseRateResearch,
+      externalIntegration,
     }),
     key_points: buildKeyPoints(signals),
     evidence_refs: evidencePackets.map((packet) => packet.evidence_id),
     external_reference_count: externalReferences.length,
     external_references: externalReferences,
+    timesfm_sidecar: input.timesfmSidecar ?? null,
     market_probability_yes_hint: marketProbabilityYesHint,
     forecast_probability_yes_hint: input.forecast_probability_yes ?? null,
     market_delta_bps: averageNullable(externalReferences.map((reference) => reference.market_delta_bps)),
@@ -1671,6 +2074,8 @@ export function buildMarketResearchSynthesis(input: {
     comparative_report: comparativeReport,
     calibration_snapshot: calibrationSnapshot,
     abstention_policy: abstentionPolicy,
+    pipeline_trace: pipelineTrace,
+    supercompact_context: supercompactContext,
     health,
   }
 }
@@ -1680,14 +2085,15 @@ export function buildMarketResearchSidecar(input: {
   snapshot?: Pick<MarketSnapshot, 'midpoint_yes' | 'yes_price'>
   forecast_probability_yes?: number | null
   signals: PredictionMarketResearchSignalInput[]
+  timesfmSidecar?: PredictionMarketTimesFMSidecar | null
 }): MarketResearchSidecar {
   const normalizedSignals = input.signals.map((signal) => normalizeResearchSignal(signal))
   const dedupedSignals = dedupeSignals(normalizedSignals)
   const pipelineVersionMetadata = buildResearchPipelineVersionMetadata()
-  const health = buildSidecarHealth({
+  const health = reconcileTimesFMSidecarHealth(buildSidecarHealth({
     signals: dedupedSignals.signals,
     duplicateSignalCount: dedupedSignals.duplicateSignalCount,
-  })
+  }), input.timesfmSidecar ?? null)
   const evidencePackets = buildResearchEvidencePackets({
     market: input.market,
     signals: dedupedSignals.signals,
@@ -1708,6 +2114,7 @@ export function buildMarketResearchSidecar(input: {
       signals: dedupedSignals.signals,
       evidencePackets,
       health,
+      timesfmSidecar: input.timesfmSidecar ?? null,
     }),
   }
 }
@@ -1716,17 +2123,46 @@ export function annotateMarketResearchSidecarComparisons(
   sidecar: MarketResearchSidecar,
   forecastProbabilityYes: number | null,
 ): MarketResearchSidecar {
+  const baseRateResearch: PredictionMarketBaseRateResearch = {
+    market_id: sidecar.market_id,
+    venue: sidecar.venue,
+    generated_at: sidecar.generated_at,
+    pipeline_version_metadata: sidecar.pipeline_version_metadata ?? RESEARCH_PIPELINE_VERSION_METADATA,
+    base_rate_probability_hint: sidecar.synthesis.base_rate_probability_hint,
+    base_rate_source: sidecar.synthesis.base_rate_source,
+    base_rate_rationale_hint: sidecar.synthesis.base_rate_rationale_hint,
+    retrieval_summary: sidecar.synthesis.retrieval_summary,
+    abstention_summary: sidecar.synthesis.abstention_summary,
+    abstention_policy: sidecar.synthesis.abstention_policy,
+    key_factors: sidecar.synthesis.key_factors,
+    counterarguments: sidecar.synthesis.counterarguments,
+    no_trade_hints: sidecar.synthesis.no_trade_hints,
+    abstention_recommended: sidecar.synthesis.abstention_recommended,
+    confidence: 0.5,
+  }
+  const weightedAggregatePreview = sidecar.synthesis.weighted_aggregate_preview
+    ?? buildWeightedAggregatePreview({
+      baseRateResearch,
+      independentForecasterOutputs: sidecar.synthesis.independent_forecaster_outputs ?? [],
+    })
+  const abstentionPolicy = sidecar.synthesis.abstention_policy
+    ?? buildAbstentionPolicy({
+      abstentionSummary: sidecar.synthesis.abstention_summary,
+      health: sidecar.health,
+      weightedAggregatePreview,
+      pipelineVersionMetadata: sidecar.pipeline_version_metadata ?? RESEARCH_PIPELINE_VERSION_METADATA,
+    })
   const externalReferences = buildExternalReferences({
     signals: sidecar.signals,
     marketProbabilityYesHint: sidecar.synthesis.market_probability_yes_hint,
     forecastProbabilityYesHint: forecastProbabilityYes,
   })
-  const comparativeReportCandidate = sidecar.synthesis.weighted_aggregate_preview && sidecar.synthesis.abstention_policy
+  const comparativeReportCandidate = weightedAggregatePreview && abstentionPolicy
     ? buildComparativeReport({
       marketOnlyProbabilityYes: sidecar.synthesis.base_rate_probability_hint,
       baseRateSource: sidecar.synthesis.base_rate_source,
-      weightedAggregatePreview: sidecar.synthesis.weighted_aggregate_preview,
-      abstentionPolicy: sidecar.synthesis.abstention_policy,
+      weightedAggregatePreview,
+      abstentionPolicy,
       forecastProbabilityYes,
     })
     : sidecar.synthesis.comparative_report ?? {
@@ -1762,10 +2198,14 @@ export function annotateMarketResearchSidecarComparisons(
           ?? 'Abstention policy data is unavailable on this stored sidecar.',
       },
       summary: `Market-only ${formatProbabilityPercent(sidecar.synthesis.base_rate_probability_hint)}, aggregate unavailable, forecast ${formatProbabilityPercent(forecastProbabilityYes)}, abstention ${sidecar.synthesis.abstention_recommended ? 'recommended' : 'not recommended'}. Preferred mode: market_only.`,
+      preferred_mode: 'market_only',
     }
   const comparativeReportResult = predictionMarketResearchComparativeReportSchema.safeParse(comparativeReportCandidate)
   const comparativeReport: PredictionMarketResearchComparativeReport = comparativeReportResult.success
-    ? comparativeReportResult.data as PredictionMarketResearchComparativeReport
+    ? {
+      ...(comparativeReportResult.data as PredictionMarketResearchComparativeReport),
+      preferred_mode: (comparativeReportResult.data as PredictionMarketResearchComparativeReport).preferred_mode ?? 'market_only',
+    }
     : {
       market_only: {
         probability_yes: sidecar.synthesis.base_rate_probability_hint,
@@ -1799,7 +2239,34 @@ export function annotateMarketResearchSidecarComparisons(
           ?? 'Abstention policy data is unavailable on this stored sidecar.',
       },
       summary: `Market-only ${formatProbabilityPercent(sidecar.synthesis.base_rate_probability_hint)}, aggregate unavailable, forecast ${formatProbabilityPercent(forecastProbabilityYes)}, abstention ${sidecar.synthesis.abstention_recommended ? 'recommended' : 'not recommended'}. Preferred mode: market_only.`,
+      preferred_mode: 'market_only',
     }
+  const supercompactContext = buildPredictionMarketResearchSupercompactContext({
+    market: {
+      market_id: sidecar.market_id,
+      venue: sidecar.venue,
+      question: sidecar.synthesis.question,
+      slug: sidecar.synthesis.market_id,
+    },
+    signals: sidecar.signals,
+    evidence_packets: sidecar.evidence_packets,
+    retrieval_summary: sidecar.synthesis.retrieval_summary,
+    weighted_aggregate_preview: weightedAggregatePreview,
+    comparative_report: comparativeReport,
+    abstention_policy: abstentionPolicy,
+    external_references: externalReferences,
+    key_factors: sidecar.synthesis.key_factors,
+    counterarguments: sidecar.synthesis.counterarguments,
+    no_trade_hints: sidecar.synthesis.no_trade_hints,
+  })
+  const calibrationSnapshot = buildCalibrationSnapshot({
+    baseRateResearch,
+    weightedAggregatePreview,
+    independentForecasterOutputs: sidecar.synthesis.independent_forecaster_outputs,
+    comparativeReport,
+    health: sidecar.health,
+    abstentionPolicy,
+  })
 
   return {
     ...sidecar,
@@ -1811,6 +2278,10 @@ export function annotateMarketResearchSidecarComparisons(
       market_delta_bps: averageNullable(externalReferences.map((reference) => reference.market_delta_bps)),
       forecast_delta_bps: averageNullable(externalReferences.map((reference) => reference.forecast_delta_bps)),
       comparative_report: comparativeReport,
+      weighted_aggregate_preview: weightedAggregatePreview,
+      abstention_policy: abstentionPolicy,
+      calibration_snapshot: calibrationSnapshot,
+      supercompact_context: supercompactContext,
     },
   }
 }

@@ -609,6 +609,16 @@
 
       .surface-card .surface-status {
         margin-bottom: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .surface-card .surface-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 8px 0 10px;
       }
 
       .surface-card .surface-summary {
@@ -944,6 +954,12 @@
         letter-spacing: 0.04em;
       }
 
+      .summary-divider {
+        height: 1px;
+        margin: 10px 0;
+        background: linear-gradient(90deg, transparent, var(--card-border), transparent);
+      }
+
       .field.inline {
         grid-template-columns: minmax(0, 1fr);
       }
@@ -1167,7 +1183,7 @@
       </section>
 
       <section class="panel controls" style="margin-bottom: 18px;">
-        <div class="toolbar" style="grid-template-columns: repeat(8, minmax(0, 1fr));">
+        <div class="toolbar" style="grid-template-columns: repeat(9, minmax(0, 1fr));">
           <div class="field">
             <label for="recommendationFilter">Recommendation</label>
             <select id="recommendationFilter">
@@ -1217,6 +1233,16 @@
               <option value="slow">slow</option>
               <option value="fast">fast</option>
               <option value="sports">sports</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="runSortSelect">Run sort</label>
+            <select id="runSortSelect">
+              <option value="updated_desc">latest first</option>
+              <option value="strategy_asc">primary strategy</option>
+              <option value="family_asc">strategy family</option>
+              <option value="actionable_desc">most actionable</option>
+              <option value="ready_desc">most ready</option>
             </select>
           </div>
           <div class="field">
@@ -1283,7 +1309,7 @@
             <div class="section-title">
               <div>
                 <h2>Run Detail</h2>
-                <p>Canonical runtime hints, research and benchmark state, packet bundle, artifacts, and recommendation details.</p>
+                <p>Canonical runtime hints, research and benchmark state, live approval context, packet bundle, artifacts, and recommendation details.</p>
               </div>
             </div>
             <div class="detail-grid">
@@ -1297,11 +1323,19 @@
               </section>
               <section class="detail-card">
                 <h3>Research</h3>
-                <div id="researchSummary" class="microcopy">Research pipeline and recommendation origin will appear here.</div>
+                <div id="researchSummary" class="microcopy">Research pipeline trace, recommendation origin, and operator thesis will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Research validation</h3>
+                <div id="researchValidationSummary" class="microcopy">Validation hints from resolved history, cost model, backtest, walk-forward, Monte Carlo, paper, and replay will appear here.</div>
               </section>
               <section class="detail-card">
                 <h3>Execution</h3>
-                <div id="executionSummary" class="microcopy">Execution projection, preview, and sizing hints will appear here.</div>
+                <div id="executionSummary" class="microcopy">Execution projection, live approval ticket context, preview, and sizing hints will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Kelly / risk cap</h3>
+                <div id="kellySummary" class="microcopy">Kelly fraction, caps, and conservative sizing hints will appear here.</div>
               </section>
               <section class="detail-card">
                 <h3>Packet bundle</h3>
@@ -1343,6 +1377,10 @@
                 <div id="strategyRegimeSummary" class="microcopy">Regime budgets and defensive posture will appear here.</div>
               </section>
               <section class="detail-card">
+                <h3>Maker inventory / quote state</h3>
+                <div id="makerQuoteSummary" class="microcopy">Maker inventory, quote state, and quote freshness will appear here.</div>
+              </section>
+              <section class="detail-card">
                 <h3>Execution Intent Preview</h3>
                 <div id="strategyIntentPreviewSummary" class="microcopy">Strategy decision preview kind will appear here.</div>
               </section>
@@ -1353,6 +1391,14 @@
               <section class="detail-card">
                 <h3>Resolution Watch</h3>
                 <div id="strategyResolutionSummary" class="microcopy">Resolution and manipulation anomalies will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Strategy Desk</h3>
+                <div id="strategyDeskSummary" class="microcopy">Filtered runs grouped by primary strategy will appear here.</div>
+              </section>
+              <section class="detail-card">
+                <h3>Strategy Families</h3>
+                <div id="strategyFamilySummary" class="microcopy">Family-level strategy aggregation will appear here.</div>
               </section>
             </div>
           </article>
@@ -1409,6 +1455,7 @@
                 <select id="arbitrageSortSelect">
                   <option value="shadow_edge_desc">shadow_edge_desc</option>
                   <option value="net_spread_desc">net_spread_desc</option>
+                  <option value="quality_desc">quality_desc</option>
                   <option value="confidence_desc">confidence_desc</option>
                   <option value="freshness_asc">freshness_asc</option>
                 </select>
@@ -1430,6 +1477,10 @@
                 <div id="arbitrageOverview" class="microcopy">Arbitrage snapshot will appear here.</div>
               </section>
               <section class="detail-card">
+                <h3>Arbitrage quality ranking</h3>
+                <div id="arbitrageQualityRanking" class="microcopy">Quality ranking will appear here.</div>
+              </section>
+              <section class="detail-card">
                 <h3>Trader desk alert</h3>
                 <div id="arbitrageDeskAlert" class="microcopy">Top shadow-ready candidate and direct actions will appear here.</div>
               </section>
@@ -1446,7 +1497,7 @@
             <div class="section-title">
               <div>
                 <h2>Live Intents</h2>
-                <p>Create, approve, reject, and audit live execution requests with two distinct actors.</p>
+                <p>Create, approve, reject, and audit live execution requests with two distinct actors. Canonical live-intent state stays primary; approval and research artifacts remain read-only context when present.</p>
               </div>
             </div>
             <div class="side-grid">
@@ -1469,7 +1520,7 @@
                   <button id="refreshLiveIntentButton" type="button" class="secondary">Refresh intents</button>
                 </div>
                 <div class="microcopy" id="liveIntentHelp" style="margin-top:10px;">
-                  Live intents require a creator and a distinct approver. The live route remains gated until an intent is approved.
+                  Live intents require a creator and a distinct approver. The live route remains gated until an intent is approved. Approval ticket, operator thesis, and research pipeline trace stay read-only context when present.
                 </div>
               </section>
               <section class="detail-card">
@@ -1554,6 +1605,7 @@
           surfaceStatus: "",
           strategyFilter: "",
           regimeFilter: "",
+          runSort: "updated_desc",
           dateWindow: "",
           arbitrageStatus: "",
           arbitrageOpportunity: "",
@@ -1592,6 +1644,7 @@
           surfaceFilter: document.getElementById("surfaceFilter"),
           strategyFilter: document.getElementById("strategyFilter"),
           regimeFilter: document.getElementById("regimeFilter"),
+          runSortSelect: document.getElementById("runSortSelect"),
           dateWindowInput: document.getElementById("dateWindowInput"),
           resetFiltersButton: document.getElementById("resetFiltersButton"),
           arbitrageStatusFilter: document.getElementById("arbitrageStatusFilter"),
@@ -1636,13 +1689,18 @@
           runSummary: document.getElementById("runSummary"),
           benchmarkSummary: document.getElementById("benchmarkSummary"),
           researchSummary: document.getElementById("researchSummary"),
+          researchValidationSummary: document.getElementById("researchValidationSummary"),
           executionSummary: document.getElementById("executionSummary"),
+          kellySummary: document.getElementById("kellySummary"),
           strategyPrimarySummary: document.getElementById("strategyPrimarySummary"),
           strategyCountsSummary: document.getElementById("strategyCountsSummary"),
           strategyRegimeSummary: document.getElementById("strategyRegimeSummary"),
+          makerQuoteSummary: document.getElementById("makerQuoteSummary"),
           strategyIntentPreviewSummary: document.getElementById("strategyIntentPreviewSummary"),
           strategyShadowSummary: document.getElementById("strategyShadowSummary"),
           strategyResolutionSummary: document.getElementById("strategyResolutionSummary"),
+          strategyDeskSummary: document.getElementById("strategyDeskSummary"),
+          strategyFamilySummary: document.getElementById("strategyFamilySummary"),
           packetBundleSummary: document.getElementById("packetBundleSummary"),
           artifactAuditSummary: document.getElementById("artifactAuditSummary"),
           marketGraphSummary: document.getElementById("marketGraphSummary"),
@@ -1661,6 +1719,7 @@
           refreshLiveIntentButton: document.getElementById("refreshLiveIntentButton"),
           liveIntentHelp: document.getElementById("liveIntentHelp"),
           arbitrageOverview: document.getElementById("arbitrageOverview"),
+          arbitrageQualityRanking: document.getElementById("arbitrageQualityRanking"),
           arbitrageCandidates: document.getElementById("arbitrageCandidates"),
           eventFeed: document.getElementById("eventFeed"),
           themeOptions: document.querySelectorAll("[data-theme-option]")
@@ -1688,6 +1747,7 @@
               if (typeof parsed.surfaceStatus === "string") state.surfaceStatus = parsed.surfaceStatus;
               if (typeof parsed.strategyFilter === "string") state.strategyFilter = parsed.strategyFilter;
               if (typeof parsed.regimeFilter === "string") state.regimeFilter = parsed.regimeFilter;
+              if (typeof parsed.runSort === "string") state.runSort = parsed.runSort;
               if (typeof parsed.dateWindow === "string") state.dateWindow = parsed.dateWindow;
               if (typeof parsed.arbitrageStatus === "string") state.arbitrageStatus = parsed.arbitrageStatus;
               if (typeof parsed.arbitrageOpportunity === "string") state.arbitrageOpportunity = parsed.arbitrageOpportunity;
@@ -1726,6 +1786,7 @@
             if (params.has("surface")) state.surfaceStatus = params.get("surface") || "";
             if (params.has("strategy")) state.strategyFilter = params.get("strategy") || "";
             if (params.has("regime")) state.regimeFilter = params.get("regime") || "";
+            if (params.has("sort")) state.runSort = params.get("sort") || state.runSort;
             if (params.has("date")) state.dateWindow = params.get("date") || "";
             if (params.has("arb_status")) state.arbitrageStatus = params.get("arb_status") || "";
             if (params.has("arb_opportunity")) state.arbitrageOpportunity = params.get("arb_opportunity") || "";
@@ -1754,6 +1815,7 @@
             if (state.surfaceStatus) url.searchParams.set("surface", state.surfaceStatus); else url.searchParams.delete("surface");
             if (state.strategyFilter) url.searchParams.set("strategy", state.strategyFilter); else url.searchParams.delete("strategy");
             if (state.regimeFilter) url.searchParams.set("regime", state.regimeFilter); else url.searchParams.delete("regime");
+            if (state.runSort) url.searchParams.set("sort", state.runSort); else url.searchParams.delete("sort");
             if (state.dateWindow) url.searchParams.set("date", state.dateWindow); else url.searchParams.delete("date");
             if (state.arbitrageStatus) url.searchParams.set("arb_status", state.arbitrageStatus); else url.searchParams.delete("arb_status");
             if (state.arbitrageOpportunity) url.searchParams.set("arb_opportunity", state.arbitrageOpportunity); else url.searchParams.delete("arb_opportunity");
@@ -1819,8 +1881,8 @@
 
         function toneForStatus(value) {
           var normalized = String(value || "").toLowerCase();
-          if (normalized === "ready" || normalized === "healthy" || normalized === "eligible" || normalized === "completed") return "good";
-          if (normalized === "blocked" || normalized === "error" || normalized === "degraded") return "bad";
+          if (normalized === "ready" || normalized === "healthy" || normalized === "eligible" || normalized === "completed" || normalized === "pass") return "good";
+          if (normalized === "blocked" || normalized === "error" || normalized === "degraded" || normalized === "fail") return "bad";
           if (normalized === "downgraded" || normalized === "preview_only" || normalized === "unproven") return "warn";
           return "neutral";
         }
@@ -1856,6 +1918,647 @@
               return String(item);
             }
           }).join(", ");
+        }
+
+        function firstDefined() {
+          for (var index = 0; index < arguments.length; index += 1) {
+            var value = arguments[index];
+            if (value !== undefined && value !== null && value !== "") {
+              return value;
+            }
+          }
+          return null;
+        }
+
+        function asArray(value) {
+          if (Array.isArray(value)) return value.slice();
+          if (value === undefined || value === null || value === "") return [];
+          return [value];
+        }
+
+        function extractApprovalActors(approvalState) {
+          if (!approvalState || typeof approvalState !== "object") return [];
+          if (Array.isArray(approvalState.approvers)) {
+            return approvalState.approvers.filter(Boolean);
+          }
+          if (!Array.isArray(approvalState.approvals)) return [];
+          return approvalState.approvals.map(function (entry) {
+            return entry && entry.actor ? entry.actor : "";
+          }).filter(Boolean);
+        }
+
+        function readApprovalTicket(source) {
+          if (!source || typeof source !== "object") return null;
+          var executionPathways = source.execution_pathways && typeof source.execution_pathways === "object"
+            ? source.execution_pathways
+            : null;
+          var approvalState = source.approval_state && typeof source.approval_state === "object"
+            ? source.approval_state
+            : null;
+          var ticket = source.approval_ticket
+            || source.trade_approval_ticket
+            || source.live_approval_ticket
+            || (executionPathways ? executionPathways.approval_ticket : null);
+
+          if (!ticket && !approvalState && firstDefined(
+            source.approval_ticket_id,
+            source.approval_ticket_status,
+            source.approval_ticket_summary,
+            source.approval_ticket_required
+          ) === null) {
+            return null;
+          }
+
+          return {
+            ticket_id: firstDefined(ticket && ticket.ticket_id, source.approval_ticket_id),
+            status: firstDefined(ticket && ticket.status, approvalState && approvalState.status, source.approval_ticket_status),
+            required: firstDefined(ticket && ticket.required, source.approval_ticket_required),
+            workflow: firstDefined(ticket && ticket.workflow, approvalState && approvalState.workflow),
+            summary: firstDefined(ticket && ticket.summary, source.approval_ticket_summary, source.approval_ticket_note),
+            approved_by: asArray(firstDefined(
+              ticket && ticket.approved_by,
+              extractApprovalActors(approvalState),
+              source.approval_ticket_approvers
+            )).filter(Boolean),
+            rejected_by: asArray(firstDefined(
+              ticket && ticket.rejected_by,
+              source.approval_ticket_rejections
+            )).filter(Boolean)
+          };
+        }
+
+        function readOperatorThesis(source) {
+          if (!source || typeof source !== "object") return null;
+          var executionPathways = source.execution_pathways && typeof source.execution_pathways === "object"
+            ? source.execution_pathways
+            : null;
+          var thesis = source.operator_thesis
+            || source.research_operator_thesis
+            || (executionPathways ? executionPathways.operator_thesis : null);
+
+          if (!thesis && firstDefined(
+            source.operator_thesis_present,
+            source.operator_thesis_source,
+            source.operator_thesis_probability_yes,
+            source.operator_thesis_summary
+          ) === null) {
+            return null;
+          }
+
+          return {
+            present: firstDefined(thesis && thesis.present, source.operator_thesis_present),
+            source: firstDefined(thesis && thesis.source, source.operator_thesis_source, source.research_thesis_source),
+            probability_yes: firstDefined(thesis && thesis.probability_yes, source.operator_thesis_probability_yes, source.operator_thesis_probability),
+            confidence: firstDefined(thesis && thesis.confidence, source.operator_thesis_confidence),
+            summary: firstDefined(thesis && thesis.summary, source.operator_thesis_summary, source.research_thesis_summary),
+            rationale: firstDefined(thesis && thesis.rationale, source.operator_thesis_rationale)
+          };
+        }
+
+        function readResearchPipelineTrace(source) {
+          if (!source || typeof source !== "object") return null;
+          var executionPathways = source.execution_pathways && typeof source.execution_pathways === "object"
+            ? source.execution_pathways
+            : null;
+          var trace = source.research_pipeline_trace
+            || (executionPathways ? executionPathways.research_pipeline_trace : null);
+
+          if (!trace && firstDefined(
+            source.research_pipeline_trace_id,
+            source.research_pipeline_trace_summary,
+            source.research_pipeline_trace_preferred_mode,
+            source.research_pipeline_trace_oracle_family
+          ) === null) {
+            return null;
+          }
+
+          return {
+            trace_id: firstDefined(trace && trace.trace_id, source.research_pipeline_trace_id),
+            pipeline_id: firstDefined(trace && trace.pipeline_id, source.research_pipeline_id),
+            pipeline_version: firstDefined(trace && trace.pipeline_version, source.research_pipeline_version),
+            preferred_mode: firstDefined(trace && trace.preferred_mode, source.research_pipeline_trace_preferred_mode, source.research_compare_preferred_mode),
+            oracle_family: firstDefined(trace && trace.oracle_family, source.research_pipeline_trace_oracle_family),
+            forecaster_count: firstDefined(trace && trace.forecaster_count, source.research_pipeline_trace_forecaster_count, source.research_forecaster_count),
+            evidence_count: firstDefined(trace && trace.evidence_count, source.research_pipeline_trace_evidence_count),
+            summary: firstDefined(trace && trace.summary, source.research_pipeline_trace_summary),
+            stage_count: firstDefined(trace && trace.stage_count, Array.isArray(trace && trace.stages) ? trace.stages.length : null),
+            stages: Array.isArray(trace && trace.stages) ? trace.stages.slice() : []
+          };
+        }
+
+        function summarizeOperatorThesis(thesis) {
+          if (!thesis) return "n/a";
+          var parts = [];
+          if (thesis.probability_yes != null) {
+            parts.push(formatPercent(thesis.probability_yes) + " yes");
+          }
+          if (thesis.source) {
+            parts.push("via " + thesis.source);
+          }
+          if (thesis.summary) {
+            parts.push(thesis.summary);
+          }
+          if (!parts.length && thesis.present === true) {
+            parts.push("present");
+          }
+          return parts.length ? parts.join(" • ") : "n/a";
+        }
+
+        function summarizeResearchPipelineTrace(trace) {
+          if (!trace) return "n/a";
+          var parts = [];
+          var lineage = [trace.preferred_mode, trace.oracle_family].filter(Boolean).join(" / ");
+          if (lineage) {
+            parts.push(lineage);
+          }
+          if (typeof trace.forecaster_count === "number") {
+            parts.push(String(trace.forecaster_count) + " forecasters");
+          }
+          if (typeof trace.evidence_count === "number") {
+            parts.push(String(trace.evidence_count) + " evidence refs");
+          }
+          if (!parts.length && trace.summary) {
+            parts.push(trace.summary);
+          }
+          return parts.length ? parts.join(" • ") : "n/a";
+        }
+
+        function summarizeValidationSeries(series) {
+          if (!series) return "n/a";
+          var parts = [];
+          if (series.summary) parts.push(series.summary);
+          if (typeof series.sample_count === "number") parts.push(String(series.sample_count) + " samples");
+          if (typeof series.window_count === "number") parts.push(String(series.window_count) + " windows");
+          if (typeof series.trial_count === "number") parts.push(String(series.trial_count) + " trials");
+          if (typeof series.win_rate === "number") parts.push(formatPercent(series.win_rate) + " win rate");
+          if (typeof series.brier_score === "number") parts.push("brier " + formatMaybeNumber(series.brier_score, 3));
+          if (typeof series.log_loss === "number") parts.push("log loss " + formatMaybeNumber(series.log_loss, 3));
+          if (typeof series.uplift_bps === "number") parts.push(formatMaybeNumber(series.uplift_bps, 0) + " bps uplift");
+          return parts.length ? parts.join(" • ") : "n/a";
+        }
+
+        function formatValidationBps(value) {
+          if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+          return formatMaybeNumber(value, 0) + "bps";
+        }
+
+        function deriveValidationBlockers(input) {
+          var blockers = [];
+          var resolvedHistoryReadyPoints = 12;
+
+          if (!input.resolved_history) {
+            blockers.push("resolved history unavailable");
+          } else if (input.resolved_history.status === "thin") {
+            blockers.push(
+              "resolved history thin (" + String(input.resolved_history.sample_count || 0) + " < " + String(resolvedHistoryReadyPoints) + " samples)"
+            );
+          }
+
+          if (!input.cost_model) {
+            blockers.push("cost model unavailable");
+          } else if (input.cost_model.promotion_ready !== true) {
+            if ((input.cost_model.sample_count || 0) <= 0) {
+              blockers.push("cost model has no resolved points");
+            } else {
+              if (typeof input.cost_model.win_rate === "number" && input.cost_model.win_rate < 0.5) {
+                blockers.push("cost model viable rate " + formatPercent(input.cost_model.win_rate) + " < 50.0%");
+              }
+              if (typeof input.cost_model.uplift_bps === "number" && input.cost_model.uplift_bps <= 0) {
+                blockers.push("cost model mean net edge " + formatValidationBps(input.cost_model.uplift_bps) + " <= 0bps");
+              }
+              if (
+                (typeof input.cost_model.win_rate !== "number" || input.cost_model.win_rate >= 0.5) &&
+                (typeof input.cost_model.uplift_bps !== "number" || input.cost_model.uplift_bps > 0)
+              ) {
+                blockers.push("cost model preview only");
+              }
+            }
+          }
+
+          if (!input.walk_forward) {
+            blockers.push("walk-forward unavailable");
+          } else if (input.walk_forward.promotion_ready !== true) {
+            if ((input.walk_forward.window_count || 0) <= 0) {
+              blockers.push("walk-forward has no train/test windows");
+            } else if ((input.walk_forward.window_count || 0) < 2) {
+              blockers.push("walk-forward only " + String(input.walk_forward.window_count) + " window");
+            } else {
+              if (typeof input.walk_forward.win_rate === "number" && input.walk_forward.win_rate < 0.5) {
+                blockers.push("walk-forward stable rate " + formatPercent(input.walk_forward.win_rate) + " < 50.0%");
+              }
+              if (typeof input.walk_forward.uplift_bps === "number" && input.walk_forward.uplift_bps < 0) {
+                blockers.push("walk-forward mean net edge " + formatValidationBps(input.walk_forward.uplift_bps) + " < 0bps");
+              }
+              if (
+                (typeof input.walk_forward.win_rate !== "number" || input.walk_forward.win_rate >= 0.5) &&
+                (typeof input.walk_forward.uplift_bps !== "number" || input.walk_forward.uplift_bps >= 0)
+              ) {
+                blockers.push("walk-forward preview only");
+              }
+            }
+          }
+
+          return blockers;
+        }
+
+        function readValidationSummary(source) {
+          if (!source || typeof source !== "object") return null;
+          var detail = source.validation && typeof source.validation === "object"
+            ? source.validation
+            : source.run && source.run.validation && typeof source.run.validation === "object"
+              ? source.run.validation
+              : source.validation_summary && typeof source.validation_summary === "object"
+                ? source.validation_summary
+                : null;
+
+          var resolvedHistory = detail && detail.resolved_history ? detail.resolved_history : {
+            summary: source.resolved_history_source_summary || source.resolved_history_summary || null,
+            sample_count: typeof source.resolved_history_points === "number" ? source.resolved_history_points : null,
+            status:
+              typeof source.resolved_history_points === "number"
+                ? (source.resolved_history_points >= 12 ? "ready" : source.resolved_history_points > 0 ? "thin" : null)
+                : null
+          };
+          if (resolvedHistory && typeof resolvedHistory === "object" && !resolvedHistory.status && typeof resolvedHistory.sample_count === "number") {
+            resolvedHistory = Object.assign({}, resolvedHistory, {
+              status: resolvedHistory.sample_count >= 12 ? "ready" : resolvedHistory.sample_count > 0 ? "thin" : null
+            });
+          }
+          resolvedHistory = resolvedHistory && (resolvedHistory.summary || typeof resolvedHistory.sample_count === "number")
+            ? resolvedHistory
+            : null;
+          var costModel = detail && detail.cost_model ? detail.cost_model : {
+            summary: source.cost_model_summary || null,
+            sample_count: typeof source.cost_model_total_points === "number" ? source.cost_model_total_points : null,
+            win_rate: typeof source.cost_model_viable_point_rate === "number" ? source.cost_model_viable_point_rate : null,
+            uplift_bps: typeof source.cost_model_average_net_edge_bps === "number" ? source.cost_model_average_net_edge_bps : null,
+            promotion_ready:
+              typeof source.cost_model_total_points === "number" &&
+              source.cost_model_total_points > 0 &&
+              typeof source.cost_model_viable_point_rate === "number" &&
+              source.cost_model_viable_point_rate >= 0.5 &&
+              typeof source.cost_model_average_net_edge_bps === "number" &&
+              source.cost_model_average_net_edge_bps > 0
+          };
+          costModel = costModel && (
+            costModel.summary ||
+            typeof costModel.sample_count === "number" ||
+            typeof costModel.win_rate === "number" ||
+            typeof costModel.uplift_bps === "number"
+          )
+            ? costModel
+            : null;
+          var backtest = detail && detail.backtest ? detail.backtest : source.backtest_summary || source.backtest_stats || null;
+          var walkForward = detail && detail.walk_forward ? detail.walk_forward : source.walk_forward_summary || source.walk_forward_stats || null;
+          if (walkForward && typeof walkForward === "object" && typeof walkForward.promotion_ready !== "boolean" && typeof source.walk_forward_promotion_ready === "boolean") {
+            walkForward = Object.assign({}, walkForward, { promotion_ready: source.walk_forward_promotion_ready });
+          }
+          var monteCarlo = detail && detail.monte_carlo ? detail.monte_carlo : source.monte_carlo_summary || source.monte_carlo_stats || null;
+          var paper = detail && detail.paper ? detail.paper : source.paper_validation_summary || source.paper_surface && (source.paper_surface.validation_summary || source.paper_surface.validation) || null;
+          var replay = detail && detail.replay ? detail.replay : source.replay_validation_summary || source.replay_surface && (source.replay_surface.validation_summary || source.replay_surface.validation) || null;
+          var operatorSummary = detail && detail.operator_summary ? detail.operator_summary : source.validation_operator_summary || null;
+          var blockers = detail && Array.isArray(detail.blockers)
+            ? detail.blockers.filter(function (item) { return typeof item === "string" && item.trim(); })
+            : deriveValidationBlockers({
+              resolved_history: resolvedHistory,
+              cost_model: costModel,
+              walk_forward: walkForward
+            });
+          var blockerSummary = detail && detail.blocker_summary
+            ? detail.blocker_summary
+            : blockers.length
+              ? blockers.join("; ")
+              : null;
+
+          if (!resolvedHistory && !costModel && !backtest && !walkForward && !monteCarlo && !paper && !replay && !operatorSummary) return null;
+
+          return {
+            resolved_history: resolvedHistory,
+            cost_model: costModel,
+            backtest: backtest,
+            walk_forward: walkForward,
+            monte_carlo: monteCarlo,
+            paper: paper,
+            replay: replay,
+            blockers: blockers,
+            blocker_summary: blockerSummary,
+            operator_summary: operatorSummary,
+          };
+        }
+
+        function readSizingSummary(source) {
+          if (!source || typeof source !== "object") return null;
+          var executionPreview = source.execution_projection_selected_preview
+            || source.quote_pair_intent_preview
+            || source.trade_intent_preview
+            || source.execution_projection
+            || source.selected_preview
+            || null;
+          var sizing = executionPreview && typeof executionPreview === "object"
+            ? (executionPreview.sizing_summary || executionPreview.sizing || null)
+            : null;
+          var sizingSource = sizing && typeof sizing === "object" ? sizing : executionPreview && typeof executionPreview === "object" ? executionPreview : source;
+
+          var recommendedSize = firstDefined(
+            sizingSource && sizingSource.recommended_size_usd,
+            sizingSource && sizingSource.size_usd,
+            source.shadow_arbitrage_recommended_size_usd,
+            source.recommended_size_usd
+          );
+          var kellyFraction = firstDefined(
+            sizingSource && sizingSource.kelly_fraction,
+            source.kelly_fraction
+          );
+          var kellyCapUsd = firstDefined(
+            sizingSource && sizingSource.kelly_cap_usd,
+            source.kelly_cap_usd
+          );
+          var maxSizeUsd = firstDefined(
+            sizingSource && sizingSource.max_size_usd,
+            sizingSource && sizingSource.conservative_cap_usd,
+            sizingSource && sizingSource.effective_cap_usd,
+            source.max_size_usd
+          );
+          var effectiveCapUsd = firstDefined(
+            sizingSource && sizingSource.effective_cap_usd,
+            source.effective_cap_usd
+          );
+          var multiplier = firstDefined(
+            sizingSource && sizingSource.multiplier,
+            source.multiplier
+          );
+          var kellyEdgeBps = firstDefined(
+            sizingSource && sizingSource.kelly_edge_bps,
+            source.kelly_edge_bps
+          );
+          var kellyApplicable = firstDefined(
+            sizingSource && sizingSource.kelly_applicable,
+            source.kelly_applicable
+          );
+          var kellyReason = firstDefined(
+            sizingSource && sizingSource.kelly_reason,
+            source.kelly_reason
+          );
+          var marketProbabilityYes = firstDefined(
+            sizingSource && sizingSource.market_probability_yes,
+            source.market_probability_yes
+          );
+          var forecastProbabilityYes = firstDefined(
+            sizingSource && sizingSource.forecast_probability_yes,
+            source.forecast_probability_yes
+          );
+          var notes = Array.isArray(sizingSource && sizingSource.notes)
+            ? sizingSource.notes
+            : Array.isArray(source.notes)
+              ? source.notes
+              : [];
+          var factors = sizingSource && sizingSource.factors ? sizingSource.factors : null;
+
+          if (
+            recommendedSize == null &&
+            kellyFraction == null &&
+            kellyCapUsd == null &&
+            maxSizeUsd == null &&
+            effectiveCapUsd == null &&
+            multiplier == null &&
+            kellyEdgeBps == null &&
+            kellyApplicable == null &&
+            kellyReason == null &&
+            marketProbabilityYes == null &&
+            forecastProbabilityYes == null &&
+            notes.length === 0 &&
+            factors == null
+          ) {
+            return null;
+          }
+
+          return {
+            requested_mode: firstDefined(sizingSource && sizingSource.requested_mode, source.requested_mode, source.mode),
+            source: firstDefined(sizingSource && sizingSource.source, source.sizing_source, source.source) || "n/a",
+            recommended_size_usd: recommendedSize,
+            max_size_usd: maxSizeUsd,
+            conservative_cap_usd: firstDefined(sizingSource && sizingSource.conservative_cap_usd, source.conservative_cap_usd),
+            effective_cap_usd: effectiveCapUsd,
+            multiplier: multiplier,
+            kelly_fraction: kellyFraction,
+            kelly_cap_usd: kellyCapUsd,
+            kelly_edge_bps: kellyEdgeBps,
+            kelly_applicable: kellyApplicable,
+            kelly_reason: kellyReason,
+            market_probability_yes: marketProbabilityYes,
+            forecast_probability_yes: forecastProbabilityYes,
+            factors: factors,
+            notes: notes,
+          };
+        }
+
+        function summarizeSizingFactors(factors) {
+          if (!factors) return "n/a";
+          if (Array.isArray(factors)) return joinList(factors, 6);
+          if (typeof factors !== "object") return String(factors);
+          return Object.keys(factors).slice(0, 6).map(function (key) {
+            var value = factors[key];
+            if (Array.isArray(value)) {
+              return key + "=" + joinList(value, 3);
+            }
+            if (value && typeof value === "object") {
+              try {
+                return key + "=" + JSON.stringify(value);
+              } catch (error) {
+                return key + "=" + String(value);
+              }
+            }
+            return key + "=" + String(value);
+          }).join(", ");
+        }
+
+        function readMakerQuoteState(source) {
+          if (!source || typeof source !== "object") return null;
+          var run = source.run && typeof source.run === "object" ? source.run : source;
+          var strategy = source.strategy && typeof source.strategy === "object" ? source.strategy : run.strategy && typeof run.strategy === "object" ? run.strategy : null;
+          var regime = strategy && strategy.market_regime && typeof strategy.market_regime === "object"
+            ? strategy.market_regime
+            : run.market_regime && typeof run.market_regime === "object"
+              ? run.market_regime
+              : source.market_regime && typeof source.market_regime === "object"
+                ? source.market_regime
+                : null;
+          var quotePreview = source.quote_pair_intent_preview
+            || run.quote_pair_intent_preview
+            || source.execution_projection_selected_preview
+            || run.execution_projection_selected_preview
+            || null;
+          var makerQuoteState = firstDefined(
+            strategy && strategy.maker_quote_state,
+            regime && regime.maker_quote_state,
+            source.maker_quote_state,
+            run.maker_quote_state,
+            quotePreview && quotePreview.maker_quote_state,
+            quotePreview && quotePreview.quote_state,
+            quotePreview && quotePreview.summary && quotePreview.summary.maker_quote_state
+          );
+          var inventoryUsd = firstDefined(
+            source.maker_inventory_usd,
+            run.maker_inventory_usd,
+            source.quote_pair_intent_maker_inventory_usd,
+            run.quote_pair_intent_maker_inventory_usd,
+            quotePreview && quotePreview.maker_inventory_usd,
+            quotePreview && quotePreview.inventory_usd,
+            quotePreview && quotePreview.summary && quotePreview.summary.maker_inventory_usd
+          );
+          var quoteAgeMs = firstDefined(
+            source.quote_age_ms,
+            run.quote_age_ms,
+            source.quote_freshness_ms,
+            run.quote_freshness_ms,
+            quotePreview && quotePreview.quote_age_ms,
+            quotePreview && quotePreview.quote_freshness_ms
+          );
+          var quoteSpreadBps = firstDefined(
+            source.quote_spread_bps,
+            run.quote_spread_bps,
+            quotePreview && quotePreview.quote_spread_bps,
+            quotePreview && quotePreview.summary && quotePreview.summary.quote_spread_bps
+          );
+          var quoteSizeUsd = firstDefined(
+            source.quote_size_usd,
+            run.quote_size_usd,
+            quotePreview && quotePreview.quote_size_usd,
+            quotePreview && quotePreview.summary && quotePreview.summary.quote_size_usd
+          );
+          var quoteNotes = Array.isArray(source.maker_quote_notes)
+            ? source.maker_quote_notes
+            : Array.isArray(run.maker_quote_notes)
+              ? run.maker_quote_notes
+              : Array.isArray(quotePreview && quotePreview.notes)
+                ? quotePreview.notes
+                : [];
+
+          if (
+            makerQuoteState === null &&
+            inventoryUsd === null &&
+            quoteAgeMs === null &&
+            quoteSpreadBps === null &&
+            quoteSizeUsd === null &&
+            quoteNotes.length === 0
+          ) {
+            return null;
+          }
+
+          return {
+            maker_quote_state: makerQuoteState || "n/a",
+            maker_inventory_usd: inventoryUsd,
+            quote_age_ms: quoteAgeMs,
+            quote_spread_bps: quoteSpreadBps,
+            quote_size_usd: quoteSizeUsd,
+            quote_notes: quoteNotes,
+            quote_source: firstDefined(
+              source.maker_quote_source,
+              run.maker_quote_source,
+              quotePreview && quotePreview.source,
+              quotePreview && quotePreview.summary && quotePreview.summary.source
+            ) || "n/a",
+          };
+        }
+
+        function arbitrageQualitySignals(candidate) {
+          if (!candidate) {
+            return {
+              quality_score: 0,
+              actionability_score: 0,
+              ranking_score: 0,
+              quality_signals: [],
+              actionability_signals: [],
+            };
+          }
+
+          var canonicalQualitySignals = Array.isArray(candidate.quality_signals)
+            ? candidate.quality_signals.slice(0, 6)
+            : Array.isArray(candidate.quality_reasons)
+              ? candidate.quality_reasons.slice(0, 6)
+              : [];
+          var canonicalActionabilitySignals = Array.isArray(candidate.actionability_signals)
+            ? candidate.actionability_signals.slice(0, 6)
+            : Array.isArray(candidate.actionability_reasons)
+              ? candidate.actionability_reasons.slice(0, 6)
+              : [];
+          var canonicalQualityScore = typeof candidate.quality_score === "number" ? candidate.quality_score : null;
+          var canonicalActionabilityScore = typeof candidate.actionability_score === "number" ? candidate.actionability_score : null;
+          var canonicalRankingScore = typeof candidate.ranking_score === "number" ? candidate.ranking_score : null;
+
+          if (
+            canonicalQualityScore != null ||
+            canonicalActionabilityScore != null ||
+            canonicalRankingScore != null ||
+            canonicalQualitySignals.length > 0 ||
+            canonicalActionabilitySignals.length > 0
+          ) {
+            return {
+              quality_score: canonicalQualityScore != null ? canonicalQualityScore : 0,
+              actionability_score: canonicalActionabilityScore != null ? canonicalActionabilityScore : 0,
+              ranking_score: canonicalRankingScore != null
+                ? canonicalRankingScore
+                : canonicalQualityScore != null || canonicalActionabilityScore != null
+                  ? Math.round((((canonicalQualityScore || 0) * 0.65) + ((canonicalActionabilityScore || 0) * 0.35)) * 10) / 10
+                  : 0,
+              quality_signals: canonicalQualitySignals,
+              actionability_signals: canonicalActionabilitySignals,
+            };
+          }
+
+          var score = 0;
+          var reasons = [];
+
+          if (candidate.shadow_ready) {
+            score += 14;
+            reasons.push("shadow-ready");
+          }
+
+          if (typeof candidate.shadow_edge_bps === "number") {
+            var shadowEdgeBoost = clamp(candidate.shadow_edge_bps / 12, -10, 18);
+            score += shadowEdgeBoost;
+            reasons.push("shadow edge " + formatMaybeNumber(candidate.shadow_edge_bps, 0) + " bps");
+          }
+
+          if (typeof candidate.net_spread_bps === "number") {
+            var netBoost = clamp(candidate.net_spread_bps / 18, -8, 12);
+            score += netBoost;
+            reasons.push("net spread " + formatMaybeNumber(candidate.net_spread_bps, 0) + " bps");
+          }
+
+          if (typeof candidate.hedge_success_probability === "number") {
+            score += clamp(candidate.hedge_success_probability * 22, 0, 22);
+            reasons.push(formatPercent(candidate.hedge_success_probability) + " hedge success");
+          }
+
+          if (typeof candidate.confidence_score === "number") {
+            score += clamp(candidate.confidence_score * 16, 0, 16);
+            reasons.push(formatPercent(candidate.confidence_score) + " confidence");
+          }
+
+          if (typeof candidate.freshness_ms === "number") {
+            var freshnessBoost = clamp(1 - clamp(candidate.freshness_ms / 120000, 0, 1), 0, 1);
+            score += freshnessBoost * 10;
+            reasons.push(formatMaybeNumber(candidate.freshness_ms, 0) + "ms freshness");
+          }
+
+          if (candidate.manual_review_required) {
+            score -= 8;
+            reasons.push("manual review");
+          }
+
+          if (Array.isArray(candidate.blocking_reasons) && candidate.blocking_reasons.length > 0) {
+            score -= Math.min(12, candidate.blocking_reasons.length * 3);
+            reasons.push(candidate.blocking_reasons.length + " blockers");
+          }
+
+          return {
+            quality_score: Math.max(0, Math.round(score * 10) / 10),
+            actionability_score: 0,
+            ranking_score: Math.max(0, Math.round(score * 10) / 10),
+            quality_signals: reasons.slice(0, 4),
+            actionability_signals: [],
+          };
         }
 
         function dateToMs(value) {
@@ -1956,6 +2659,146 @@
           };
         }
 
+        function strategyFamilyFromPrimaryStrategy(value) {
+          var primary = String(value || "").toLowerCase();
+          if (!primary) return null;
+          if (primary === "intramarket_parity") return "parity";
+          if (primary === "maker_spread_capture") return "maker";
+          if (primary === "latency_reference_spread") return "latency";
+          if (primary === "logical_constraint_arb") return "logical";
+          if (primary === "negative_risk_basket") return "basket";
+          if (primary === "resolution_attack_watch" || primary === "resolution_sniping_watch") return "resolution_watch";
+          if (primary.indexOf("watch") !== -1) return "resolution_watch";
+          if (primary.indexOf("maker") !== -1) return "maker";
+          if (primary.indexOf("latency") !== -1) return "latency";
+          if (primary.indexOf("parity") !== -1) return "parity";
+          if (primary.indexOf("basket") !== -1) return "basket";
+          if (primary.indexOf("logical") !== -1) return "logical";
+          return "other";
+        }
+
+        function strategyFamilyLabel(value) {
+          var family = strategyFamilyFromPrimaryStrategy(value);
+          return family || "n/a";
+        }
+
+        function compareMaybeStrings(left, right) {
+          return String(left || "").localeCompare(String(right || ""));
+        }
+
+        function sortRuns(runs) {
+          var sorted = Array.isArray(runs) ? runs.slice() : [];
+          sorted.sort(function (left, right) {
+            var leftStrategy = strategySummaryFrom(left);
+            var rightStrategy = strategySummaryFrom(right);
+            var leftCounts = normalizeStrategyCounts(leftStrategy && leftStrategy.strategy_counts);
+            var rightCounts = normalizeStrategyCounts(rightStrategy && rightStrategy.strategy_counts);
+            var leftUpdated = dateToMs(left.updated_at) || dateToMs(left.created_at) || 0;
+            var rightUpdated = dateToMs(right.updated_at) || dateToMs(right.created_at) || 0;
+
+            if (state.runSort === "strategy_asc") {
+              return compareMaybeStrings(leftStrategy && leftStrategy.primary_strategy, rightStrategy && rightStrategy.primary_strategy)
+                || rightUpdated - leftUpdated;
+            }
+            if (state.runSort === "family_asc") {
+              return compareMaybeStrings(strategyFamilyLabel(leftStrategy && leftStrategy.primary_strategy), strategyFamilyLabel(rightStrategy && rightStrategy.primary_strategy))
+                || compareMaybeStrings(leftStrategy && leftStrategy.primary_strategy, rightStrategy && rightStrategy.primary_strategy)
+                || rightUpdated - leftUpdated;
+            }
+            if (state.runSort === "actionable_desc") {
+              return (rightCounts.actionable - leftCounts.actionable)
+                || (rightCounts.ready - leftCounts.ready)
+                || rightUpdated - leftUpdated;
+            }
+            if (state.runSort === "ready_desc") {
+              return (rightCounts.ready - leftCounts.ready)
+                || (rightCounts.actionable - leftCounts.actionable)
+                || rightUpdated - leftUpdated;
+            }
+            return rightUpdated - leftUpdated;
+          });
+          return sorted;
+        }
+
+        function buildStrategyDesk(runs) {
+          var filteredRuns = sortRuns(filterRuns(runs || []));
+          var strategies = Object.create(null);
+          var families = Object.create(null);
+
+          filteredRuns.forEach(function (run) {
+            var strategy = strategySummaryFrom(run);
+            if (!strategy || !strategy.primary_strategy) return;
+
+            var primary = strategy.primary_strategy;
+            var family = strategyFamilyLabel(primary);
+            var counts = normalizeStrategyCounts(strategy.strategy_counts);
+            var benchmarkReady = run.benchmark_promotion_ready === true || run.benchmark_ready === true;
+            var liveReady = String(run.execution_projection_selected_path || run.selected_path || "") === "live"
+              && String(run.execution_projection_selected_path_status || run.selected_path_status || "").toLowerCase() === "ready";
+
+            if (!strategies[primary]) {
+              strategies[primary] = {
+                primary_strategy: primary,
+                family: family,
+                runs: 0,
+                actionable: 0,
+                ready: 0,
+                benchmark_ready: 0,
+                live_ready: 0,
+                regimes: Object.create(null),
+              };
+            }
+
+            if (!families[family]) {
+              families[family] = {
+                family: family,
+                runs: 0,
+                actionable: 0,
+                ready: 0,
+                benchmark_ready: 0,
+                live_ready: 0,
+              };
+            }
+
+            strategies[primary].runs += 1;
+            strategies[primary].actionable += counts.actionable;
+            strategies[primary].ready += counts.ready;
+            strategies[primary].benchmark_ready += benchmarkReady ? 1 : 0;
+            strategies[primary].live_ready += liveReady ? 1 : 0;
+            if (strategy.market_regime) {
+              strategies[primary].regimes[strategy.market_regime] = (strategies[primary].regimes[strategy.market_regime] || 0) + 1;
+            }
+
+            families[family].runs += 1;
+            families[family].actionable += counts.actionable;
+            families[family].ready += counts.ready;
+            families[family].benchmark_ready += benchmarkReady ? 1 : 0;
+            families[family].live_ready += liveReady ? 1 : 0;
+          });
+
+          var strategyRows = Object.keys(strategies).map(function (key) {
+            return strategies[key];
+          }).sort(function (left, right) {
+            return (right.runs - left.runs)
+              || (right.ready - left.ready)
+              || compareMaybeStrings(left.primary_strategy, right.primary_strategy);
+          });
+
+          var familyRows = Object.keys(families).map(function (key) {
+            return families[key];
+          }).sort(function (left, right) {
+            return (right.runs - left.runs)
+              || (right.ready - left.ready)
+              || compareMaybeStrings(left.family, right.family);
+          });
+
+          return {
+            filtered_runs: filteredRuns.length,
+            strategies: strategyRows,
+            families: familyRows,
+          };
+        }
+
         function strategySummaryFrom(source) {
           if (!source || typeof source !== "object") return null;
           var strategy = source.strategy && typeof source.strategy === "object" ? source.strategy : source;
@@ -1985,8 +2828,9 @@
             || source.strategy_market_regime
             || null;
           var operatorSummary = strategy.operator_summary || source.strategy_operator_summary || null;
+          var makerQuote = readMakerQuoteState(source);
 
-          if (!primaryStrategy && !marketRegime && !previewKind && !strategyShadowSummary && !resolutionAnomalies.length && counts.total === 0 && !operatorSummary) {
+          if (!primaryStrategy && !marketRegime && !previewKind && !strategyShadowSummary && !resolutionAnomalies.length && counts.total === 0 && !operatorSummary && !makerQuote) {
             return null;
           }
 
@@ -1997,6 +2841,13 @@
             strategy_shadow_summary: strategyShadowSummary,
             resolution_anomalies: resolutionAnomalies,
             execution_intent_preview_kind: previewKind,
+            maker_quote_state: makerQuote ? makerQuote.maker_quote_state : null,
+            maker_inventory_usd: makerQuote ? makerQuote.maker_inventory_usd : null,
+            quote_age_ms: makerQuote ? makerQuote.quote_age_ms : null,
+            quote_spread_bps: makerQuote ? makerQuote.quote_spread_bps : null,
+            quote_size_usd: makerQuote ? makerQuote.quote_size_usd : null,
+            quote_source: makerQuote ? makerQuote.quote_source : null,
+            quote_notes: makerQuote ? makerQuote.quote_notes : [],
             operator_summary: operatorSummary
           };
         }
@@ -2051,7 +2902,7 @@
         function normalizeArbitrageCandidate(candidate) {
           if (!candidate) return null;
           var source = candidate.executable_edge || candidate;
-          return {
+          var normalized = {
             candidate_id: candidate.candidate_id || candidate.arbitrage_candidate_id || candidate.canonical_event_key || candidate.canonical_event_id || null,
             canonical_event_key: candidate.canonical_event_key || candidate.event_key || candidate.market_equivalence_proof?.canonical_event_key || null,
             canonical_event_id: candidate.canonical_event_id || candidate.event_id || candidate.market_equivalence_proof?.canonical_event_id || null,
@@ -2083,6 +2934,15 @@
             opportunity_type: candidate.opportunity_type || source.opportunity_type || null,
             notes: Array.isArray(candidate.notes) ? candidate.notes : [],
           };
+          var quality = arbitrageQualitySignals(normalized);
+          return Object.assign({}, normalized, {
+            quality_score: quality.quality_score,
+            actionability_score: quality.actionability_score,
+            ranking_score: quality.ranking_score,
+            quality_signals: quality.quality_signals,
+            actionability_signals: quality.actionability_signals,
+            quality_reasons: quality.quality_signals,
+          });
         }
 
         function arbitrageDeskStatus(candidate) {
@@ -2103,6 +2963,11 @@
         function sortArbitrageCandidates(candidates) {
           var sorted = candidates.slice();
           sorted.sort(function (left, right) {
+            if (state.arbitrageSort === "quality_desc") {
+              return (right.quality_score || -Infinity) - (left.quality_score || -Infinity)
+                || (right.shadow_edge_bps || -Infinity) - (left.shadow_edge_bps || -Infinity)
+                || (right.confidence_score || -Infinity) - (left.confidence_score || -Infinity);
+            }
             if (state.arbitrageSort === "net_spread_desc") {
               return (right.net_spread_bps || -Infinity) - (left.net_spread_bps || -Infinity);
             }
@@ -2355,6 +3220,7 @@
           if (elements.surfaceFilter) elements.surfaceFilter.value = state.surfaceStatus;
           if (elements.strategyFilter) elements.strategyFilter.value = state.strategyFilter;
           if (elements.regimeFilter) elements.regimeFilter.value = state.regimeFilter;
+          if (elements.runSortSelect) elements.runSortSelect.value = state.runSort;
           if (elements.dateWindowInput) elements.dateWindowInput.value = state.dateWindow;
           if (elements.arbitrageStatusFilter) elements.arbitrageStatusFilter.value = state.arbitrageStatus;
           if (elements.arbitrageOpportunityFilter) elements.arbitrageOpportunityFilter.value = state.arbitrageOpportunity;
@@ -2362,7 +3228,7 @@
           if (elements.arbitrageDisplayLimitInput) elements.arbitrageDisplayLimitInput.value = String(state.arbitrageDisplayLimit);
           if (elements.resetFiltersButton) {
             elements.resetFiltersButton.disabled = !(
-              state.recommendation || state.benchmarkState || state.selectedPath || state.surfaceStatus || state.strategyFilter || state.regimeFilter || state.dateWindow
+              state.recommendation || state.benchmarkState || state.selectedPath || state.surfaceStatus || state.strategyFilter || state.regimeFilter || state.dateWindow || state.runSort !== "updated_desc"
             );
           }
           if (elements.resetArbitrageFiltersButton) {
@@ -2374,9 +3240,9 @@
         }
 
         function renderRuns(runs) {
-          var filteredRuns = filterRuns(runs);
+          var filteredRuns = sortRuns(filterRuns(runs));
           if (elements.runListSummary) {
-            elements.runListSummary.textContent = filteredRuns.length + " of " + (Array.isArray(runs) ? runs.length : 0) + " runs match the current filters.";
+            elements.runListSummary.textContent = filteredRuns.length + " of " + (Array.isArray(runs) ? runs.length : 0) + " runs match the current filters. Sort: " + state.runSort + ".";
           }
 
           if (!Array.isArray(runs) || runs.length === 0) {
@@ -2396,7 +3262,10 @@
             var benchmarkReady = run.benchmark_promotion_ready === true || run.benchmark_ready === true ? "ready" : "not ready";
             var selectedPath = run.execution_projection_selected_path || run.selected_path || run.execution_projection_requested_path || "n/a";
             var selectedPathStatus = run.execution_projection_selected_path_status || run.selected_path_status || run.execution_projection_verdict || "n/a";
+            var edgeBucket = run.execution_projection_selected_edge_bucket || run.selected_edge_bucket || "";
+            var preTradeGateVerdict = run.execution_projection_selected_pre_trade_gate_verdict || run.pre_trade_gate_verdict || "";
             var strategy = strategySummaryFrom(run);
+            var family = strategyFamilyLabel(strategy && strategy.primary_strategy);
             return '' +
               '<button type="button" class="run-card' + active + '" data-run-id="' + escapeHtml(run.run_id) + '">' +
                 '<div class="headline">' +
@@ -2408,7 +3277,10 @@
                   pill("rec", recommendation, toneForStatus(recommendation === "bet" ? "ready" : recommendation)) +
                   pill("conf", confidence, "neutral") +
                   pill("benchmark", benchmarkReady, run.benchmark_promotion_ready === true ? "good" : "warn") +
+                  (edgeBucket ? pill("edge", edgeBucket, "neutral") : "") +
+                  (preTradeGateVerdict ? pill("gate", preTradeGateVerdict, toneForStatus(preTradeGateVerdict)) : "") +
                   (strategy && strategy.primary_strategy ? pill("strategy", strategy.primary_strategy, "neutral") : "") +
+                  (strategy && strategy.primary_strategy ? pill("family", family, "neutral") : "") +
                   (strategy && strategy.market_regime ? pill("regime", strategy.market_regime, "neutral") : "") +
                 '</div>' +
               '</button>';
@@ -2536,100 +3408,251 @@
             return;
           }
           var strategy = strategySummaryFrom(detail);
+          var operatorThesis = readOperatorThesis(detail);
+          var researchTrace = readResearchPipelineTrace(detail);
           elements.researchSummary.innerHTML = [
-            summaryLine("Origin", detail.research_recommendation_origin || detail.research_runtime_mode || "n/a"),
-            summaryLine("Pipeline", detail.research_pipeline_id || "n/a"),
-            summaryLine("Version", detail.research_pipeline_version || "n/a"),
-            summaryLine("Preferred mode", detail.research_compare_preferred_mode || "n/a"),
-            summaryLine("Forecasters", detail.research_forecaster_count != null ? String(detail.research_forecaster_count) : "n/a"),
+            summaryLine("Research origin", detail.research_recommendation_origin || detail.research_runtime_mode || "n/a"),
+            summaryLine("Research pipeline", firstDefined(researchTrace && researchTrace.pipeline_id, detail.research_pipeline_id) || "n/a"),
+            summaryLine("Research pipeline trace", researchTrace ? (researchTrace.summary || summarizeResearchPipelineTrace(researchTrace)) : "n/a"),
+            summaryLine("Research lineage", researchTrace ? summarizeResearchPipelineTrace(researchTrace) : "n/a"),
+            summaryLine("Pipeline version", firstDefined(researchTrace && researchTrace.pipeline_version, detail.research_pipeline_version) || "n/a"),
+            summaryLine("Preferred mode", firstDefined(researchTrace && researchTrace.preferred_mode, detail.research_compare_preferred_mode) || "n/a"),
+            summaryLine("Oracle family", researchTrace && researchTrace.oracle_family ? researchTrace.oracle_family : "n/a"),
+            summaryLine("Forecasters", researchTrace && researchTrace.forecaster_count != null ? String(researchTrace.forecaster_count) : detail.research_forecaster_count != null ? String(detail.research_forecaster_count) : "n/a"),
             summaryLine("Weighted yes", formatPercent(detail.research_weighted_probability_yes)),
             summaryLine("Coverage", formatPercent(detail.research_weighted_coverage)),
+            summaryLine("TimesFM requested", detail.timesfm_requested_mode || "n/a"),
+            summaryLine("TimesFM effective", detail.timesfm_effective_mode || "n/a"),
+            summaryLine("TimesFM lane", detail.timesfm_selected_lane || "n/a"),
+            summaryLine("TimesFM health", detail.timesfm_health || "n/a"),
+            summaryLine("TimesFM summary", detail.timesfm_summary || "n/a"),
+            summaryLine("Operator thesis", operatorThesis ? summarizeOperatorThesis(operatorThesis) : "n/a"),
+            summaryLine("Thesis source", operatorThesis && operatorThesis.source ? operatorThesis.source : "n/a"),
+            summaryLine("Thesis probability", operatorThesis && operatorThesis.probability_yes != null ? formatPercent(operatorThesis.probability_yes) : "n/a"),
             summaryLine("Abstention blocks", detail.research_abstention_policy_blocks_forecast === true ? "yes" : "no"),
             summaryLine("Strategy operator note", strategy && strategy.operator_summary ? strategy.operator_summary : "n/a")
           ].join("");
         }
 
+        function renderValidationSummary(detail) {
+          if (!elements.researchValidationSummary) return;
+          var validation = readValidationSummary(detail);
+          if (!validation) {
+            elements.researchValidationSummary.innerHTML = '<div class="empty-state">Research validation hints unavailable.</div>';
+            return;
+          }
+
+          var badges = [];
+          if (validation.resolved_history && typeof validation.resolved_history.status === "string" && validation.resolved_history.status) {
+            badges.push(
+              pill(
+                "history",
+                validation.resolved_history.status,
+                validation.resolved_history.status === "ready" ? "good" : "warn"
+              )
+            );
+          }
+          if (validation.walk_forward && typeof validation.walk_forward.promotion_ready === "boolean") {
+            badges.push(
+              pill(
+                "walk-forward",
+                validation.walk_forward.promotion_ready ? "ready" : "preview",
+                validation.walk_forward.promotion_ready ? "good" : "warn"
+              )
+            );
+          }
+          if (validation.cost_model && typeof validation.cost_model.promotion_ready === "boolean") {
+            badges.push(
+              pill(
+                "cost-model",
+                validation.cost_model.promotion_ready ? "ready" : "preview",
+                validation.cost_model.promotion_ready ? "good" : "warn"
+              )
+            );
+          }
+
+          elements.researchValidationSummary.innerHTML = (
+            badges.length ? '<div class="surface-badges">' + badges.join("") + '</div>' : ''
+          ) + [
+            summaryLine("Validation summary", validation.operator_summary || "n/a"),
+            summaryLine("Validation blockers", validation.blocker_summary || "none"),
+            summaryLine("Resolved history", summarizeValidationSeries(validation.resolved_history)),
+            summaryLine("Cost model", summarizeValidationSeries(validation.cost_model)),
+            summaryLine("Backtest", summarizeValidationSeries(validation.backtest)),
+            summaryLine("Walk-forward", summarizeValidationSeries(validation.walk_forward)),
+            summaryLine("Monte Carlo", summarizeValidationSeries(validation.monte_carlo)),
+            summaryLine("Paper", summarizeValidationSeries(validation.paper)),
+            summaryLine("Replay", summarizeValidationSeries(validation.replay)),
+          ].join("") + listBlock(validation.blockers || []);
+        }
+
         function renderExecutionSummary(detail) {
           if (!detail) {
             elements.executionSummary.innerHTML = '<div class="empty-state">Execution data unavailable.</div>';
+            if (elements.kellySummary) {
+              elements.kellySummary.innerHTML = '<div class="empty-state">Kelly / risk cap hints unavailable.</div>';
+            }
             return;
           }
           var strategy = strategySummaryFrom(detail);
+          var approvalTicket = readApprovalTicket(detail);
+          var sizing = readSizingSummary(detail);
           elements.executionSummary.innerHTML = [
             summaryLine("Requested path", detail.execution_projection_requested_path || "n/a"),
             summaryLine("Selected path", detail.execution_projection_selected_path || "n/a"),
             summaryLine("Path status", detail.execution_projection_selected_path_status || detail.execution_projection_verdict || "n/a"),
+            summaryLine("Live route status", detail.live_status || detail.execution_projection_selected_path_status || detail.execution_projection_verdict || "n/a"),
             summaryLine("Effective mode", detail.execution_projection_selected_path_effective_mode || detail.execution_projection_recommended_effective_mode || "n/a"),
+            summaryLine("Edge bucket", detail.execution_projection_selected_edge_bucket || "n/a"),
+            summaryLine("Pre-trade gate", detail.execution_projection_selected_pre_trade_gate_verdict || "n/a"),
+            summaryLine("Net / minimum edge", [
+              typeof detail.execution_projection_selected_path_net_edge_bps === "number" ? formatMaybeNumber(detail.execution_projection_selected_path_net_edge_bps, 0) + " bps" : "n/a",
+              typeof detail.execution_projection_selected_path_minimum_net_edge_bps === "number" ? formatMaybeNumber(detail.execution_projection_selected_path_minimum_net_edge_bps, 0) + " bps" : "n/a"
+            ].join(" / ")),
             summaryLine("Preview size USD", detail.execution_projection_selected_preview && typeof detail.execution_projection_selected_preview.size_usd === "number" ? formatMaybeNumber(detail.execution_projection_selected_preview.size_usd, 2) : "n/a"),
             summaryLine("Preview source", detail.execution_projection_selected_preview_source || "n/a"),
+            summaryLine("Approval ticket", approvalTicket && approvalTicket.status ? approvalTicket.status : "n/a"),
+            summaryLine("Approval required", approvalTicket ? (approvalTicket.required === true ? "yes" : approvalTicket.required === false ? "no" : "n/a") : "n/a"),
+            summaryLine("Approval ticket context", approvalTicket && approvalTicket.summary ? approvalTicket.summary : "Canonical live intent remains the approval source."),
             summaryLine("Intent preview kind", strategy && strategy.execution_intent_preview_kind ? strategy.execution_intent_preview_kind : "n/a"),
             summaryLine("Capital status", detail.execution_projection_capital_status || "n/a"),
             summaryLine("Reconciliation", detail.execution_projection_reconciliation_status || "n/a")
-          ].join("") + listBlock(detail.execution_projection_downgrade_reasons || detail.execution_projection_blocking_reasons || []);
+          ].join("") + listBlock(
+            [detail.execution_projection_selected_pre_trade_gate_summary]
+              .concat(detail.execution_projection_downgrade_reasons || detail.execution_projection_blocking_reasons || [])
+              .filter(Boolean)
+          );
+
+          if (elements.kellySummary) {
+            elements.kellySummary.innerHTML = sizing
+              ? [
+                  summaryLine("Requested mode", sizing.requested_mode || "n/a"),
+                  summaryLine("Sizing source", sizing.source || "n/a"),
+                  summaryLine("Recommended size", sizing.recommended_size_usd != null ? "$" + formatMaybeNumber(sizing.recommended_size_usd, 0) : "n/a"),
+                  summaryLine("Kelly cap", sizing.kelly_cap_usd != null ? "$" + formatMaybeNumber(sizing.kelly_cap_usd, 0) : "n/a"),
+                  summaryLine("Max / effective cap", [
+                    sizing.max_size_usd != null ? "$" + formatMaybeNumber(sizing.max_size_usd, 0) : "n/a",
+                    sizing.effective_cap_usd != null ? "$" + formatMaybeNumber(sizing.effective_cap_usd, 0) : "n/a"
+                  ].join(" / ")),
+                  summaryLine("Kelly fraction", sizing.kelly_fraction != null ? formatMaybeNumber(sizing.kelly_fraction, 3) : "n/a"),
+                  summaryLine("Kelly edge", sizing.kelly_edge_bps != null ? formatMaybeNumber(sizing.kelly_edge_bps, 0) + " bps" : "n/a"),
+                  summaryLine("Multiplier", sizing.multiplier != null ? formatMaybeNumber(sizing.multiplier, 2) + "x" : "n/a"),
+                  summaryLine("Market / forecast yes", [
+                    sizing.market_probability_yes != null ? formatPercent(sizing.market_probability_yes) : "n/a",
+                    sizing.forecast_probability_yes != null ? formatPercent(sizing.forecast_probability_yes) : "n/a"
+                  ].join(" / ")),
+                  summaryLine("Kelly applicable", sizing.kelly_applicable === true ? "yes" : sizing.kelly_applicable === false ? "no" : "n/a"),
+                  summaryLine("Kelly reason", sizing.kelly_reason || "n/a"),
+                  summaryLine("Factors", summarizeSizingFactors(sizing.factors)),
+                ].join("") + listBlock(sizing.notes)
+              : '<div class="empty-state">Kelly / risk cap hints unavailable.</div>';
+          }
         }
 
-        function renderStrategySection(detail, overview) {
+        function renderStrategySection(detail, overview, runs) {
           var source = detail && (detail.strategy || detail.run || detail) ? (detail.strategy ? detail : (detail.run || detail)) : (overview && (overview.strategy || overview)) || null;
           var strategy = strategySummaryFrom(source);
+          var makerQuote = readMakerQuoteState(source);
+          var strategyDesk = buildStrategyDesk(Array.isArray(runs) ? runs : []);
 
           if (!strategy) {
             if (elements.strategyPrimarySummary) elements.strategyPrimarySummary.innerHTML = '<div class="empty-state">No strategy engine payload visible yet.</div>';
             if (elements.strategyCountsSummary) elements.strategyCountsSummary.innerHTML = '<div class="empty-state">Strategy counts will appear here.</div>';
             if (elements.strategyRegimeSummary) elements.strategyRegimeSummary.innerHTML = '<div class="empty-state">Market regime will appear here.</div>';
+            if (elements.makerQuoteSummary) elements.makerQuoteSummary.innerHTML = '<div class="empty-state">Maker inventory and quote state hints unavailable.</div>';
             if (elements.strategyIntentPreviewSummary) elements.strategyIntentPreviewSummary.innerHTML = '<div class="empty-state">Execution intent preview kind will appear here.</div>';
             if (elements.strategyShadowSummary) elements.strategyShadowSummary.innerHTML = '<div class="empty-state">Shadow strategy summary will appear here.</div>';
             if (elements.strategyResolutionSummary) elements.strategyResolutionSummary.innerHTML = '<div class="empty-state">Resolution anomalies will appear here.</div>';
-            return;
+          } else {
+            var counts = strategy.strategy_counts || normalizeStrategyCounts({});
+
+            if (elements.strategyPrimarySummary) {
+              elements.strategyPrimarySummary.innerHTML = [
+                summaryLine("Primary strategy", strategy.primary_strategy || "n/a"),
+                summaryLine("Strategy family", strategyFamilyLabel(strategy.primary_strategy)),
+                summaryLine("Operator summary", strategy.operator_summary || "n/a"),
+              ].join("");
+            }
+
+            if (elements.strategyCountsSummary) {
+              elements.strategyCountsSummary.innerHTML = [
+                summaryLine("Total", String(counts.total)),
+                summaryLine("Actionable", String(counts.actionable)),
+                summaryLine("Ready", String(counts.ready)),
+                summaryLine("Degraded", String(counts.degraded)),
+                summaryLine("Blocked", String(counts.blocked)),
+                summaryLine("Inactive", String(counts.inactive)),
+              ].join("");
+            }
+
+            if (elements.strategyRegimeSummary) {
+              elements.strategyRegimeSummary.innerHTML = [
+                summaryLine("Market regime", strategy.market_regime || "n/a"),
+                summaryLine("Execution posture", strategy.market_regime === "fast" || strategy.market_regime === "sports" ? "defensive / freshness-bound" : strategy.market_regime === "slow" ? "forecast-friendly / research-heavy" : "n/a"),
+              ].join("");
+            }
+
+            if (elements.makerQuoteSummary) {
+              elements.makerQuoteSummary.innerHTML = makerQuote
+                ? [
+                    summaryLine("Quote state", makerQuote.maker_quote_state || "n/a"),
+                    summaryLine("Inventory USD", makerQuote.maker_inventory_usd != null ? "$" + formatMaybeNumber(makerQuote.maker_inventory_usd, 0) : "n/a"),
+                    summaryLine("Quote age", makerQuote.quote_age_ms != null ? formatMaybeNumber(makerQuote.quote_age_ms, 0) + "ms" : "n/a"),
+                    summaryLine("Quote spread", makerQuote.quote_spread_bps != null ? formatMaybeNumber(makerQuote.quote_spread_bps, 0) + " bps" : "n/a"),
+                    summaryLine("Quote size", makerQuote.quote_size_usd != null ? "$" + formatMaybeNumber(makerQuote.quote_size_usd, 0) : "n/a"),
+                    summaryLine("Quote source", makerQuote.quote_source || "n/a"),
+                  ].join("") + listBlock(makerQuote.quote_notes)
+                : '<div class="empty-state">Maker inventory and quote state hints unavailable.</div>';
+            }
+
+            if (elements.strategyIntentPreviewSummary) {
+              elements.strategyIntentPreviewSummary.innerHTML = [
+                summaryLine("Preview kind", strategy.execution_intent_preview_kind || "n/a"),
+                summaryLine("Intent family", strategy.execution_intent_preview_kind === "quote_pair" ? "maker quoting" : strategy.execution_intent_preview_kind === "basket" ? "multi-leg basket" : strategy.execution_intent_preview_kind === "shadow_watch" ? "watch-only" : strategy.execution_intent_preview_kind === "trade" ? "trade intent" : "n/a"),
+              ].join("");
+            }
+
+            if (elements.strategyShadowSummary) {
+              elements.strategyShadowSummary.innerHTML = strategy.strategy_shadow_summary
+                ? [
+                    summaryLine("Shadow summary", strategy.strategy_shadow_summary),
+                  ].join("")
+                : '<div class="empty-state">No generalized shadow strategy summary yet.</div>';
+            }
+
+            if (elements.strategyResolutionSummary) {
+              elements.strategyResolutionSummary.innerHTML = strategy.resolution_anomalies && strategy.resolution_anomalies.length > 0
+                ? [
+                    summaryLine("Anomaly count", String(strategy.resolution_anomalies.length)),
+                  ].join("") + listBlock(strategy.resolution_anomalies)
+                : '<div class="empty-state">No resolution anomaly reported.</div>';
+            }
           }
 
-          var counts = strategy.strategy_counts || normalizeStrategyCounts({});
-
-          if (elements.strategyPrimarySummary) {
-            elements.strategyPrimarySummary.innerHTML = [
-              summaryLine("Primary strategy", strategy.primary_strategy || "n/a"),
-              summaryLine("Operator summary", strategy.operator_summary || "n/a"),
-            ].join("");
+          if (elements.strategyDeskSummary) {
+            elements.strategyDeskSummary.innerHTML = strategyDesk.strategies.length
+              ? strategyDesk.strategies.slice(0, 6).map(function (entry) {
+                  var regimes = Object.keys(entry.regimes || {}).map(function (key) {
+                    return key + ":" + entry.regimes[key];
+                  });
+                  return [
+                    summaryLine(entry.primary_strategy, "runs=" + entry.runs + " ready=" + entry.ready + " actionable=" + entry.actionable),
+                    summaryLine("family / live", entry.family + " / " + entry.live_ready + " live-ready"),
+                    summaryLine("benchmark / regimes", entry.benchmark_ready + " benchmark-ready / " + (regimes.length ? regimes.join(", ") : "n/a")),
+                  ].join("");
+                }).join('<div class="summary-divider"></div>')
+              : '<div class="empty-state">No filtered runs with a visible primary strategy yet.</div>';
           }
 
-          if (elements.strategyCountsSummary) {
-            elements.strategyCountsSummary.innerHTML = [
-              summaryLine("Total", String(counts.total)),
-              summaryLine("Actionable", String(counts.actionable)),
-              summaryLine("Ready", String(counts.ready)),
-              summaryLine("Degraded", String(counts.degraded)),
-              summaryLine("Blocked", String(counts.blocked)),
-              summaryLine("Inactive", String(counts.inactive)),
-            ].join("");
-          }
-
-          if (elements.strategyRegimeSummary) {
-            elements.strategyRegimeSummary.innerHTML = [
-              summaryLine("Market regime", strategy.market_regime || "n/a"),
-              summaryLine("Execution posture", strategy.market_regime === "fast" || strategy.market_regime === "sports" ? "defensive / freshness-bound" : strategy.market_regime === "slow" ? "forecast-friendly / research-heavy" : "n/a"),
-            ].join("");
-          }
-
-          if (elements.strategyIntentPreviewSummary) {
-            elements.strategyIntentPreviewSummary.innerHTML = [
-              summaryLine("Preview kind", strategy.execution_intent_preview_kind || "n/a"),
-              summaryLine("Intent family", strategy.execution_intent_preview_kind === "quote_pair" ? "maker quoting" : strategy.execution_intent_preview_kind === "basket" ? "multi-leg basket" : strategy.execution_intent_preview_kind === "shadow_watch" ? "watch-only" : strategy.execution_intent_preview_kind === "trade" ? "trade intent" : "n/a"),
-            ].join("");
-          }
-
-          if (elements.strategyShadowSummary) {
-            elements.strategyShadowSummary.innerHTML = strategy.strategy_shadow_summary
-              ? [
-                  summaryLine("Shadow summary", strategy.strategy_shadow_summary),
-                ].join("")
-              : '<div class="empty-state">No generalized shadow strategy summary yet.</div>';
-          }
-
-          if (elements.strategyResolutionSummary) {
-            elements.strategyResolutionSummary.innerHTML = strategy.resolution_anomalies && strategy.resolution_anomalies.length > 0
-              ? [
-                  summaryLine("Anomaly count", String(strategy.resolution_anomalies.length)),
-                ].join("") + listBlock(strategy.resolution_anomalies)
-              : '<div class="empty-state">No resolution anomaly reported.</div>';
+          if (elements.strategyFamilySummary) {
+            elements.strategyFamilySummary.innerHTML = strategyDesk.families.length
+              ? strategyDesk.families.slice(0, 6).map(function (entry) {
+                  return [
+                    summaryLine(entry.family, "runs=" + entry.runs + " ready=" + entry.ready + " actionable=" + entry.actionable),
+                    summaryLine("benchmark / live", entry.benchmark_ready + " benchmark-ready / " + entry.live_ready + " live-ready"),
+                  ].join("");
+                }).join('<div class="summary-divider"></div>')
+              : '<div class="empty-state">No family-level strategy aggregation yet.</div>';
           }
         }
 
@@ -2651,11 +3674,21 @@
           }
 
           elements.liveIntentsList.innerHTML = intents.map(function (intent) {
-            var status = intent.approval_state && intent.approval_state.status ? intent.approval_state.status : intent.status || "pending";
-            var approvers = intent.approval_state && Array.isArray(intent.approval_state.approvers)
-              ? intent.approval_state.approvers
-              : [];
-            var canAct = status === "pending" || status === "partial";
+            var status = intent.status || (intent.approval_state && intent.approval_state.status ? intent.approval_state.status : "pending");
+            var approvalState = intent.approval_state && typeof intent.approval_state === "object"
+              ? intent.approval_state
+              : null;
+            var approvalTicket = readApprovalTicket(intent);
+            var operatorThesis = readOperatorThesis(intent);
+            var researchTrace = readResearchPipelineTrace(intent);
+            var approvers = extractApprovalActors(approvalState);
+            if (!approvers.length && approvalTicket && Array.isArray(approvalTicket.approved_by)) {
+              approvers = approvalTicket.approved_by;
+            }
+            var executionResult = intent.execution_result && typeof intent.execution_result === "object"
+              ? intent.execution_result
+              : null;
+            var canAct = status === "pending_approval" || status === "pending_second_approval" || status === "pending" || status === "partial";
             var intentId = intent.intent_id || "";
             var isSelected = state.selectedIntentId && state.selectedIntentId === intentId;
             return '' +
@@ -2666,12 +3699,33 @@
                 '</div>' +
                 '<div class="summary">' +
                   'creator: ' + escapeHtml(intent.requested_by || intent.created_by || "n/a") +
-                  ' • approvers: ' + escapeHtml(approvers.length ? approvers.join(", ") : "none") +
+                  ' • approval actors: ' + escapeHtml(approvers.length ? approvers.join(", ") : "none") +
                 '</div>' +
                 '<div class="summary" style="margin-top:6px;">' +
                   'selected path: ' + escapeHtml(intent.selected_path || intent.requested_path || "n/a") +
-                  ' • live status: ' + escapeHtml(intent.live_status || "n/a") +
+                  ' • live route status: ' + escapeHtml(intent.live_status || "n/a") +
                 '</div>' +
+                '<div class="summary" style="margin-top:6px;">' +
+                  'approval state: ' + escapeHtml((approvalState && approvalState.status) || (approvalTicket && approvalTicket.status) || status || "n/a") +
+                  ' • approval ticket: ' + escapeHtml(approvalTicket && (approvalTicket.ticket_id || approvalTicket.status) ? (approvalTicket.ticket_id || approvalTicket.status) : "none") +
+                '</div>' +
+                (operatorThesis
+                  ? '<div class="summary" style="margin-top:6px;">' +
+                    'operator thesis: ' + escapeHtml(summarizeOperatorThesis(operatorThesis)) +
+                  '</div>'
+                  : '') +
+                (researchTrace
+                  ? '<div class="summary" style="margin-top:6px;">' +
+                    'research pipeline trace: ' + escapeHtml(researchTrace.summary || summarizeResearchPipelineTrace(researchTrace)) +
+                  '</div>'
+                  : '') +
+                (executionResult
+                  ? '<div class="summary" style="margin-top:6px;">' +
+                    'transport: ' + escapeHtml(executionResult.transport_mode || "n/a") +
+                    ' • performed_live: ' + escapeHtml(executionResult.performed_live ? "yes" : "no") +
+                    ' • execution: ' + escapeHtml(executionResult.live_execution_status || executionResult.status || "n/a") +
+                  '</div>'
+                  : '') +
                 '<div class="summary" style="margin-top:6px;">' + escapeHtml(intent.summary || (intent.benchmark_state && intent.benchmark_state.summary) || "No summary.") + '</div>' +
                 '<div class="intent-actions">' +
                   (canAct ? '<button type="button" data-live-approve="' + escapeHtml(intentId) + '">Approve</button>' : '') +
@@ -2754,10 +3808,17 @@
             var blockers = surfaceBlockersFrom(entry, name);
             var projectedPath = entry.execution_projection_selected_path || entry.execution_projection && entry.execution_projection.selected_path || entry.live_path && entry.live_path.path || entry.paper_path && entry.paper_path.path || entry.shadow_path && entry.shadow_path.path || "n/a";
             var strategy = strategySummaryFrom(entry);
+            var family = strategyFamilyLabel(strategy && strategy.primary_strategy);
             return '' +
               '<article class="surface-card">' +
                 '<h3>' + escapeHtml(name) + '</h3>' +
                 '<div class="surface-status">' + pill("status", status, toneForStatus(status)) + '</div>' +
+                '<div class="surface-badges">' +
+                  (strategy && strategy.primary_strategy ? pill("strategy", strategy.primary_strategy, "neutral") : pill("strategy", "n/a", "neutral")) +
+                  (strategy && strategy.primary_strategy ? pill("family", family, "neutral") : "") +
+                  (strategy && strategy.market_regime ? pill("regime", strategy.market_regime, "neutral") : "") +
+                  (strategy && strategy.execution_intent_preview_kind ? pill("intent", strategy.execution_intent_preview_kind, "neutral") : "") +
+                '</div>' +
                 '<div class="surface-line"><span class="label">Projected path</span><span class="value">' + escapeHtml(projectedPath) + '</span></div>' +
                 '<div class="surface-line"><span class="label">Benchmark ready</span><span class="value">' + escapeHtml(entry.benchmark_promotion_ready === true ? "yes" : "no") + '</span></div>' +
                 '<div class="surface-line"><span class="label">Preview source</span><span class="value">' + escapeHtml(entry.execution_projection_selected_preview_source || entry.live_trade_intent_preview_source || entry.paper_trade_intent_preview_source || entry.shadow_trade_intent_preview_source || "n/a") + '</span></div>' +
@@ -2928,6 +3989,9 @@
             if (elements.arbitrageOverview) {
               elements.arbitrageOverview.innerHTML = '<div class="empty-state">' + escapeHtml(error || "Arbitrage snapshot will appear here.") + '</div>';
             }
+            if (elements.arbitrageQualityRanking) {
+              elements.arbitrageQualityRanking.innerHTML = '<div class="empty-state">' + escapeHtml(error || "Quality ranking will appear here.") + '</div>';
+            }
             if (elements.arbitrageDeskAlert) {
               elements.arbitrageDeskAlert.innerHTML = '<div class="empty-state">' + escapeHtml(error || "Top shadow-ready candidate will appear here.") + '</div>';
             }
@@ -2940,6 +4004,11 @@
           var overview = snapshot.overview || {};
           var allCandidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : [];
           var candidates = getFilteredArbitrageCandidates(snapshot);
+          var qualityCandidates = candidates.slice().sort(function (left, right) {
+            return (right.quality_score || -Infinity) - (left.quality_score || -Infinity)
+              || (right.shadow_edge_bps || -Infinity) - (left.shadow_edge_bps || -Infinity)
+              || (right.confidence_score || -Infinity) - (left.confidence_score || -Infinity);
+          });
           var bestShadowReady = candidates.find(function (candidate) {
             return candidate.shadow_ready;
           }) || null;
@@ -2971,6 +4040,23 @@
               summaryLine("Freshness", snapshot.freshness || "n/a"),
               summaryLine("Errors", String(Array.isArray(overview.errors) ? overview.errors.length : 0))
             ].join("") + listBlock(overview.errors || []);
+          }
+          if (elements.arbitrageQualityRanking) {
+            elements.arbitrageQualityRanking.innerHTML = qualityCandidates.length
+              ? qualityCandidates.slice(0, 5).map(function (candidate, index) {
+                  return [
+                    summaryLine("#" + String(index + 1), (candidate.candidate_id || candidate.canonical_event_key || "candidate") + " • score " + formatMaybeNumber(candidate.quality_score, 1)),
+                    summaryLine("Route", [candidate.buy_venue, candidate.sell_venue].filter(Boolean).join(" / ") || "n/a"),
+                    summaryLine("Edge / confidence", [
+                      candidate.shadow_edge_bps != null ? formatMaybeNumber(candidate.shadow_edge_bps, 0) + " bps shadow" : "n/a",
+                      candidate.confidence_score != null ? formatPercent(candidate.confidence_score) + " confidence" : "n/a"
+                    ].join(" / ")),
+                    summaryLine("Signals", joinList(candidate.quality_signals || candidate.quality_reasons, 4)),
+                    summaryLine("Actionability", joinList(candidate.actionability_signals, 4)),
+                    summaryLine("Status", arbitrageDeskStatus(candidate) + (candidate.manual_review_required ? " / manual review" : "")),
+                  ].join("");
+                }).join('<div class="summary-divider"></div>')
+              : '<div class="empty-state">No quality-ranked candidates yet.</div>';
           }
           if (elements.arbitrageDeskAlert) {
             elements.arbitrageDeskAlert.innerHTML = bestShadowReady
@@ -3212,8 +4298,9 @@
               renderRunSummary(detail.run || detail);
               renderBenchmarkSummary(detail.run || detail);
               renderResearchSummary(detail.run || detail);
+              renderValidationSummary(detail);
               renderExecutionSummary(detail.run || detail);
-              renderStrategySection(detail.run || detail, overview);
+              renderStrategySection(detail.run || detail, overview, runs);
               renderSummaryPanels(detail);
               renderSurfaces({ surfaces: detail.surfaces || {} });
               renderVenueContext({
@@ -3238,8 +4325,9 @@
               renderRunSummary(null);
               renderBenchmarkSummary(null);
               renderResearchSummary(null);
+              renderValidationSummary(null);
               renderExecutionSummary(null);
-              renderStrategySection(null, overview);
+              renderStrategySection(null, overview, runs);
               renderSummaryPanels(null);
               renderSurfaces(null);
               renderVenueContext(venueSnapshot);
@@ -3396,6 +4484,14 @@
           });
         }
 
+        if (elements.runSortSelect) {
+          elements.runSortSelect.addEventListener("change", function () {
+            state.runSort = elements.runSortSelect.value || "updated_desc";
+            syncControls();
+            refreshDashboard();
+          });
+        }
+
         if (elements.dateWindowInput) {
           elements.dateWindowInput.addEventListener("change", function () {
             state.dateWindow = elements.dateWindowInput.value.trim();
@@ -3412,6 +4508,7 @@
             state.surfaceStatus = "";
             state.strategyFilter = "";
             state.regimeFilter = "";
+            state.runSort = "updated_desc";
             state.dateWindow = "";
             syncControls();
             refreshDashboard();

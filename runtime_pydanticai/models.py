@@ -36,6 +36,8 @@ class RuntimeModelConfig(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     source: str = "openclaw"
+    config_path: str | None = None
+    openclaw_path: str | None = None
 
 
 class RuntimeHealthReport(BaseModel):

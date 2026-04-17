@@ -7,6 +7,7 @@ import {
 } from '@/lib/prediction-markets/contract-examples'
 import {
   autonomousAgentReportSchema,
+  approvalTradeTicketSchema,
   basketIntentPreviewSchema,
   capitalLedgerSnapshotSchema,
   crossVenueMarketRefSchema,
@@ -23,6 +24,8 @@ import {
   predictionMarketArtifactRefSchema,
   predictionMarketPacketBundleSchema,
   predictionMarketBudgetsSchema,
+  predictionMarketResearchPipelineSummarySchema,
+  predictionMarketResearchPipelineTraceSchema,
   predictionMarketRunSummarySchema,
   predictionMarketsAdviceRequestSchema,
   predictionMarketsReplayRequestSchema,
@@ -67,6 +70,7 @@ const contractSchemas: Record<
   venueHealthSnapshot: venueHealthSnapshotSchema,
   capitalLedgerSnapshot: capitalLedgerSnapshotSchema,
   tradeIntent: tradeIntentSchema,
+  approvalTradeTicket: approvalTradeTicketSchema,
   forecastPacket: forecastPacketSchema,
   marketRecommendationPacket: marketRecommendationPacketSchema,
   predictionMarketArtifactRef: predictionMarketArtifactRefSchema,
@@ -74,6 +78,8 @@ const contractSchemas: Record<
   predictionMarketRunSummary: predictionMarketRunSummarySchema,
   predictionMarketsAdviceRequest: predictionMarketsAdviceRequestSchema,
   predictionMarketsReplayRequest: predictionMarketsReplayRequestSchema,
+  predictionMarketResearchPipelineTrace: predictionMarketResearchPipelineTraceSchema,
+  predictionMarketResearchPipelineSummary: predictionMarketResearchPipelineSummarySchema,
 }
 
 describe('prediction market contract examples', () => {
@@ -81,6 +87,28 @@ describe('prediction market contract examples', () => {
     for (const name of predictionMarketContractExampleNames) {
       expect(() => contractSchemas[name].parse(predictionMarketContractExamples[name])).not.toThrow()
     }
+  })
+
+  it('accepts the product-facing predict and predict-deep request contract aliases', () => {
+    const shallow = predictionMarketsAdviceRequestSchema.parse({
+      venue: 'polymarket',
+      market_id: 'alias-contract-market',
+      request_mode: 'predict',
+      response_variant: 'standard',
+    })
+    const deep = predictionMarketsAdviceRequestSchema.parse({
+      venue: 'polymarket',
+      market_id: 'alias-contract-market',
+      request_mode: 'predict-deep',
+      response_variant: 'research-heavy',
+      variant_tags: ['polfish', 'mirofish-pm'],
+    })
+
+    expect(shallow.request_mode).toBe('predict')
+    expect(shallow.response_variant).toBe('standard')
+    expect(deep.request_mode).toBe('predict_deep')
+    expect(deep.response_variant).toBe('research_heavy')
+    expect(deep.variant_tags).toEqual(['polfish', 'mirofish-pm'])
   })
 
   it('documents required fields that are present in the canonical examples', () => {
@@ -123,9 +151,15 @@ describe('prediction market contract examples', () => {
     expect(predictionMarketContractExamples.tradeIntent.market_id).toBe(
       predictionMarketContractExamples.marketDescriptor.market_id,
     )
+    expect(predictionMarketContractExamples.approvalTradeTicket.market_id).toBe(
+      predictionMarketContractExamples.marketDescriptor.market_id,
+    )
+    expect(predictionMarketContractExamples.approvalTradeTicket.approval_state.status).toBe('approved')
     expect(predictionMarketContractExamples.predictionMarketsAdviceRequest.market_id).toBe(
       predictionMarketContractExamples.marketDescriptor.market_id,
     )
+    expect(predictionMarketContractExamples.predictionMarketsAdviceRequest.request_mode).toBe('predict_deep')
+    expect(predictionMarketContractExamples.predictionMarketsAdviceRequest.response_variant).toBe('research_heavy')
     expect(predictionMarketContractExamples.predictionMarketRunSummary.manifest.run_id).toBe(
       predictionMarketContractExamples.runManifest.run_id,
     )
@@ -134,6 +168,12 @@ describe('prediction market contract examples', () => {
     )
     expect(predictionMarketContractExamples.predictionMarketsReplayRequest.run_id).toBe(
       predictionMarketContractExamples.runManifest.run_id,
+    )
+    expect(predictionMarketContractExamples.predictionMarketResearchPipelineTrace.market_id).toBe(
+      predictionMarketContractExamples.marketDescriptor.market_id,
+    )
+    expect(predictionMarketContractExamples.predictionMarketResearchPipelineSummary.trace_id).toBe(
+      predictionMarketContractExamples.predictionMarketResearchPipelineTrace.trace_id,
     )
   })
 
