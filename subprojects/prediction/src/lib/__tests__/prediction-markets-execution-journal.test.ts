@@ -83,6 +83,48 @@ describe('prediction markets execution journal', () => {
     expect(entries).toHaveLength(1)
   })
 
+  it('appends a new entry when existing execution previews belong to another run', () => {
+    const preview = makePreview({
+      preview_id: 'run-002:trade-preview',
+      run_id: 'run-002',
+      trade_intent_preview: {
+        ...makePreview().trade_intent_preview,
+        run_id: 'run-002',
+        intent_id: 'intent-002',
+      },
+    })
+
+    const existing = [
+      {
+        run_id: 'run-001',
+        entry_kind: 'execution_intent_preview' as const,
+        preview_id: 'run-001:trade-preview',
+        preview_kind: 'trade' as const,
+        execution_readiness_verdict: 'blocked' as const,
+        reconciliation_status: 'low' as const,
+        venue: 'polymarket',
+        market_id: 'market-001',
+        summary: 'Existing entry from an earlier run',
+      },
+    ]
+
+    const entries = appendExecutionJournalEntries({
+      existing,
+      runId: 'run-002',
+      preview,
+      executionReadinessVerdict: 'ready',
+      reconciliationStatus: 'none',
+    })
+
+    expect(entries).toHaveLength(2)
+    expect(entries[1]).toMatchObject({
+      run_id: 'run-002',
+      preview_id: 'run-002:trade-preview',
+      execution_readiness_verdict: 'ready',
+      reconciliation_status: 'none',
+    })
+  })
+
   it('returns existing entries unchanged when preview is absent', () => {
     const existing = [
       {

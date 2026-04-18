@@ -140,6 +140,26 @@ describe('prediction markets reconciliation gate', () => {
     })
   })
 
+  it('blocks live mode when drift is open even if severity is none', () => {
+    const gate = evaluateReconciliationGate({
+      mode: 'live',
+      reconciliation: makeReconciliation({
+        severity: 'none',
+        within_tolerance: false,
+        summary: 'Ledger drift is present but severity remains uncategorized.',
+      }),
+    })
+
+    expect(gate.verdict).toBe('block')
+    expect(gate.blockers).toEqual(expect.arrayContaining([
+      'reconciliation:open_drift:live_mode_blocked',
+      'reconciliation:none:live_mode_blocked',
+    ]))
+    expect(gate.warnings).toEqual(expect.arrayContaining([
+      'reconciliation:Ledger drift is present but severity remains uncategorized.',
+    ]))
+  })
+
   it('passes when reconciliation is within tolerance', () => {
     const gate = evaluateReconciliationGate({
       mode: 'live',
