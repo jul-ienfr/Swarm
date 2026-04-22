@@ -38,7 +38,7 @@ describe('prediction markets CRYPTO screener', () => {
     })
   })
 
-  it('enriches seeded opportunities with live venue markets when available', async () => {
+  it('does not attach a dated price-target market to the cross-venue dislocation opportunity', async () => {
     serviceMocks.listPredictionMarketUniverse.mockImplementation(async ({ venue, search }: { venue: string; search: string }) => {
       if (venue === 'kalshi' && (search === 'BTC' || search === 'Bitcoin')) {
         return {
@@ -65,17 +65,14 @@ describe('prediction markets CRYPTO screener', () => {
     const { buildPredictionCryptoScreenerLive } = await import('@/lib/prediction-markets/crypto')
     const result = await buildPredictionCryptoScreenerLive({ venue: 'kalshi', asset: 'BTC', limit: 5 })
 
-    expect(result.snapshot_id).toBe('crypto-screener-live-v1')
+    expect(result.snapshot_id).toBe('crypto-screener-seeded-v1')
     expect(result.total).toBe(1)
     expect(result.opportunities[0]).toMatchObject({
       opportunity_id: 'crypto:kalshi:btc:cross-venue-crypto-dislocations',
-      source_mode: 'live',
-      matched_market_count: 1,
-      top_market: {
-        market_id: 'KXBTCDIP-2026-12-31',
-        question: 'Will Bitcoin reach $120,000 by December 31, 2026?',
-      },
+      source_mode: 'seeded',
+      matched_market_count: 0,
+      top_market: null,
     })
-    expect(result.opportunities[0].score).toBeGreaterThan(123)
+    expect(result.opportunities[0].score).toBe(123)
   })
 })

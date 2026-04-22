@@ -304,11 +304,15 @@ function scoreLiveMarketMatch(input: {
   const aliases = assetAliases[input.asset].map((alias) => alias.toLowerCase())
   const keywords = archetypeKeywords[input.archetype]
 
-  let score = 0
-  if (aliases.some((alias) => question.includes(alias))) score += 30
-  for (const keyword of keywords) {
-    if (question.includes(keyword)) score += 8
+  const hasAssetAliasMatch = aliases.some((alias) => question.includes(alias))
+  const matchedKeywordCount = keywords.reduce((count, keyword) => count + (question.includes(keyword) ? 1 : 0), 0)
+  const requiresArchetypeKeyword = input.archetype === 'cross-venue crypto dislocations'
+
+  if (!hasAssetAliasMatch || (requiresArchetypeKeyword && matchedKeywordCount === 0)) {
+    return 0
   }
+
+  let score = 30 + (matchedKeywordCount * 8)
   if (input.market.liquidity_usd != null) {
     if (input.market.liquidity_usd >= 100_000) score += 10
     else if (input.market.liquidity_usd >= 25_000) score += 6

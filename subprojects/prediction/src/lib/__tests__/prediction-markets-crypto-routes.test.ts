@@ -110,7 +110,7 @@ describe('prediction markets CRYPTO screener routes', () => {
     })
   })
 
-  it('returns a live-enriched screener payload by default', async () => {
+  it('returns the seeded screener payload when live markets do not match the crypto archetype', async () => {
     const { GET } = await import('@/app/api/v1/prediction-markets/crypto/screener/route')
     const request = new NextRequest('http://localhost/api/v1/prediction-markets/crypto/screener?venue=kalshi&asset=BTC&limit=5')
     const response = await GET(request)
@@ -122,20 +122,20 @@ describe('prediction markets CRYPTO screener routes', () => {
     expect(mocks.readLimiter).toHaveBeenCalledWith(request)
     expect(body).toMatchObject({
       screener: {
-        snapshot_id: 'crypto-screener-live-v1',
+        snapshot_id: 'crypto-screener-seeded-v1',
         total: 1,
         opportunities: [
           {
             opportunity_id: 'crypto:kalshi:btc:cross-venue-crypto-dislocations',
-            source_mode: 'live',
-            matched_market_count: 1,
+            source_mode: 'seeded',
+            matched_market_count: 0,
           },
         ],
       },
     })
   })
 
-  it('returns a live-enriched opportunity detail payload and 404s when missing', async () => {
+  it('returns the seeded opportunity detail payload when live markets do not match and 404s when missing', async () => {
     const { GET } = await import('@/app/api/v1/prediction-markets/crypto/opportunities/[opportunity_id]/route')
     const request = new NextRequest('http://localhost/api/v1/prediction-markets/crypto/opportunities/crypto:kalshi:btc:cross-venue-crypto-dislocations')
     const response = await GET(request, {
@@ -149,10 +149,8 @@ describe('prediction markets CRYPTO screener routes', () => {
       opportunity: {
         label: 'BTC cross-venue dislocation watch',
         conviction: 'high',
-        source_mode: 'live',
-        top_market: {
-          market_id: 'KXBTC-2026-DEC',
-        },
+        source_mode: 'seeded',
+        top_market: null,
       },
     })
 
