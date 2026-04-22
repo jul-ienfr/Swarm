@@ -1,0 +1,12 @@
+[package]
+name = "pm_storage"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pm_executor = { path = "../pm_executor" }
+pm_ledger = { path = "../pm_ledger" }
+pm_signal = { path = "../pm_signal" }
+pm_types = { path = "../pm_types" }
+serde.workspace = true
+serde_json.workspace = true
