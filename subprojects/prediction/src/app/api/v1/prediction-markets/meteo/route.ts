@@ -3,8 +3,41 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import { toPredictionMarketsErrorResponse } from '@/lib/prediction-markets/errors'
-import { buildMeteoBestBetsSummary, buildMeteoPricingReportFromProviders } from '@/lib/prediction-markets/meteo'
+import {
+  analyzeMeteoResolutionSource,
+  buildMeteoBestBetsSummary,
+  buildMeteoExecutionCandidates,
+  buildMeteoExecutionSummary,
+  buildMeteoPricingReportFromProviders,
+  buildMeteoStationMetadata,
+  detectMeteoMarketAnomalies,
+  extractMeteoResolutionSource,
+} from '@/lib/prediction-markets/meteo'
+import { toPolymarketQuoteMarketEvent } from '@/lib/prediction-markets/polymarket-market-event'
 import { readLimiter } from '@/lib/rate-limit'
+
+ type PolymarketQuoteEventInput = {
+  event_id?: string
+  ts?: string
+  venue?: 'polymarket'
+  market_id?: string
+  event_type?: 'quote'
+  best_bid?: number | null
+  best_ask?: number | null
+  last_trade_price?: number | null
+  bid_size?: number | null
+  ask_size?: number | null
+  quote_age_ms?: number | null
+}
+
+ type PolymarketEventInput = {
+  title?: string
+  description?: string
+  rules?: string
+  resolution_source?: string
+  market_id?: string
+  quote_event?: PolymarketQuoteEventInput
+}
 
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
@@ -23,11 +56,21 @@ export async function GET(request: NextRequest) {
     const openMeteoModels = splitCsv(searchParams.get('open_meteo_models'))
     const includeNws = optionalBoolean(searchParams.get('include_nws'))
     const includeMeteostat = optionalBoolean(searchParams.get('include_meteostat'))
+    const includeExecution = optionalBoolean(searchParams.get('include_execution')) ?? false
     const meteostatStart = searchParams.get('meteostat_start') ?? undefined
     const meteostatEnd = searchParams.get('meteostat_end') ?? undefined
     const cacheTtlMs = optionalInteger(searchParams.get('cache_ttl_ms'), 'cache_ttl_ms')
     const retryCount = optionalInteger(searchParams.get('retry_count'), 'retry_count')
+    const minEdgeBps = optionalInteger(searchParams.get('min_edge_bps'), 'min_edge_bps')
     const marketPrices = parseMarketPrices(searchParams.get('market_prices'))
+    const resolutionSource = searchParams.get('resolution_source') ?? undefined
+    const description = searchParams.get('description') ?? undefined
+    const rules = searchParams.get('rules') ?? undefined
+    const snapshotPayload = parsePolymarketSnapshot(searchParams.get('snapshot_json'))
+    const polymarketEvent = snapshotPayload?.event ?? parsePolymarketEvent(searchParams.get('event_json'))
+    const resolvedResolutionSource = resolutionSource ?? polymarketEvent?.resolution_source ?? undefined
+    const resolvedDescription = description ?? polymarketEvent?.description ?? undefined
+    const resolvedRules = rules ?? polymarketEvent?.rules ?? undefined
 
     const result = await buildMeteoPricingReportFromProviders({
       question,
@@ -45,12 +88,61 @@ export async function GET(request: NextRequest) {
       userAgent: 'swarm-prediction/1.0 (+meteo-route)',
     })
 
+    const resolution = extractMeteoResolutionSource({
+      question,
+      spec: result.spec,
+      resolutionSource: resolvedResolutionSource,
+      description: resolvedDescription,
+      rules: resolvedRules,
+      polymarketEvent,
+    })
+    const station = buildMeteoStationMetadata({
+      question,
+      spec: result.spec,
+      resolutionSource: resolvedResolutionSource,
+      description: resolvedDescription,
+      rules: resolvedRules,
+      polymarketEvent,
+    })
+    const resolutionAnalysis = analyzeMeteoResolutionSource({
+      question,
+      spec: result.spec,
+      resolutionSource: resolvedResolutionSource,
+      description: resolvedDescription,
+      rules: resolvedRules,
+      polymarketEvent,
+    })
+    const executionCandidates = includeExecution
+      ? buildMeteoExecutionCandidates({
+          report: result.report,
+          forecastPoints: result.forecastPoints,
+          minEdgeBps,
+        })
+      : undefined
+    const anomalies = includeExecution ? detectMeteoMarketAnomalies(result.report) : undefined
+    const executionSummary = includeExecution && executionCandidates && anomalies
+      ? buildMeteoExecutionSummary({
+          candidates: executionCandidates,
+          anomalies,
+        })
+      : undefined
+
     return NextResponse.json(
       {
         spec: result.spec,
         forecast_points: result.forecastPoints,
         report: result.report,
+        resolution_source: resolution,
+        station_metadata: station,
+        resolution_analysis: resolutionAnalysis,
         best_bets: buildMeteoBestBetsSummary(result.report),
+        ...(includeExecution
+          ? {
+              execution_candidates: executionCandidates,
+              anomalies,
+              execution_summary: executionSummary,
+            }
+          : {}),
       },
       { headers: { 'X-Prediction-Markets-API': 'v1' } },
     )
@@ -147,4 +239,102 @@ function parseMarketPrices(value: string | null): Record<string, number> | undef
   }))
 
   return normalized
+}
+
+function parsePolymarketEvent(value: string | null): PolymarketEventInput | undefined {
+  if (value == null || value.trim() === '') {
+    return undefined
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new Error('Invalid query parameter: event_json must be valid JSON')
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid query parameter: event_json must be a JSON object')
+  }
+
+  const event = parsed as Record<string, unknown>
+  const quoteEvent = event.quote_event
+  const normalizedQuoteEvent = quoteEvent && typeof quoteEvent === 'object' && !Array.isArray(quoteEvent)
+    ? normalizeQuoteEvent(quoteEvent as Record<string, unknown>)
+    : undefined
+
+  return {
+    title: typeof event.title === 'string' ? event.title : undefined,
+    description: typeof event.description === 'string' ? event.description : undefined,
+    rules: typeof event.rules === 'string' ? event.rules : undefined,
+    resolution_source: typeof event.resolution_source === 'string' ? event.resolution_source : undefined,
+    market_id: typeof event.market_id === 'string' ? event.market_id : undefined,
+    quote_event: normalizedQuoteEvent,
+  }
+}
+
+function parsePolymarketSnapshot(value: string | null): { event?: PolymarketEventInput } | undefined {
+  if (value == null || value.trim() === '') {
+    return undefined
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new Error('Invalid query parameter: snapshot_json must be valid JSON')
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid query parameter: snapshot_json must be a JSON object')
+  }
+
+  const snapshot = parsed as Record<string, unknown>
+  const rawEvent = snapshot.event
+  const normalizedEvent = rawEvent && typeof rawEvent === 'object' && !Array.isArray(rawEvent)
+    ? rawEvent as Record<string, unknown>
+    : undefined
+
+  return {
+    event: {
+      title: typeof normalizedEvent?.title === 'string' ? normalizedEvent.title : undefined,
+      description: typeof normalizedEvent?.description === 'string' ? normalizedEvent.description : undefined,
+      rules: typeof normalizedEvent?.rules === 'string' ? normalizedEvent.rules : undefined,
+      resolution_source: typeof normalizedEvent?.resolution_source === 'string' ? normalizedEvent.resolution_source : undefined,
+      market_id: typeof snapshot.market === 'object' && snapshot.market && !Array.isArray(snapshot.market) && typeof (snapshot.market as Record<string, unknown>).market_id === 'string'
+        ? (snapshot.market as Record<string, unknown>).market_id as string
+        : undefined,
+      quote_event: normalizeQuoteEvent(
+        toPolymarketQuoteMarketEvent(parsed as never) as unknown as Record<string, unknown>,
+      ),
+    },
+  }
+}
+
+function normalizeQuoteEvent(quoteEvent: Record<string, unknown>): PolymarketQuoteEventInput {
+  return {
+    event_id: typeof quoteEvent.event_id === 'string' ? quoteEvent.event_id : undefined,
+    ts: typeof quoteEvent.ts === 'string' ? quoteEvent.ts : undefined,
+    venue: quoteEvent.venue === 'polymarket' ? 'polymarket' : undefined,
+    market_id: typeof quoteEvent.market_id === 'string' ? quoteEvent.market_id : undefined,
+    event_type: quoteEvent.event_type === 'quote' ? 'quote' : undefined,
+    best_bid: toNullableNumber(quoteEvent.best_bid),
+    best_ask: toNullableNumber(quoteEvent.best_ask),
+    last_trade_price: toNullableNumber(quoteEvent.last_trade_price),
+    bid_size: toNullableNumber(quoteEvent.bid_size),
+    ask_size: toNullableNumber(quoteEvent.ask_size),
+    quote_age_ms: toNullableNumber(quoteEvent.quote_age_ms),
+  }
+}
+
+function toNullableNumber(value: unknown): number | null | undefined {
+  if (value == null) {
+    return undefined
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  return null
 }

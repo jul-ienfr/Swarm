@@ -1,6 +1,9 @@
 export type MeteoTemperatureUnit = 'c' | 'f'
 export type MeteoTemperatureKind = 'high' | 'low'
 export type MeteoForecastProviderKind = 'open-meteo' | 'nws' | 'meteostat' | 'official-observation' | 'custom'
+export type MeteoResolutionProvider = 'noaa' | 'wunderground' | 'nws' | 'hong-kong-observatory' | 'unknown'
+export type MeteoResolutionStationType = 'airport' | 'weather-station' | 'unknown'
+export type MeteoResolutionPrecision = 'whole-degree' | 'tenth-degree' | 'unknown'
 
 export type MeteoRangeBound = {
   value: number
@@ -121,6 +124,37 @@ export type MeteoPricingOpportunity = {
   marketPrice: number
 }
 
+export type MeteoExecutionCandidate = {
+  label: string
+  side: 'yes' | 'no'
+  marketPrice: number
+  fairPrice: number
+  edge: number
+  edgeBps: number
+  expectedValue: number
+  expectedRoi: number | null
+  confidence: 'low' | 'medium' | 'high'
+  priority: 'low' | 'medium' | 'high'
+  tradeable: boolean
+  maxEntryPrice: number
+  noTradeAbove: number
+  reasonCodes: string[]
+}
+
+export type MeteoMarketAnomaly = {
+  type: 'adjacent_gap'
+  label: string
+  severity: 'low' | 'medium' | 'high'
+  details: string
+}
+
+export type MeteoExecutionSummary = {
+  candidateCount: number
+  tradeableCount: number
+  highPriorityCount: number
+  anomalyCount: number
+}
+
 export type MeteoBestBetsSummary = {
   summary: string
   actionableCount: number
@@ -150,6 +184,63 @@ export type MeteoPricingReport = {
     providers: string[]
     contributions: MeteoForecastContribution[]
   }
+}
+
+export type MeteoResolutionSource = {
+  provider: MeteoResolutionProvider
+  sourceUrl: string | null
+  stationName: string | null
+  stationCode: string | null
+  stationType: MeteoResolutionStationType
+  measurementField: string | null
+  measurementKind: MeteoTemperatureKind | 'unknown'
+  unit: MeteoTemperatureUnit | null
+  precision: MeteoResolutionPrecision
+  finalizationRule: string | null
+  revisionRule: string | null
+  extractedFrom: Array<'resolutionSource' | 'description' | 'question' | 'rules'>
+  confidence: number
+}
+
+export type MeteoStationMetadata = {
+  stationName: string | null
+  stationCode: string | null
+  stationType: MeteoResolutionStationType
+  countryOrRegion: string | null
+  city: string | null
+  sourceProvider: MeteoResolutionProvider
+  sourceUrl: string | null
+  sourceNetwork: string | null
+  notes: string[]
+}
+
+export type MeteoResolutionAnalysis = {
+  isOfficialSourceIdentified: boolean
+  needsManualReview: boolean
+  confidence: number
+}
+
+export type MeteoPolymarketEventQuoteInput = {
+  event_id?: string | null
+  ts?: string | null
+  venue?: 'polymarket' | null
+  market_id?: string | null
+  event_type?: 'quote' | null
+  best_bid?: number | null
+  best_ask?: number | null
+  last_trade_price?: number | null
+  bid_size?: number | null
+  ask_size?: number | null
+  quote_age_ms?: number | null
+}
+
+export type MeteoPolymarketEventInput = {
+  title?: string | null
+  description?: string | null
+  rules?: string | null
+  resolution_source?: string | null
+  market_id?: string | null
+  quote_event?: MeteoPolymarketEventQuoteInput | null
 }
 
 export type MeteoOpenMeteoTemperaturePayload = {
