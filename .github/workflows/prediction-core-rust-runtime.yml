@@ -1,0 +1,25 @@
+name: prediction-core-rust-runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'prediction_core/rust/**'
+      - 'tests/test_prediction_core_rust_*'
+  pull_request:
+    paths:
+      - 'prediction_core/rust/**'
+      - 'tests/test_prediction_core_rust_*'
+
+jobs:
+  pm-storage-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Verify Docker is available
+        run: docker version
+      - name: Run pm_storage runtime bundle via xtask
+        working-directory: prediction_core/rust
+        run: cargo run -p xtask -- pm-storage-runtime
