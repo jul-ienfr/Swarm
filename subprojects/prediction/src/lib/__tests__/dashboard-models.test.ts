@@ -502,6 +502,38 @@ describe('prediction markets dashboard models', () => {
     expect(overview.validation?.resolved_history?.summary).toContain('Resolved 18 local evaluation records')
     expect(overview.validation?.cost_model?.win_rate).toBeCloseTo(0.666667)
     expect(overview.validation?.monte_carlo?.summary).toContain('Monte Carlo drawdowns')
+    expect(overview.crypto).toMatchObject({
+      subproject_id: 'crypto',
+      subproject_name: 'CRYPTO',
+      venue: 'polymarket',
+      venue_supported: true,
+      seeded_markets_total: 4,
+      seeded_markets_for_venue: 3,
+      focus_assets: ['BTC', 'ETH', 'SOL'],
+      execution_profiles: ['manual-research', 'semi-systematic', 'systematic-monitoring'],
+    })
+    expect(overview.crypto.highlighted_markets.map((market) => market.label)).toEqual([
+      'BTC monthly strike map',
+      'ETH expiry structure harvest',
+      'SOL range bucket monitor',
+    ])
+    expect(overview.crypto.summary).toContain('CRYPTO tracks 3 seeded polymarket markets across 3 focus assets')
+    expect(overview.subprojects.map((subproject) => subproject.id)).toEqual(['crypto', 'sport', 'meteo'])
+    expect(overview.subprojects.find((subproject) => subproject.id === 'sport')).toMatchObject({
+      name: 'Sport',
+      venue_supported: true,
+      seeded_markets_total: 4,
+      seeded_markets_for_venue: 3,
+      focus: ['football', 'basketball', 'tennis', 'combat'],
+    })
+    expect(overview.subprojects.find((subproject) => subproject.id === 'meteo')).toMatchObject({
+      name: 'Météo',
+      venue_supported: true,
+      seeded_markets_total: 0,
+      seeded_markets_for_venue: 0,
+      focus: ['temperature', 'weather'],
+      execution_profiles: ['manual-research', 'semi-systematic', 'systematic-monitoring'],
+    })
     expect(overview.external_integrations.source_scope).toBe('conversation_registry')
     expect(overview.external_integrations.integration.profile_ids).toEqual(
       expect.arrayContaining(['polymarket-clob-client', 'geomapdata-cn']),
