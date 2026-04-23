@@ -872,7 +872,7 @@ def _print_deliberation_campaign_result(report: DeliberationCampaignReport | dic
         f"\n[bold blue]Runtime:[/bold blue] {_summarize_counter(summary.get('runtime_counts', {}))}"
         f"\n[bold blue]Engine:[/bold blue] {_summarize_counter(summary.get('engine_counts', {}))}"
         f"\n[bold blue]Stability:[/bold blue] "
-        f"{_format_kv_line(('samples', stability_summary.get('sample_count', payload.get('sample_count_requested', 'n/a'))), ('stable', stability_summary.get('stable')), ('std_dev', f'{float(stability_summary.get('std_dev', 0.0) or 0.0):.3f}'), ('comparison', stability_summary.get('comparison_key')))}"
+        f"{_format_kv_line(('samples', stability_summary.get('sample_count', payload.get('sample_count_requested', 'n/a'))), ('stable', stability_summary.get('stable')), ('std_dev', format(float(stability_summary.get('std_dev', 0.0) or 0.0), '.3f')), ('comparison', stability_summary.get('comparison_key')))}"
     )
     console.print(Panel(panel_body))
     report_path = payload.get("report_path")

@@ -4,7 +4,10 @@ import os
 import sqlite3
 from typing import Any
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver as _CheckpointSaver
+except ModuleNotFoundError:  # langgraph>=1 split sqlite saver out of the base package
+    from langgraph.checkpoint.memory import InMemorySaver as _CheckpointSaver
 from langgraph.graph import StateGraph
 
 from ledger_state import SupervisorState
@@ -24,9 +27,12 @@ from workers.video_assembler import VideoAssembler
 
 
 def _build_checkpointer(checkpoints_path: str):
+    if _CheckpointSaver.__name__ == "InMemorySaver":
+        return _CheckpointSaver()
+
     os.makedirs(os.path.dirname(checkpoints_path), exist_ok=True)
     conn = sqlite3.connect(checkpoints_path, check_same_thread=False)
-    return SqliteSaver(conn)
+    return _CheckpointSaver(conn)
 
 
 def _add_custom_nodes(workflow: StateGraph, config_path: str) -> list[str]:
