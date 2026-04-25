@@ -9,6 +9,8 @@ import type {
   MeteoNwsFetchParams,
   MeteoNwsPointMetadata,
   MeteoNwsTemperaturePayload,
+  MeteoResolutionSourceObservation,
+  MeteoResolutionSourceRoute,
   MeteoOpenMeteoFetchParams,
   MeteoOpenMeteoTemperaturePayload,
   MeteoTemperatureKind,
@@ -193,6 +195,237 @@ export async function fetchMeteostatHistoricalPoint(params: MeteoMeteostatFetchP
   })
 }
 
+export async function fetchMeteoResolutionSourceObservation(input: {
+  route: MeteoResolutionSourceRoute
+  unit: MeteoTemperatureUnit
+  fetchImpl?: typeof fetch
+  cacheTtlMs?: number
+  retryCount?: number
+  now?: Date
+  weatherApiKey?: string
+}): Promise<MeteoResolutionSourceObservation> {
+  if (!input.route.primary_poll_url) {
+    throw new Error('Resolution source route does not define a primary polling URL')
+  }
+
+  const fetchUrl = buildResolutionObservationFetchUrl(input.route, input.weatherApiKey)
+  const payload = await fetchJsonWithMeteoProviderCache<{
+    properties?: {
+      timestamp?: string
+      temperature?: { value?: number | null; unitCode?: string | null }
+    }
+    observations?: Array<{
+      stationID?: string
+      obsTimeUtc?: string
+      obsTimeLocal?: string
+      imperial?: { temp?: number | null }
+      metric?: { temp?: number | null }
+    }>
+    temperature?: {
+      recordTime?: string
+      data?: Array<{ place?: string; value?: number | null; unit?: string | null }>
+    }
+  }>({
+    url: fetchUrl,
+    fetchImpl: input.fetchImpl,
+    cacheTtlMs: input.cacheTtlMs ?? Math.max(30_000, (input.route.freshness_sla_seconds ?? 300) * 500),
+    retryCount: input.retryCount ?? 1,
+  })
+
+  if (input.route.provider === 'noaa') {
+    return buildNoaaResolutionObservation({
+      route: input.route,
+      payload,
+      unit: input.unit,
+      now: input.now,
+    })
+  }
+
+  if (input.route.provider === 'wunderground') {
+    return buildWundergroundResolutionObservation({
+      route: input.route,
+      payload,
+      unit: input.unit,
+      now: input.now,
+    })
+  }
+
+  if (input.route.provider === 'hong-kong-observatory') {
+    return buildHkoResolutionObservation({
+      route: input.route,
+      payload,
+      unit: input.unit,
+      now: input.now,
+    })
+  }
+
+  throw new Error(`Direct observation fetch is not implemented for provider: ${input.route.provider}`)
+}
+
+type NoaaResolutionObservationPayload = {
+  properties?: {
+    timestamp?: string
+    temperature?: { value?: number | null; unitCode?: string | null }
+  }
+}
+
+type WundergroundResolutionObservationPayload = {
+  observations?: Array<{
+    stationID?: string
+    obsTimeUtc?: string
+    obsTimeLocal?: string
+    imperial?: { temp?: number | null }
+    metric?: { temp?: number | null }
+  }>
+}
+
+type HkoResolutionObservationPayload = {
+  temperature?: {
+    recordTime?: string
+    data?: Array<{ place?: string; value?: number | null; unit?: string | null }>
+  }
+}
+
+function buildNoaaResolutionObservation(input: {
+  route: MeteoResolutionSourceRoute
+  payload: NoaaResolutionObservationPayload
+  unit: MeteoTemperatureUnit
+  now?: Date
+}): MeteoResolutionSourceObservation {
+  const rawTemperature = input.payload.properties?.temperature?.value
+  if (rawTemperature === null || rawTemperature === undefined || !Number.isFinite(rawTemperature)) {
+    throw new Error('NOAA station observation does not contain usable temperature data')
+  }
+
+  const sourceUnit = input.payload.properties?.temperature?.unitCode?.toLowerCase().includes('degf') ? 'f' : 'c'
+  const observedAt = input.payload.properties?.timestamp ?? null
+
+  return buildResolutionObservation({
+    route: input.route,
+    rawTemperature,
+    sourceUnit,
+    targetUnit: input.unit,
+    observedAt,
+    now: input.now,
+  })
+}
+
+function buildWundergroundResolutionObservation(input: {
+  route: MeteoResolutionSourceRoute
+  payload: WundergroundResolutionObservationPayload
+  unit: MeteoTemperatureUnit
+  now?: Date
+}): MeteoResolutionSourceObservation {
+  const normalizedStationCode = input.route.station_code?.trim().toLowerCase()
+  const observation = input.payload.observations?.find((row) => {
+    const stationId = row.stationID?.trim().toLowerCase()
+    return stationId ? stationId === normalizedStationCode : false
+  }) ?? input.payload.observations?.[0]
+  const rawMetricTemperature = observation?.metric?.temp
+  const rawImperialTemperature = observation?.imperial?.temp
+  const rawTemperature = rawMetricTemperature ?? rawImperialTemperature
+  if (rawTemperature === null || rawTemperature === undefined || !Number.isFinite(rawTemperature)) {
+    throw new Error('Wunderground station observation does not contain usable temperature data')
+  }
+
+  return buildResolutionObservation({
+    route: input.route,
+    rawTemperature,
+    sourceUnit: rawMetricTemperature !== null && rawMetricTemperature !== undefined ? 'c' : 'f',
+    targetUnit: input.unit,
+    observedAt: observation?.obsTimeUtc ?? observation?.obsTimeLocal ?? null,
+    now: input.now,
+  })
+}
+
+function buildHkoResolutionObservation(input: {
+  route: MeteoResolutionSourceRoute
+  payload: HkoResolutionObservationPayload
+  unit: MeteoTemperatureUnit
+  now?: Date
+}): MeteoResolutionSourceObservation {
+  const rows = input.payload.temperature?.data ?? []
+  const normalizedStationCode = input.route.station_code?.trim().toLowerCase()
+  const preferredRow = rows.find((row) => {
+    const place = row.place?.trim().toLowerCase()
+    if (!place) return false
+    if (place === normalizedStationCode) return true
+    return place.includes('hong kong observatory') || place === 'hko'
+  }) ?? rows[0]
+  const rawTemperature = preferredRow?.value
+  if (rawTemperature === null || rawTemperature === undefined || !Number.isFinite(rawTemperature)) {
+    throw new Error('HKO current weather payload does not contain usable temperature data')
+  }
+
+  const sourceUnit = normalizeTemperatureUnit(preferredRow?.unit) ?? 'c'
+  const observedAt = input.payload.temperature?.recordTime ?? null
+
+  return buildResolutionObservation({
+    route: input.route,
+    rawTemperature,
+    sourceUnit,
+    targetUnit: input.unit,
+    observedAt,
+    now: input.now,
+  })
+}
+
+function buildResolutionObservationFetchUrl(route: MeteoResolutionSourceRoute, weatherApiKey?: string): string {
+  const primaryPollUrl = route.primary_poll_url
+  if (!primaryPollUrl) {
+    throw new Error('Resolution source route does not define a primary polling URL')
+  }
+
+  const normalizedApiKey = weatherApiKey?.trim()
+  if (route.provider !== 'wunderground' || !normalizedApiKey) return primaryPollUrl
+
+  const url = new URL(primaryPollUrl)
+  if (!url.searchParams.has('apiKey')) {
+    url.searchParams.set('apiKey', normalizedApiKey)
+  }
+  return url.toString()
+}
+
+function buildResolutionObservation(input: {
+  route: MeteoResolutionSourceRoute
+  rawTemperature: number
+  sourceUnit: MeteoTemperatureUnit
+  targetUnit: MeteoTemperatureUnit
+  observedAt: string | null
+  now?: Date
+}): MeteoResolutionSourceObservation {
+  const temperature = input.targetUnit === input.sourceUnit
+    ? input.rawTemperature
+    : input.targetUnit === 'f'
+      ? celsiusToFahrenheit(input.rawTemperature)
+      : fahrenheitToCelsius(input.rawTemperature)
+  const ageSeconds = input.observedAt && input.now
+    ? Math.max(0, Math.floor((input.now.getTime() - new Date(input.observedAt).getTime()) / 1000))
+    : null
+
+  return {
+    provider: input.route.provider,
+    station_code: input.route.station_code,
+    observed_at: input.observedAt,
+    temperature: round4(temperature),
+    unit: input.targetUnit,
+    source_url: input.route.primary_poll_url ?? '',
+    age_seconds: ageSeconds,
+    is_fresh: ageSeconds === null || input.route.freshness_sla_seconds === null
+      ? null
+      : ageSeconds <= input.route.freshness_sla_seconds,
+  }
+}
+
+export function observationToForecastPoint(observation: MeteoResolutionSourceObservation): MeteoForecastPoint {
+  return {
+    provider: `official-observation:${observation.provider}:${observation.station_code ?? 'unknown'}`,
+    mean: observation.temperature,
+    stddev: observation.is_fresh === false ? 0.8 : 0.35,
+    weight: observation.is_fresh === false ? 3 : 8,
+  }
+}
+
 export async function fetchNwsPointMetadata(input: {
   latitude: number
   longitude: number
@@ -293,6 +526,10 @@ function buildNwsHeaders(userAgent?: string): HeadersInit {
 
 function celsiusToFahrenheit(value: number): number {
   return value * 9 / 5 + 32
+}
+
+function fahrenheitToCelsius(value: number): number {
+  return (value - 32) * 5 / 9
 }
 
 function celsiusToFahrenheitIfNeeded(value: number, unit: MeteoTemperatureUnit): number {

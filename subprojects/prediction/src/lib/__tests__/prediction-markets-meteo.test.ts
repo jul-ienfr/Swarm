@@ -9,6 +9,9 @@ import {
   clearMeteoProviderCache,
   fetchJsonWithMeteoProviderCache,
   fetchMeteostatHistoricalPoint,
+  buildMeteoResolutionSourceRoute,
+  fetchMeteoResolutionSourceObservation,
+  observationToForecastPoint,
   fetchNwsForecastPoint,
   fetchOpenMeteoForecastPoint,
   normalizeMeteostatDailyPayload,
@@ -605,6 +608,261 @@ describe('prediction markets meteo', () => {
     expect(report.opportunities[0]).toMatchObject({
       label: '70+F',
       side: 'yes',
+    })
+  })
+
+  it('builds a low-latency NOAA station source route from an identified resolution station', () => {
+    const route = buildMeteoResolutionSourceRoute({
+      provider: 'noaa',
+      sourceUrl: 'https://www.weather.gov/wrh/Climate?wfo=okx&obs=KNYC',
+      stationName: 'New York City Central Park Station',
+      stationCode: 'KNYC',
+      stationType: 'airport',
+      measurementField: 'Daily Maximum Temperature',
+      measurementKind: 'high',
+      unit: 'f',
+      precision: 'whole-degree',
+      finalizationRule: 'Finalized after NOAA daily climate report publication.',
+      revisionRule: null,
+      extractedFrom: ['resolutionSource', 'description', 'rules'],
+      confidence: 0.95,
+    })
+
+    expect(route).toEqual({
+      provider: 'noaa',
+      station_code: 'KNYC',
+      primary_poll_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
+      fallback_poll_urls: ['https://www.weather.gov/wrh/Climate?wfo=okx&obs=KNYC'],
+      measurement_path: 'properties.temperature.value',
+      expected_lag_seconds: 900,
+      freshness_sla_seconds: 1200,
+      official_lag_seconds: null,
+    })
+  })
+
+  it('builds Wunderground and HKO source routes with provider-specific latency metadata', () => {
+    const wundergroundRoute = buildMeteoResolutionSourceRoute({
+      provider: 'wunderground',
+      sourceUrl: 'https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX',
+      stationName: 'Los Angeles Airport Station',
+      stationCode: 'KLAX',
+      stationType: 'airport',
+      measurementField: 'Daily Maximum Temperature',
+      measurementKind: 'high',
+      unit: 'f',
+      precision: 'whole-degree',
+      finalizationRule: null,
+      revisionRule: null,
+      extractedFrom: ['resolutionSource'],
+      confidence: 0.92,
+    })
+    const hkoRoute = buildMeteoResolutionSourceRoute({
+      provider: 'hong-kong-observatory',
+      sourceUrl: 'https://www.hko.gov.hk/en/wxinfo/ts/index.htm',
+      stationName: 'Hong Kong Observatory',
+      stationCode: 'HKO',
+      stationType: 'weather-station',
+      measurementField: 'Daily Maximum Temperature',
+      measurementKind: 'high',
+      unit: 'c',
+      precision: 'tenth-degree',
+      finalizationRule: 'Daily extract is official after publication.',
+      revisionRule: null,
+      extractedFrom: ['resolutionSource', 'description'],
+      confidence: 0.9,
+    })
+
+    expect(wundergroundRoute).toEqual({
+      provider: 'wunderground',
+      station_code: 'KLAX',
+      primary_poll_url: 'https://api.weather.com/v2/pws/observations/current?stationId=KLAX&format=json&units=e',
+      fallback_poll_urls: ['https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX'],
+      measurement_path: 'observations[0].imperial.temp',
+      expected_lag_seconds: 1800,
+      freshness_sla_seconds: 3600,
+      official_lag_seconds: null,
+    })
+    expect(hkoRoute).toEqual({
+      provider: 'hong-kong-observatory',
+      station_code: 'HKO',
+      primary_poll_url: 'https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en',
+      fallback_poll_urls: [
+        'https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMTEMP&lang=en',
+        'https://www.hko.gov.hk/en/wxinfo/ts/index.htm',
+      ],
+      measurement_path: 'temperature.data[].value filtered by place/station',
+      expected_lag_seconds: 600,
+      freshness_sla_seconds: 1200,
+      official_lag_seconds: 86400,
+    })
+  })
+
+  it('fetches a direct NOAA station observation from the resolution source route', async () => {
+    const route = buildMeteoResolutionSourceRoute({
+      provider: 'noaa',
+      sourceUrl: 'https://www.weather.gov/wrh/Climate?wfo=okx&obs=KNYC',
+      stationName: 'New York City Central Park Station',
+      stationCode: 'KNYC',
+      stationType: 'airport',
+      measurementField: 'Daily Maximum Temperature',
+      measurementKind: 'high',
+      unit: 'f',
+      precision: 'whole-degree',
+      finalizationRule: null,
+      revisionRule: null,
+      extractedFrom: ['resolutionSource'],
+      confidence: 0.95,
+    })
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      properties: {
+        station: 'https://api.weather.gov/stations/KNYC',
+        timestamp: '2026-04-21T20:51:00+00:00',
+        temperature: { value: 21.7, unitCode: 'wmoUnit:degC' },
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/geo+json' },
+    }))
+
+    const observation = await fetchMeteoResolutionSourceObservation({
+      route,
+      unit: 'f',
+      fetchImpl,
+      cacheTtlMs: 1,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledWith('https://api.weather.gov/stations/KNYC/observations/latest', undefined)
+    expect(observation).toEqual({
+      provider: 'noaa',
+      station_code: 'KNYC',
+      observed_at: '2026-04-21T20:51:00+00:00',
+      temperature: 71.06,
+      unit: 'f',
+      source_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
+      age_seconds: null,
+      is_fresh: null,
+    })
+  })
+
+  it('fetches a direct Wunderground station observation from the resolution source route', async () => {
+    const route = buildMeteoResolutionSourceRoute({
+      provider: 'wunderground',
+      sourceUrl: 'https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX',
+      stationName: 'Los Angeles Airport Station',
+      stationCode: 'KLAX',
+      stationType: 'airport',
+      measurementField: 'Daily Maximum Temperature',
+      measurementKind: 'high',
+      unit: 'f',
+      precision: 'whole-degree',
+      finalizationRule: null,
+      revisionRule: null,
+      extractedFrom: ['resolutionSource'],
+      confidence: 0.92,
+    })
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      observations: [
+        {
+          stationID: 'KLAX',
+          obsTimeUtc: '2026-04-21T21:53:00Z',
+          imperial: { temp: 69.8 },
+          metric: { temp: 21 },
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const observation = await fetchMeteoResolutionSourceObservation({
+      route,
+      unit: 'c',
+      fetchImpl,
+      cacheTtlMs: 1,
+      now: new Date('2026-04-21T22:30:00Z'),
+      weatherApiKey: 'weather-secret',
+    })
+
+    expect(fetchImpl).toHaveBeenCalledWith('https://api.weather.com/v2/pws/observations/current?stationId=KLAX&format=json&units=e&apiKey=weather-secret', undefined)
+    expect(observation).toEqual({
+      provider: 'wunderground',
+      station_code: 'KLAX',
+      observed_at: '2026-04-21T21:53:00Z',
+      temperature: 21,
+      unit: 'c',
+      source_url: 'https://api.weather.com/v2/pws/observations/current?stationId=KLAX&format=json&units=e',
+      age_seconds: 2220,
+      is_fresh: true,
+    })
+  })
+
+  it('fetches a direct HKO station observation from the current-weather resolution source route', async () => {
+    const route = buildMeteoResolutionSourceRoute({
+      provider: 'hong-kong-observatory',
+      sourceUrl: 'https://www.hko.gov.hk/en/wxinfo/ts/index.htm',
+      stationName: 'Hong Kong Observatory',
+      stationCode: 'HKO',
+      stationType: 'weather-station',
+      measurementField: 'Daily Maximum Temperature',
+      measurementKind: 'high',
+      unit: 'c',
+      precision: 'tenth-degree',
+      finalizationRule: null,
+      revisionRule: null,
+      extractedFrom: ['resolutionSource'],
+      confidence: 0.9,
+    })
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      temperature: {
+        recordTime: '2026-04-21T15:30:00+08:00',
+        data: [
+          { place: 'Sha Tin', value: 27.1, unit: 'C' },
+          { place: 'Hong Kong Observatory', value: 28.4, unit: 'C' },
+        ],
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const observation = await fetchMeteoResolutionSourceObservation({
+      route,
+      unit: 'c',
+      fetchImpl,
+      cacheTtlMs: 1,
+      now: new Date('2026-04-21T07:45:00Z'),
+    })
+
+    expect(fetchImpl).toHaveBeenCalledWith('https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en', undefined)
+    expect(observation).toEqual({
+      provider: 'hong-kong-observatory',
+      station_code: 'HKO',
+      observed_at: '2026-04-21T15:30:00+08:00',
+      temperature: 28.4,
+      unit: 'c',
+      source_url: 'https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en',
+      age_seconds: 900,
+      is_fresh: true,
+    })
+  })
+
+  it('converts a fresh official station observation into a high-priority forecast point', () => {
+    const point = observationToForecastPoint({
+      provider: 'noaa',
+      station_code: 'KNYC',
+      observed_at: '2026-04-21T20:51:00+00:00',
+      temperature: 71.06,
+      unit: 'f',
+      source_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
+      age_seconds: 420,
+      is_fresh: true,
+    })
+
+    expect(point).toEqual({
+      provider: 'official-observation:noaa:KNYC',
+      mean: 71.06,
+      stddev: 0.35,
+      weight: 8,
     })
   })
 

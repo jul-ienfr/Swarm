@@ -6,6 +6,7 @@ import type {
   MeteoResolutionPrecision,
   MeteoResolutionProvider,
   MeteoResolutionSource,
+  MeteoResolutionSourceRoute,
   MeteoResolutionStationType,
   MeteoStationMetadata,
   MeteoTemperatureKind,
@@ -110,6 +111,65 @@ export function analyzeMeteoResolutionSource(input: MeteoResolutionContext): Met
     needsManualReview: !isOfficialSourceIdentified || resolution.confidence < 0.7,
     confidence: resolution.confidence,
     matchedSignals,
+  }
+}
+
+export function buildMeteoResolutionSourceRoute(resolution: MeteoResolutionSource): MeteoResolutionSourceRoute {
+  const stationCode = resolution.stationCode
+  const fallbackPollUrls = resolution.sourceUrl ? [resolution.sourceUrl] : []
+
+  if (resolution.provider === 'noaa' && stationCode) {
+    return {
+      provider: resolution.provider,
+      station_code: stationCode,
+      primary_poll_url: `https://api.weather.gov/stations/${stationCode}/observations/latest`,
+      fallback_poll_urls: fallbackPollUrls,
+      measurement_path: 'properties.temperature.value',
+      expected_lag_seconds: 900,
+      freshness_sla_seconds: 1200,
+      official_lag_seconds: null,
+    }
+  }
+
+  if (resolution.provider === 'wunderground' && stationCode) {
+    const units = resolution.unit === 'c' ? 'm' : 'e'
+    return {
+      provider: resolution.provider,
+      station_code: stationCode,
+      primary_poll_url: `https://api.weather.com/v2/pws/observations/current?stationId=${stationCode}&format=json&units=${units}`,
+      fallback_poll_urls: fallbackPollUrls,
+      measurement_path: units === 'm' ? 'observations[0].metric.temp' : 'observations[0].imperial.temp',
+      expected_lag_seconds: 1800,
+      freshness_sla_seconds: 3600,
+      official_lag_seconds: null,
+    }
+  }
+
+  if (resolution.provider === 'hong-kong-observatory') {
+    return {
+      provider: resolution.provider,
+      station_code: stationCode,
+      primary_poll_url: 'https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en',
+      fallback_poll_urls: [
+        'https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=CLMTEMP&lang=en',
+        ...fallbackPollUrls,
+      ],
+      measurement_path: 'temperature.data[].value filtered by place/station',
+      expected_lag_seconds: 600,
+      freshness_sla_seconds: 1200,
+      official_lag_seconds: 86400,
+    }
+  }
+
+  return {
+    provider: resolution.provider,
+    station_code: stationCode,
+    primary_poll_url: resolution.sourceUrl,
+    fallback_poll_urls: [],
+    measurement_path: null,
+    expected_lag_seconds: null,
+    freshness_sla_seconds: null,
+    official_lag_seconds: null,
   }
 }
 
