@@ -220,28 +220,6 @@ export type MeteoResolutionAnalysis = {
   confidence: number
 }
 
-export type MeteoResolutionSourceRoute = {
-  provider: MeteoResolutionProvider
-  station_code: string | null
-  primary_poll_url: string | null
-  fallback_poll_urls: string[]
-  measurement_path: string | null
-  expected_lag_seconds: number | null
-  freshness_sla_seconds: number | null
-  official_lag_seconds: number | null
-}
-
-export type MeteoResolutionSourceObservation = {
-  provider: MeteoResolutionProvider
-  station_code: string | null
-  observed_at: string | null
-  temperature: number
-  unit: MeteoTemperatureUnit
-  source_url: string
-  age_seconds: number | null
-  is_fresh: boolean | null
-}
-
 export type MeteoPolymarketEventQuoteInput = {
   event_id?: string | null
   ts?: string | null

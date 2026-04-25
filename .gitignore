@@ -13,8 +13,6 @@ node_modules/
 .next/
 
 data/
-!subprojects/prediction/src/lib/prediction-markets/data/
-!subprojects/prediction/src/lib/prediction-markets/data/geomapdata-cn-provinces.json
 log/
 *.log
 *.db

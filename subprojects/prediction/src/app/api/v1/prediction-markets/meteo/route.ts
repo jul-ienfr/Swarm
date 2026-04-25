@@ -6,16 +6,12 @@ import { toPredictionMarketsErrorResponse } from '@/lib/prediction-markets/error
 import {
   analyzeMeteoResolutionSource,
   buildMeteoBestBetsSummary,
-  buildMeteoResolutionSourceRoute,
   buildMeteoExecutionCandidates,
   buildMeteoExecutionSummary,
-  buildMeteoPricingReport,
   buildMeteoPricingReportFromProviders,
   buildMeteoStationMetadata,
   detectMeteoMarketAnomalies,
   extractMeteoResolutionSource,
-  fetchMeteoResolutionSourceObservation,
-  observationToForecastPoint,
 } from '@/lib/prediction-markets/meteo'
 import { toPolymarketQuoteMarketEvent } from '@/lib/prediction-markets/polymarket-market-event'
 import { readLimiter } from '@/lib/rate-limit'
@@ -61,7 +57,6 @@ export async function GET(request: NextRequest) {
     const includeNws = optionalBoolean(searchParams.get('include_nws'))
     const includeMeteostat = optionalBoolean(searchParams.get('include_meteostat'))
     const includeExecution = optionalBoolean(searchParams.get('include_execution')) ?? false
-    const includeResolutionObservation = optionalBoolean(searchParams.get('include_resolution_observation')) ?? false
     const meteostatStart = searchParams.get('meteostat_start') ?? undefined
     const meteostatEnd = searchParams.get('meteostat_end') ?? undefined
     const cacheTtlMs = optionalInteger(searchParams.get('cache_ttl_ms'), 'cache_ttl_ms')
@@ -117,46 +112,14 @@ export async function GET(request: NextRequest) {
       rules: resolvedRules,
       polymarketEvent,
     })
-    const resolutionSourceRoute = buildMeteoResolutionSourceRoute(resolution)
-    let resolutionSourceObservation = undefined
-    let resolutionSourceObservationError: { provider: string; message: string } | undefined
-    if (includeResolutionObservation && resolutionSourceRoute.primary_poll_url) {
-      try {
-        resolutionSourceObservation = await fetchMeteoResolutionSourceObservation({
-          route: resolutionSourceRoute,
-          unit: result.spec.unit,
-          cacheTtlMs,
-          retryCount,
-          now: new Date(),
-          weatherApiKey: process.env.WEATHER_COM_API_KEY ?? process.env.WUNDERGROUND_API_KEY,
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to fetch direct resolution-source observation'
-        resolutionSourceObservationError = {
-          provider: resolutionSourceRoute.provider,
-          message,
-        }
-        logger.warn({ err: error, route: resolutionSourceRoute }, 'Direct météo resolution-source observation unavailable')
-      }
-    }
-    const officialForecastPoints = resolutionSourceObservation
-      ? [...result.forecastPoints, observationToForecastPoint(resolutionSourceObservation)]
-      : result.forecastPoints
-    const officialReport = resolutionSourceObservation
-      ? buildMeteoPricingReport({
-          spec: result.spec,
-          forecastPoints: officialForecastPoints,
-          marketPrices,
-        })
-      : result.report
     const executionCandidates = includeExecution
       ? buildMeteoExecutionCandidates({
-          report: officialReport,
-          forecastPoints: officialForecastPoints,
+          report: result.report,
+          forecastPoints: result.forecastPoints,
           minEdgeBps,
         })
       : undefined
-    const anomalies = includeExecution ? detectMeteoMarketAnomalies(officialReport) : undefined
+    const anomalies = includeExecution ? detectMeteoMarketAnomalies(result.report) : undefined
     const executionSummary = includeExecution && executionCandidates && anomalies
       ? buildMeteoExecutionSummary({
           candidates: executionCandidates,
@@ -167,15 +130,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         spec: result.spec,
-        forecast_points: officialForecastPoints,
-        report: officialReport,
+        forecast_points: result.forecastPoints,
+        report: result.report,
         resolution_source: resolution,
-        resolution_source_route: resolutionSourceRoute,
-        ...(includeResolutionObservation ? { resolution_source_observation: resolutionSourceObservation ?? null } : {}),
-        ...(resolutionSourceObservationError ? { resolution_source_observation_error: resolutionSourceObservationError } : {}),
         station_metadata: station,
         resolution_analysis: resolutionAnalysis,
-        best_bets: buildMeteoBestBetsSummary(officialReport),
+        best_bets: buildMeteoBestBetsSummary(result.report),
         ...(includeExecution
           ? {
               execution_candidates: executionCandidates,

@@ -55,7 +55,6 @@ const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
   readLimiter: vi.fn(),
   buildMeteoPricingReportFromProviders: vi.fn(),
-  buildMeteoPricingReport: vi.fn(),
   buildMeteoBestBetsSummary: vi.fn(),
   buildMeteoExecutionCandidates: vi.fn(),
   detectMeteoMarketAnomalies: vi.fn(),
@@ -63,9 +62,6 @@ const mocks = vi.hoisted(() => ({
   extractMeteoResolutionSource: vi.fn(),
   buildMeteoStationMetadata: vi.fn(),
   analyzeMeteoResolutionSource: vi.fn(),
-  buildMeteoResolutionSourceRoute: vi.fn(),
-  fetchMeteoResolutionSourceObservation: vi.fn(),
-  observationToForecastPoint: vi.fn(),
   toPolymarketQuoteMarketEvent: vi.fn(),
   loggerError: vi.fn(),
 }))
@@ -88,7 +84,6 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/prediction-markets/meteo', () => ({
   buildMeteoPricingReportFromProviders: mocks.buildMeteoPricingReportFromProviders,
-  buildMeteoPricingReport: mocks.buildMeteoPricingReport,
   buildMeteoBestBetsSummary: mocks.buildMeteoBestBetsSummary,
   buildMeteoExecutionCandidates: mocks.buildMeteoExecutionCandidates,
   detectMeteoMarketAnomalies: mocks.detectMeteoMarketAnomalies,
@@ -96,9 +91,6 @@ vi.mock('@/lib/prediction-markets/meteo', () => ({
   extractMeteoResolutionSource: mocks.extractMeteoResolutionSource,
   buildMeteoStationMetadata: mocks.buildMeteoStationMetadata,
   analyzeMeteoResolutionSource: mocks.analyzeMeteoResolutionSource,
-  buildMeteoResolutionSourceRoute: mocks.buildMeteoResolutionSourceRoute,
-  fetchMeteoResolutionSourceObservation: mocks.fetchMeteoResolutionSourceObservation,
-  observationToForecastPoint: mocks.observationToForecastPoint,
 }))
 
 vi.mock('@/lib/prediction-markets/polymarket-market-event', () => ({
@@ -111,7 +103,6 @@ describe('prediction markets météo route', () => {
     mocks.requireRole.mockReset()
     mocks.readLimiter.mockReset()
     mocks.buildMeteoPricingReportFromProviders.mockReset()
-    mocks.buildMeteoPricingReport.mockReset()
     mocks.buildMeteoBestBetsSummary.mockReset()
     mocks.buildMeteoExecutionCandidates.mockReset()
     mocks.detectMeteoMarketAnomalies.mockReset()
@@ -119,31 +110,14 @@ describe('prediction markets météo route', () => {
     mocks.extractMeteoResolutionSource.mockReset()
     mocks.buildMeteoStationMetadata.mockReset()
     mocks.analyzeMeteoResolutionSource.mockReset()
-    mocks.buildMeteoResolutionSourceRoute.mockReset()
-    mocks.fetchMeteoResolutionSourceObservation.mockReset()
-    mocks.observationToForecastPoint.mockReset()
     mocks.toPolymarketQuoteMarketEvent.mockReset()
     mocks.loggerError.mockReset()
-    delete process.env.WEATHER_COM_API_KEY
-    delete process.env.WUNDERGROUND_API_KEY
 
     mocks.requireRole.mockReturnValue({ user: { workspace_id: 7, username: 'viewer' } })
     mocks.readLimiter.mockReturnValue(null)
     mocks.extractMeteoResolutionSource.mockReturnValue({ provider: 'unknown', sourceUrl: null, stationName: null, stationCode: null, stationType: 'unknown', measurementField: null, measurementKind: 'unknown', unit: 'f', precision: 'unknown', finalizationRule: null, revisionRule: null, extractedFrom: [], confidence: 0.2 })
     mocks.buildMeteoStationMetadata.mockReturnValue({ stationName: null, stationCode: null, stationType: 'unknown', countryOrRegion: null, city: null, sourceProvider: 'unknown', sourceUrl: null, sourceNetwork: null, notes: [] })
     mocks.analyzeMeteoResolutionSource.mockReturnValue({ isOfficialSourceIdentified: false, needsManualReview: true, confidence: 0.2 })
-    mocks.buildMeteoResolutionSourceRoute.mockReturnValue({ provider: 'unknown', station_code: null, primary_poll_url: null, fallback_poll_urls: [], measurement_path: null, expected_lag_seconds: null, freshness_sla_seconds: null, official_lag_seconds: null })
-    mocks.fetchMeteoResolutionSourceObservation.mockResolvedValue(null)
-    mocks.observationToForecastPoint.mockImplementation((observation) => ({ provider: `official-observation:${observation.provider}:${observation.station_code ?? 'unknown'}`, mean: observation.temperature, stddev: 0.35, weight: 8 }))
-    mocks.buildMeteoPricingReport.mockImplementation(({ spec, forecastPoints, marketPrices }) => ({
-      mean: forecastPoints[forecastPoints.length - 1]?.mean ?? 0,
-      stddev: forecastPoints[forecastPoints.length - 1]?.stddev ?? 1,
-      unit: spec.unit ?? 'f',
-      bins: [],
-      opportunities: [],
-      marketSnapshot: { pricedBinCount: marketPrices ? Object.keys(marketPrices).length : 0, yesPriceSum: null, overround: null },
-      provenance: { providerCount: forecastPoints.length, providers: forecastPoints.map((point) => point.provider), contributions: forecastPoints.map((point) => ({ provider: point.provider, providerKind: point.provider.startsWith('official-observation') ? 'official-observation' : 'custom', sourceLabel: point.provider, weight: point.weight ?? 1, mean: point.mean, stddev: point.stddev })) },
-    }))
     mocks.buildMeteoBestBetsSummary.mockReturnValue({
       summary: 'Top météo bet: YES 68-69F',
       actionableCount: 1,
@@ -252,11 +226,6 @@ describe('prediction markets météo route', () => {
       spec: {
         city: 'Los Angeles',
         kind: 'high',
-      },
-      resolution_source_route: {
-        provider: 'unknown',
-        station_code: null,
-        primary_poll_url: null,
       },
       forecast_points: [
         { provider: 'open-meteo:ecmwf', mean: 68.8 },
@@ -524,315 +493,6 @@ describe('prediction markets météo route', () => {
         quote_event: expect.objectContaining({ quote_age_ms: 500 }),
       }),
     }))
-  })
-
-  it('returns a null direct observation without fetching when no route URL is available', async () => {
-    mocks.buildMeteoPricingReportFromProviders.mockResolvedValue({
-      spec: {
-        question: 'q',
-        city: 'Unknown',
-        countryOrRegion: null,
-        marketDate: '2026-04-21',
-        kind: 'high',
-        unit: 'f',
-        bins: [],
-      },
-      forecastPoints: [{ provider: 'open-meteo:ecmwf', mean: 68.8, stddev: 1.4, weight: 1 }],
-      report: {
-        mean: 68.8,
-        stddev: 1.4,
-        unit: 'f',
-        bins: [],
-        opportunities: [],
-        marketSnapshot: { pricedBinCount: 0, yesPriceSum: null, overround: null },
-        provenance: { providerCount: 1, providers: ['open-meteo:ecmwf'], contributions: [] },
-      },
-    })
-    mocks.buildMeteoResolutionSourceRoute.mockReturnValue({
-      provider: 'unknown',
-      station_code: null,
-      primary_poll_url: null,
-      fallback_poll_urls: [],
-      measurement_path: null,
-      expected_lag_seconds: null,
-      freshness_sla_seconds: null,
-      official_lag_seconds: null,
-    })
-
-    const { GET } = await import('@/app/api/v1/prediction-markets/meteo/route')
-    const response = await GET(
-      new NextRequest('http://localhost/api/v1/prediction-markets/meteo?question=q&latitude=40&longitude=-73&include_resolution_observation=true'),
-    )
-    const body = await response.json()
-
-    expect(response.status).toBe(200)
-    expect(mocks.fetchMeteoResolutionSourceObservation).not.toHaveBeenCalled()
-    expect(body).toMatchObject({
-      resolution_source_route: { provider: 'unknown', primary_poll_url: null },
-      resolution_source_observation: null,
-      forecast_points: [{ provider: 'open-meteo:ecmwf', mean: 68.8 }],
-      report: { mean: 68.8, unit: 'f' },
-    })
-    expect(body.resolution_source_observation_error).toBeUndefined()
-  })
-
-  it('keeps the pricing response usable when a direct resolution observation is unsupported', async () => {
-    const route = {
-      provider: 'wunderground',
-      station_code: 'KLAX',
-      primary_poll_url: 'https://api.weather.com/v2/pws/observations/current?stationId=KLAX&format=json&units=e',
-      fallback_poll_urls: ['https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX'],
-      measurement_path: 'observations[0].imperial.temp',
-      expected_lag_seconds: 1800,
-      freshness_sla_seconds: 3600,
-      official_lag_seconds: null,
-    }
-    mocks.buildMeteoPricingReportFromProviders.mockResolvedValue({
-      spec: {
-        question: 'q',
-        city: 'Los Angeles',
-        countryOrRegion: 'CA',
-        marketDate: '2026-04-21',
-        kind: 'high',
-        unit: 'f',
-        bins: [],
-      },
-      forecastPoints: [{ provider: 'open-meteo:ecmwf', mean: 68.8, stddev: 1.4, weight: 1 }],
-      report: {
-        mean: 68.8,
-        stddev: 1.4,
-        unit: 'f',
-        bins: [],
-        opportunities: [],
-        marketSnapshot: { pricedBinCount: 0, yesPriceSum: null, overround: null },
-        provenance: { providerCount: 1, providers: ['open-meteo:ecmwf'], contributions: [] },
-      },
-    })
-    mocks.buildMeteoResolutionSourceRoute.mockReturnValue(route)
-    mocks.fetchMeteoResolutionSourceObservation.mockRejectedValue(new Error('Direct observation fetch is not implemented for provider: wunderground'))
-
-    const { GET } = await import('@/app/api/v1/prediction-markets/meteo/route')
-    const response = await GET(
-      new NextRequest('http://localhost/api/v1/prediction-markets/meteo?question=q&latitude=34.05&longitude=-118.25&resolution_source=https%3A%2F%2Fwww.wunderground.com%2Fhistory%2Fdaily%2Fus%2Fca%2Flos-angeles%2FKLAX&include_resolution_observation=true'),
-    )
-    const body = await response.json()
-
-    expect(response.status).toBe(200)
-    expect(mocks.fetchMeteoResolutionSourceObservation).toHaveBeenCalledWith({
-      route,
-      unit: 'f',
-      cacheTtlMs: undefined,
-      retryCount: undefined,
-      now: expect.any(Date),
-      weatherApiKey: undefined,
-    })
-    expect(body).toMatchObject({
-      forecast_points: [{ provider: 'open-meteo:ecmwf', mean: 68.8 }],
-      report: { mean: 68.8, unit: 'f' },
-      resolution_source_observation: null,
-    })
-    expect(body.resolution_source_observation_error).toMatchObject({
-      provider: 'wunderground',
-      message: 'Direct observation fetch is not implemented for provider: wunderground',
-    })
-  })
-
-  it('passes a Weather.com API key from env to direct Wunderground observation fetches', async () => {
-    process.env.WEATHER_COM_API_KEY = 'weather-secret'
-    const route = {
-      provider: 'wunderground',
-      station_code: 'KLAX',
-      primary_poll_url: 'https://api.weather.com/v2/pws/observations/current?stationId=KLAX&format=json&units=e',
-      fallback_poll_urls: ['https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX'],
-      measurement_path: 'observations[0].imperial.temp',
-      expected_lag_seconds: 1800,
-      freshness_sla_seconds: 3600,
-      official_lag_seconds: null,
-    }
-    mocks.buildMeteoPricingReportFromProviders.mockResolvedValue({
-      spec: {
-        question: 'q',
-        city: 'Los Angeles',
-        countryOrRegion: 'CA',
-        marketDate: '2026-04-21',
-        kind: 'high',
-        unit: 'f',
-        bins: [],
-      },
-      forecastPoints: [],
-      report: {
-        mean: 69,
-        stddev: 1,
-        unit: 'f',
-        bins: [],
-        opportunities: [],
-        marketSnapshot: { pricedBinCount: 0, yesPriceSum: null, overround: null },
-        provenance: { providerCount: 0, providers: [], contributions: [] },
-      },
-    })
-    mocks.buildMeteoResolutionSourceRoute.mockReturnValue(route)
-    mocks.fetchMeteoResolutionSourceObservation.mockResolvedValue({
-      provider: 'wunderground',
-      station_code: 'KLAX',
-      observed_at: '2026-04-21T21:53:00Z',
-      temperature: 69.8,
-      unit: 'f',
-      source_url: route.primary_poll_url,
-      age_seconds: 120,
-      is_fresh: true,
-    })
-
-    const { GET } = await import('@/app/api/v1/prediction-markets/meteo/route')
-    const response = await GET(
-      new NextRequest('http://localhost/api/v1/prediction-markets/meteo?question=q&latitude=34.05&longitude=-118.25&include_resolution_observation=true'),
-    )
-
-    expect(response.status).toBe(200)
-    expect(mocks.fetchMeteoResolutionSourceObservation).toHaveBeenCalledWith({
-      route,
-      unit: 'f',
-      cacheTtlMs: undefined,
-      retryCount: undefined,
-      now: expect.any(Date),
-      weatherApiKey: 'weather-secret',
-    })
-  })
-
-  it('optionally fetches and exposes the direct resolution-source observation', async () => {
-    const route = {
-      provider: 'noaa',
-      station_code: 'KNYC',
-      primary_poll_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
-      fallback_poll_urls: ['https://www.weather.gov/wrh/Climate?wfo=okx&obs=KNYC'],
-      measurement_path: 'properties.temperature.value',
-      expected_lag_seconds: 900,
-      freshness_sla_seconds: 1200,
-      official_lag_seconds: null,
-    }
-    mocks.buildMeteoPricingReportFromProviders.mockResolvedValue({
-      spec: {
-        question: 'q',
-        city: 'New York',
-        countryOrRegion: 'NY',
-        marketDate: '2026-04-21',
-        kind: 'high',
-        unit: 'f',
-        bins: [],
-      },
-      forecastPoints: [],
-      report: {
-        mean: 71,
-        stddev: 1,
-        unit: 'f',
-        bins: [],
-        opportunities: [],
-        marketSnapshot: { pricedBinCount: 0, yesPriceSum: null, overround: null },
-        provenance: { providerCount: 0, providers: [], contributions: [] },
-      },
-    })
-    mocks.buildMeteoResolutionSourceRoute.mockReturnValue(route)
-    mocks.fetchMeteoResolutionSourceObservation.mockResolvedValue({
-      provider: 'noaa',
-      station_code: 'KNYC',
-      observed_at: '2026-04-21T20:51:00+00:00',
-      temperature: 71.06,
-      unit: 'f',
-      source_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
-      age_seconds: null,
-      is_fresh: null,
-    })
-
-    const { GET } = await import('@/app/api/v1/prediction-markets/meteo/route')
-    const response = await GET(
-      new NextRequest('http://localhost/api/v1/prediction-markets/meteo?question=q&latitude=40.78&longitude=-73.97&resolution_source=https%3A%2F%2Fwww.weather.gov%2Fwrh%2FClimate%3Fwfo%3Dokx%26obs%3DKNYC&include_resolution_observation=true&cache_ttl_ms=60000&retry_count=2'),
-    )
-    const body = await response.json()
-
-    expect(mocks.fetchMeteoResolutionSourceObservation).toHaveBeenCalledWith({
-      route,
-      unit: 'f',
-      cacheTtlMs: 60000,
-      retryCount: 2,
-      now: expect.any(Date),
-    })
-    expect(body).toMatchObject({
-      resolution_source_observation: {
-        provider: 'noaa',
-        station_code: 'KNYC',
-        temperature: 71.06,
-        unit: 'f',
-        source_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
-      },
-    })
-  })
-
-  it('uses the observation-enriched report for execution anomalies when both opt-ins are enabled', async () => {
-    const route = {
-      provider: 'noaa',
-      station_code: 'KNYC',
-      primary_poll_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
-      fallback_poll_urls: [],
-      measurement_path: 'properties.temperature.value',
-      expected_lag_seconds: 900,
-      freshness_sla_seconds: 1200,
-      official_lag_seconds: null,
-    }
-    const baseReport = {
-      mean: 68,
-      stddev: 1.2,
-      unit: 'f',
-      bins: [],
-      opportunities: [],
-      marketSnapshot: { pricedBinCount: 0, yesPriceSum: null, overround: null },
-      provenance: { providerCount: 1, providers: ['open-meteo:ecmwf'], contributions: [] },
-    }
-    const enrichedReport = {
-      mean: 71.06,
-      stddev: 0.35,
-      unit: 'f',
-      bins: [],
-      opportunities: [],
-      marketSnapshot: { pricedBinCount: 0, yesPriceSum: null, overround: null },
-      provenance: { providerCount: 2, providers: ['open-meteo:ecmwf', 'official-observation:noaa:KNYC'], contributions: [] },
-    }
-    mocks.buildMeteoPricingReportFromProviders.mockResolvedValue({
-      spec: { question: 'q', city: 'New York', countryOrRegion: 'NY', marketDate: '2026-04-21', kind: 'high', unit: 'f', bins: [] },
-      forecastPoints: [{ provider: 'open-meteo:ecmwf', mean: 68, stddev: 1.2, weight: 1 }],
-      report: baseReport,
-    })
-    mocks.buildMeteoResolutionSourceRoute.mockReturnValue(route)
-    mocks.fetchMeteoResolutionSourceObservation.mockResolvedValue({
-      provider: 'noaa',
-      station_code: 'KNYC',
-      observed_at: '2026-04-21T20:51:00+00:00',
-      temperature: 71.06,
-      unit: 'f',
-      source_url: 'https://api.weather.gov/stations/KNYC/observations/latest',
-      age_seconds: 420,
-      is_fresh: true,
-    })
-    mocks.observationToForecastPoint.mockReturnValue({ provider: 'official-observation:noaa:KNYC', mean: 71.06, stddev: 0.35, weight: 8 })
-    mocks.buildMeteoPricingReport.mockReturnValue(enrichedReport)
-    mocks.detectMeteoMarketAnomalies.mockReturnValue([])
-    mocks.buildMeteoExecutionSummary.mockReturnValue({ candidateCount: 0, tradeableCount: 0, highPriorityCount: 0, anomalyCount: 0 })
-
-    const { GET } = await import('@/app/api/v1/prediction-markets/meteo/route')
-    const response = await GET(
-      new NextRequest('http://localhost/api/v1/prediction-markets/meteo?question=q&latitude=40.78&longitude=-73.97&include_resolution_observation=true&include_execution=true'),
-    )
-    const body = await response.json()
-
-    expect(response.status).toBe(200)
-    expect(mocks.buildMeteoExecutionCandidates).toHaveBeenCalledWith({
-      report: enrichedReport,
-      forecastPoints: [
-        { provider: 'open-meteo:ecmwf', mean: 68, stddev: 1.2, weight: 1 },
-        { provider: 'official-observation:noaa:KNYC', mean: 71.06, stddev: 0.35, weight: 8 },
-      ],
-      minEdgeBps: undefined,
-    })
-    expect(mocks.detectMeteoMarketAnomalies).toHaveBeenCalledWith(enrichedReport)
-    expect(body.report).toEqual(enrichedReport)
   })
 
   it('optionally adds execution candidates anomalies and summary when include_execution is enabled', async () => {
